@@ -24,7 +24,12 @@ branches only, never for a branch about to merge.
 - **Escalate to a human merge** (no self-merge) when: premerge reports PROTECTED
   (gate-integrity paths changed — hooks, premerge/token-gate scripts, biome config,
   root package.json scripts), verify/e2e fails and the fix is non-obvious, the PR is
-  not mergeable-clean, or the change touches schema/migrations/deploy configuration.
+  not mergeable-clean, or the change touches schema/migrations (unless this repo has
+  a migration-safety gate configured — `MIGRATION_LINT_ENABLED=true` in
+  `scripts/premerge.conf.sh` — in which case `premerge.sh` already hard-blocks
+  self-merge automatically when the lint flags something, so no separate check is
+  needed; repos without the gate configured keep escalating unconditionally) or
+  deploy configuration.
 - Rationale: green must mean "the code is correct", never "the gate was weakened".
   When a bad change slips through, improve verify/e2e/review — do not revoke self-merge.
 

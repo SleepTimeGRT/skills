@@ -18,7 +18,7 @@ template installed into each repo's AGENTS.md). Summary:
 |---|---|---|
 | `.githooks/pre-commit` | commit | gitleaks + biome auto-fix on staged files |
 | `.githooks/pre-push` | push | `pnpm verify:static` — static checks only, token-gated |
-| `scripts/premerge.sh` | before squash merge | sync check → gate-integrity check → review requirement → full `pnpm verify` → e2e |
+| `scripts/premerge.sh` | right before squash merge | gate-integrity check → migration-safety lint (opt-in) → review requirement → full `pnpm verify` + e2e (if configured) |
 
 Self-merge: the authoring agent may merge its own PR when `premerge.sh` passes
 (including `--review-done` after a clean review pass for code changes).
@@ -60,14 +60,18 @@ only checked for presence.
 Audit first; apply only when the user asks. One repository per commit. Steps:
 
 1. Copy `assets/githooks/{pre-commit,pre-push,post-checkout}` → `<repo>/.githooks/`,
-   `assets/scripts/{premerge.sh,token-gate.sh,premerge.conf.sh}` → `<repo>/scripts/`.
-   Mark hooks and scripts executable.
+   `assets/scripts/{premerge.sh,token-gate.sh,premerge.conf.sh,migration-lint.py}` →
+   `<repo>/scripts/`. Mark hooks and scripts executable.
 2. Write `.githooks/worktree-links.conf` with the repo's actual gitignored
    env/secret paths (inspect the previous post-checkout hook or `.gitignore`).
 3. Fill `scripts/premerge.conf.sh`: set `E2E_CMD` if the repo has a merge-blocking
    e2e suite; extend `PROTECTED_EXTRA_REGEX` for repo-specific gate tooling; optionally
    set `PROTECTED_SCRIPT_KEYS` by tracing the repo's actual verify/premerge chain to the
    script keys it calls (leave unset to keep guarding the whole `scripts` block).
+   If the repo has SQL migrations, consider setting `MIGRATION_LINT_ENABLED="true"` and
+   `MIGRATION_LINT_REGEX` to opt into the destructive-op lint — this is a separate,
+   per-repo decision made only on explicit request, not a default part of applying
+   this skill.
 4. Wire package.json to the naming contract above. Compose `verify:static` from the
    repo's existing static stages; move test stages out of any previous pre-push into
    `verify`/premerge. Keep every previously-gated stage somewhere — compare the

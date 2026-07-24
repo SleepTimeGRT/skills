@@ -19,3 +19,10 @@
 # not the leaf keys it calls, so list leaves too. Leave unset/empty to keep guarding the
 # entire scripts block (safe default; matches pre-PROTECTED_SCRIPT_KEYS behavior).
 #PROTECTED_SCRIPT_KEYS="verify verify:guides check-types premerge prepare e2e"
+
+# Destructive-op lint (opt-in). Enable and set a regex matching this repo's
+# migration file paths; the lint hard-blocks self-merge when it flags a
+# destructive operation (DROP TABLE/COLUMN, TRUNCATE, DELETE without WHERE,
+# RENAME, ALTER COLUMN TYPE) with no override in this script.
+#MIGRATION_LINT_ENABLED="true"
+#MIGRATION_LINT_REGEX='^supabase/migrations/.*\.sql$'

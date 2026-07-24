@@ -17,6 +17,7 @@ RUNNER = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "tok
 MIGRATION_LINT = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "migration-lint.py"
 PREMERGE = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "premerge.sh"
 AUDIT = ROOT / "skills" / "lifecycle-gate-policy" / "scripts" / "audit.py"
+ASSETS = ROOT / "skills" / "lifecycle-gate-policy" / "assets"
 
 
 def run(
@@ -39,6 +40,12 @@ def run(
 def retained_log(stdout: str) -> Path:
     line = next(line for line in stdout.splitlines() if "log:" in line)
     return Path(line.split(" — log: ", 1)[1])
+
+
+def test_agents_policy_escalation_mentions_migration_lint_gate() -> None:
+    text = (ASSETS / "agents-policy.md").read_text(encoding="utf-8")
+    assert "MIGRATION_LINT_ENABLED" in text
+    assert "schema/migrations/deploy configuration" not in text
 
 
 class GitFixture(unittest.TestCase):
