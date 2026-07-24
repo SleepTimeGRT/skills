@@ -67,13 +67,21 @@ printf '{"ts":"%s","event":"assign","skill":"orca-evaluate","role":"agent-e2e","
 git diff "$(git merge-base origin/main HEAD)"...HEAD > <worktree 루트>/.evaluate-diff.patch
 ```
 
-fresh-context code-reviewer terminal을 하나 스폰한다(이 evaluator 세션·generator와 별도 세션 — **강한 reasoning 모델 고정**, `model-selection.md` High Risk tier 참고: Claude Opus 4.8 xhigh / Codex Sol xhigh 등. "provider 자유, 가장 싼 provider"가 아니다 — 코드 정오 판단은 이 세션의 Gemini가 약하다고 표시된 지점이라 일부러 다른 모델을 쓰는 것). 리뷰어는 반드시 이 세 가지를 갖는다: ①skeptical 지침("동의 표명 불필요, 결함·spec-divergence만 보고, 근거 있는 우려를 안이하게 넘기지 말 것") ②issue의 acceptance criteria 원문 ③**§2 agent e2e 결과 요약** — diff만으로는 안 보이는 런타임 동작(무엇이 실제로 실패했는지)을 code review가 근거로 쓸 수 있게 한다.
+diff에 schema/migration 파일이 포함돼 있으면, code-reviewer를 스폰하기 전에 destructive-op 린터를 돌린다:
+
+```bash
+python3 scripts/migration-lint.py <diff에 포함된 migration 파일 경로...> > <worktree 루트>/.migration-lint.json
+```
+
+(repo에 `scripts/migration-lint.py`가 없으면 이 단계를 건너뛴다 — opt-in 게이트이므로 미구성 repo에서는 아무 일도 하지 않는다.)
+
+fresh-context code-reviewer terminal을 하나 스폰한다(이 evaluator 세션·generator와 별도 세션 — **강한 reasoning 모델 고정**, `model-selection.md` High Risk tier 참고: Claude Opus 4.8 xhigh / Codex Sol xhigh 등. "provider 자유, 가장 싼 provider"가 아니다 — 코드 정오 판단은 이 세션의 Gemini가 약하다고 표시된 지점이라 일부러 다른 모델을 쓰는 것). 리뷰어는 반드시 이 항목들을 갖는다: ①skeptical 지침("동의 표명 불필요, 결함·spec-divergence만 보고, 근거 있는 우려를 안이하게 넘기지 말 것") ②issue의 acceptance criteria 원문 ③**§2 agent e2e 결과 요약** — diff만으로는 안 보이는 런타임 동작(무엇이 실제로 실패했는지)을 code review가 근거로 쓸 수 있게 한다 ④**(schema/migration 변경이 있으면) `.migration-lint.json` 결과 + §1에서 받은 "의도된 destructive 오퍼레이션" 선언** — 린터가 flag한 항목 중 선언에 커버되지 않는 게 있으면 report에 명시하라는 지시와 함께.
 
 ```bash
 orca terminal create --worktree active --title eval-review \
   --command "<강한 reasoning provider의 launch 문법 — provider 문서에서 resolve>" --json
 orca terminal wait --terminal <review-handle> --for tui-idle --timeout-ms 60000 --json
-orca orchestration task-create --spec "<diff 절대경로 + acceptance criteria 원문 + §2 agent e2e 결과 요약 + skeptical 리뷰 지침 + report 경로 + 코드 수정 금지>" --json
+orca orchestration task-create --spec "<diff 절대경로 + acceptance criteria 원문 + §2 agent e2e 결과 요약 + (해당 시) migration-lint 결과와 §1 destructive-op 선언 + skeptical 리뷰 지침 + report 경로 + 코드 수정 금지>" --json
 orca orchestration dispatch --task <task_id> --to <review-handle> --inject --json
 printf '{"ts":"%s","event":"assign","skill":"orca-evaluate","role":"code-review","issue":"<issue-num>","task_id":"<task_id>","provider":"<provider>","model":"<model>","effort":"<effort>","terminal":"<review-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
   >> ~/.agents/orca-workflows/logs/assignments.jsonl   # 할당 로그 — §1 참고
@@ -89,7 +97,7 @@ report는 severity(Critical/Important/Minor) + 도달 조건 + 최악 결과 + f
 
 - **PASS** — code-reviewer report에 Critical/Important finding 없음, contract 판정 승인 상태 유지, agent e2e 통과(자기 요약과 재확인 결과가 일치).
 - **FAIL** — 구체적 finding(severity+근거) + 수정 방향을 `orca-workflow`에 반환한다. (재시도는 `orca-workflow`가 관리한다 — 이 스킬은 재-dispatch하지 않는다. `orca-workflow`가 이 리포트를 받아 재시도 카운터를 세고, 필요하면 `orca-task-runner`에 재-dispatch — evaluator가 task-runner를 직접 부르지 않는다.)
-- **ESCALATE** — 다음 중 하나면 재시도 없이 즉시: acceptance criteria 자체가 애매해서 판정이 불가능, 구현이 issue 스코프 밖의 것을 건드림, agent e2e가 인프라 문제(계정·secret·환경)로 판단 불가.
+- **ESCALATE** — 다음 중 하나면 재시도 없이 즉시: acceptance criteria 자체가 애매해서 판정이 불가능, 구현이 issue 스코프 밖의 것을 건드림, agent e2e가 인프라 문제(계정·secret·환경)로 판단 불가, **destructive-op 린터가 flag했는데 code-reviewer report가 그 항목이 제안서의 destructive-op 선언에 커버되지 않는다고 명시함**.
 
 ## 폴백
 
