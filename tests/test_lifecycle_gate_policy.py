@@ -15,6 +15,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "token-gate.sh"
 MIGRATION_LINT = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "migration-lint.py"
+PREMERGE = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "premerge.sh"
 
 
 def run(
@@ -316,6 +317,94 @@ class MigrationLintTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(report["clean"])
         self.assertEqual(report["flags"], [])
+
+
+class PremergeFixture(GitFixture):
+    def setUp(self) -> None:
+        super().setUp()
+        run("git", "config", "user.email", "fixture@example.test", cwd=self.repo)
+        run("git", "config", "user.name", "Fixture", cwd=self.repo)
+        run("git", "checkout", "-q", "-b", "main", cwd=self.repo)
+        self.write("scripts/premerge.sh", PREMERGE.read_text(encoding="utf-8"), executable=True)
+        self.write("scripts/token-gate.sh", RUNNER.read_text(encoding="utf-8"), executable=True)
+        self.write("scripts/migration-lint.py", MIGRATION_LINT.read_text(encoding="utf-8"), executable=True)
+        run("git", "commit", "-qm", "init", cwd=self.repo)
+
+        self.origin = Path(self.tempdir.name) / "origin.git"
+        run("git", "init", "-q", "--bare", str(self.origin), cwd=self.repo)
+        run("git", "remote", "add", "origin", str(self.origin), cwd=self.repo)
+        run("git", "push", "-q", "-u", "origin", "main", cwd=self.repo)
+        run("git", "remote", "set-head", "origin", "main", cwd=self.repo)
+
+    def configure(self, conf: str) -> None:
+        run("git", "checkout", "-q", "main", cwd=self.repo)
+        self.write("scripts/premerge.conf.sh", conf)
+        run("git", "commit", "-qm", "configure migration lint", cwd=self.repo)
+        run("git", "push", "-q", "origin", "main", cwd=self.repo)
+        run("git", "checkout", "-q", "-b", "feature", cwd=self.repo)
+
+    def add_migration(self, relative: str, sql: str) -> None:
+        self.write(relative, sql)
+        run("git", "commit", "-qm", f"add {relative}", cwd=self.repo)
+
+    def run_premerge(self) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        runtime_tmp = Path(self.tempdir.name) / "runtime tmp"
+        runtime_tmp.mkdir(mode=0o700, exist_ok=True)
+        env["TMPDIR"] = str(runtime_tmp)
+        return run("bash", "scripts/premerge.sh", cwd=self.repo, check=False, env=env)
+
+
+class MigrationLintPremergeTests(PremergeFixture):
+    def test_flags_destructive_migration_blocks_selfmerge(self) -> None:
+        self.configure(
+            """
+            MIGRATION_LINT_ENABLED="true"
+            MIGRATION_LINT_REGEX='^supabase/migrations/.*\\.sql$'
+            """
+        )
+        self.add_migration("supabase/migrations/0001_drop_users.sql", "DROP TABLE users;\n")
+
+        result = self.run_premerge()
+
+        self.assertEqual(result.returncode, 5)
+        self.assertIn("MIGRATION_ESCALATE", result.stderr)
+        self.assertIn("drop-table", result.stderr)
+
+    def test_clean_migration_reaches_review_stage(self) -> None:
+        self.configure(
+            """
+            MIGRATION_LINT_ENABLED="true"
+            MIGRATION_LINT_REGEX='^supabase/migrations/.*\\.sql$'
+            """
+        )
+        self.add_migration(
+            "supabase/migrations/0002_add_widgets.sql",
+            "CREATE TABLE widgets (id serial primary key);\n",
+        )
+
+        result = self.run_premerge()
+
+        self.assertEqual(result.returncode, 4)
+        self.assertIn("REVIEW required", result.stdout)
+
+    def test_disabled_by_default_does_not_block_destructive_migration(self) -> None:
+        self.configure("")
+        self.add_migration("supabase/migrations/0001_drop_users.sql", "DROP TABLE users;\n")
+
+        result = self.run_premerge()
+
+        self.assertEqual(result.returncode, 4)
+        self.assertIn("REVIEW required", result.stdout)
+
+    def test_enabled_without_regex_fails_fast(self) -> None:
+        self.configure('MIGRATION_LINT_ENABLED="true"\n')
+        self.add_migration("supabase/migrations/0001_drop_users.sql", "DROP TABLE users;\n")
+
+        result = self.run_premerge()
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("MIGRATION_LINT_REGEX unset", result.stderr)
 
 
 if __name__ == "__main__":

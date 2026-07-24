@@ -12,6 +12,8 @@
 #   3  PROTECTED — diff touches gate-integrity paths; a human must merge this PR
 #   4  REVIEW — code changes present and --review-done not given; run your
 #      review process first, then re-run with --review-done
+#   5  MIGRATION_ESCALATE — destructive-op lint flagged a migration change;
+#      a human must review and merge this PR (opt-in via MIGRATION_LINT_ENABLED)
 #   *  verify/e2e failure (their exit codes pass through)
 set -euo pipefail
 
@@ -25,6 +27,8 @@ E2E_CMD="" # e.g. "pnpm test:e2e:ci"; empty = repo has no merge-blocking e2e
 REVIEW_EXEMPT_REGEX='(^|/)docs/|\.(md|mdx|txt)$'
 PROTECTED_EXTRA_REGEX="" # repo-specific additions to the protected set
 PROTECTED_SCRIPT_KEYS="" # space-separated package.json script keys to guard; empty = guard the whole scripts block
+MIGRATION_LINT_ENABLED="false" # opt-in destructive-op lint for schema/migration files
+MIGRATION_LINT_REGEX="" # e.g. '^supabase/migrations/.*\.sql$' — required when MIGRATION_LINT_ENABLED=true
 CONF="$REPO_ROOT/scripts/premerge.conf.sh"
 [ -f "$CONF" ] && . "$CONF"
 
@@ -66,7 +70,7 @@ fi
 # ---- 2. gate integrity --------------------------------------------------------
 # The gate an agent is judged by must not be editable by that agent in the same PR
 # (a green result must mean "code is correct", never "gate was weakened").
-PROTECTED_REGEX='^\.githooks/|^scripts/(premerge\.sh|premerge\.conf\.sh|token-gate\.sh)$|^biome\.json$|^\.gitleaks\.toml$'
+PROTECTED_REGEX='^\.githooks/|^scripts/(premerge\.sh|premerge\.conf\.sh|token-gate\.sh|migration-lint\.py)$|^biome\.json$|^\.gitleaks\.toml$'
 PROTECTED_HITS=$(printf '%s\n' "$CHANGED" | grep -E "$PROTECTED_REGEX" || true)
 if [ -n "$PROTECTED_EXTRA_REGEX" ]; then
   EXTRA_HITS=$(printf '%s\n' "$CHANGED" | grep -E "$PROTECTED_EXTRA_REGEX" || true)
@@ -114,7 +118,29 @@ if [ -n "$PROTECTED_HITS" ]; then
   exit 3
 fi
 
-# ---- 3. review requirement ----------------------------------------------------
+# ---- 3. migration safety (opt-in) --------------------------------------------
+# Deterministic destructive-op scan for schema/migration files. Disabled by
+# default; a repo opts in via scripts/premerge.conf.sh. When enabled and the
+# lint flags something, this hard-blocks self-merge with no override — a
+# contract-aware alternative exists in orca-evaluate's separate merge path,
+# which does not go through this script.
+if [ "$MIGRATION_LINT_ENABLED" = "true" ]; then
+  if [ -z "$MIGRATION_LINT_REGEX" ]; then
+    printf '[premerge] FAIL — MIGRATION_LINT_ENABLED=true but MIGRATION_LINT_REGEX unset in premerge.conf.sh\n' >&2
+    exit 2
+  fi
+  MIGRATION_FILES=$(printf '%s\n' "$CHANGED" | grep -E "$MIGRATION_LINT_REGEX" || true)
+  if [ -n "$MIGRATION_FILES" ]; then
+    if ! LINT_OUT=$(printf '%s\n' "$MIGRATION_FILES" | xargs python3 scripts/migration-lint.py 2>&1); then
+      printf '[premerge] MIGRATION_ESCALATE — destructive-op lint flagged a migration change:\n' >&2
+      printf '%s\n' "$LINT_OUT" | sed 's/^/[premerge]   /' >&2
+      printf '[premerge] self-merge is not allowed — a human must review and merge this PR\n' >&2
+      exit 5
+    fi
+  fi
+fi
+
+# ---- 4. review requirement ----------------------------------------------------
 CODE_CHANGES=$(printf '%s\n' "$CHANGED" | grep -Ev "$REVIEW_EXEMPT_REGEX" || true)
 if [ -n "$CODE_CHANGES" ] && [ "$REVIEW_DONE" -ne 1 ]; then
   CODE_COUNT=$(printf '%s\n' "$CODE_CHANGES" | wc -l | tr -d ' ')
@@ -124,7 +150,7 @@ if [ -n "$CODE_CHANGES" ] && [ "$REVIEW_DONE" -ne 1 ]; then
   exit 4
 fi
 
-# ---- 4. full verification -------------------------------------------------------
+# ---- 5. full verification -------------------------------------------------------
 # *_CMD strings run through `bash -c` so quoting inside them behaves like a shell line.
 token_gate_capture premerge:verify -- bash -c "$VERIFY_CMD"
 if [ -n "$E2E_CMD" ]; then
