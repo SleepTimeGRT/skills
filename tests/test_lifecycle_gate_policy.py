@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -13,6 +14,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "token-gate.sh"
+PREMERGE = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "premerge.sh"
 
 
 def run(
@@ -233,6 +235,125 @@ class RunnerTests(GitFixture):
         self.assertNotEqual(main_log, linked_log)
         self.assertIn("main-warning", main_log.read_text(encoding="utf-8"))
         self.assertIn("linked-warning", linked_log.read_text(encoding="utf-8"))
+
+
+class PremergeE2eExemptionTests(unittest.TestCase):
+    """scripts/premerge.sh: E2E_EXEMPT_REGEX skip logic."""
+
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory(prefix="premerge fixture ")
+        base = Path(self.tempdir.name)
+        self.origin = base / "origin.git"
+        run("git", "init", "-q", "--bare", str(self.origin), cwd=base)
+
+        self.repo = base / "repo"
+        self.repo.mkdir()
+        run("git", "init", "-qb", "main", cwd=self.repo)
+        run("git", "config", "user.email", "fixture@example.test", cwd=self.repo)
+        run("git", "config", "user.name", "Fixture", cwd=self.repo)
+        run("git", "remote", "add", "origin", str(self.origin), cwd=self.repo)
+
+        self.marker = base / "e2e-ran.marker"
+        self._write_gate_scripts(e2e_exempt_regex="")
+        (self.repo / "README.md").write_text("fixture\n", encoding="utf-8")
+        run("git", "add", "-A", cwd=self.repo)
+        run("git", "commit", "-qm", "init", cwd=self.repo)
+        run("git", "push", "-q", "origin", "main", cwd=self.repo)
+
+    def tearDown(self) -> None:
+        self.tempdir.cleanup()
+
+    def _write_gate_scripts(self, e2e_exempt_regex: str) -> None:
+        scripts_dir = self.repo / "scripts"
+        scripts_dir.mkdir(exist_ok=True)
+        shutil.copy(PREMERGE, scripts_dir / "premerge.sh")
+        shutil.copy(RUNNER, scripts_dir / "token-gate.sh")
+        (scripts_dir / "premerge.sh").chmod(0o755)
+
+        conf_lines = [
+            'VERIFY_CMD="true"',
+            f'E2E_CMD="touch {shlex.quote(str(self.marker))}"',
+        ]
+        if e2e_exempt_regex:
+            conf_lines.append(f"E2E_EXEMPT_REGEX={shlex.quote(e2e_exempt_regex)}")
+        (scripts_dir / "premerge.conf.sh").write_text(
+            "\n".join(conf_lines) + "\n", encoding="utf-8"
+        )
+
+    def configure_main(self, e2e_exempt_regex: str) -> None:
+        """Push a repo-config change to main, as if the repo had already adopted it."""
+        self._write_gate_scripts(e2e_exempt_regex)
+        run("git", "add", "-A", cwd=self.repo)
+        run("git", "commit", "-qm", "chore: configure premerge e2e exemption", cwd=self.repo)
+        run("git", "push", "-q", "origin", "main", cwd=self.repo)
+
+    def branch_with_changes(self, files: dict[str, str]) -> None:
+        run("git", "checkout", "-qb", "feature", cwd=self.repo)
+        for relative, content in files.items():
+            path = self.repo / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            run("git", "add", relative, cwd=self.repo)
+        run("git", "commit", "-qm", "feature commit", cwd=self.repo)
+
+    def run_premerge(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return run("bash", "scripts/premerge.sh", *args, cwd=self.repo, check=False)
+
+    def test_skips_e2e_when_every_changed_path_is_exempt(self) -> None:
+        self.configure_main(r"\.(md|mdx|txt)$")
+        self.branch_with_changes({"NOTES.md": "docs only\n"})
+
+        result = self.run_premerge()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "[premerge] SKIP e2e — all changed paths match E2E_EXEMPT_REGEX", result.stdout
+        )
+        self.assertIn("PASS — self-merge allowed (e2e skipped", result.stdout)
+        self.assertFalse(self.marker.exists())
+
+    def test_runs_e2e_when_any_changed_path_is_not_exempt(self) -> None:
+        self.configure_main(r"\.(md|mdx|txt)$")
+        self.branch_with_changes({"NOTES.md": "docs only\n", "src.py": "print('x')\n"})
+
+        result = self.run_premerge("--review-done")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("SKIP e2e", result.stdout)
+        self.assertIn("PASS — self-merge allowed (e2e ran)", result.stdout)
+        self.assertTrue(self.marker.exists())
+
+    def test_gitignore_only_diff_skips_e2e_but_still_requires_review(self) -> None:
+        # Mirrors the motivating case in issue #10: a .gitignore-only PR should skip
+        # e2e once the repo opts in, but REVIEW_EXEMPT_REGEX (docs/md only, unchanged)
+        # does not cover .gitignore, so the review gate still fires independently.
+        self.configure_main(r"^\.gitignore$")
+        self.branch_with_changes({".gitignore": "*.log\n"})
+
+        result = self.run_premerge()
+
+        self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
+        self.assertIn("[premerge] REVIEW required", result.stdout)
+        self.assertNotIn("SKIP e2e", result.stdout)
+        self.assertFalse(self.marker.exists())
+
+        result = self.run_premerge("--review-done")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("[premerge] SKIP e2e", result.stdout)
+        self.assertFalse(self.marker.exists())
+
+    def test_e2e_runs_by_default_when_regex_unset_even_for_docs_only_diff(self) -> None:
+        # setUp already wired E2E_EXEMPT_REGEX="" (the default) — guards against a
+        # `grep -Ev ''` implementation matching every line and skipping unconditionally.
+        self.branch_with_changes({"NOTES.md": "docs only\n"})
+
+        result = self.run_premerge()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("SKIP e2e", result.stdout)
+        self.assertIn("PASS — self-merge allowed (e2e ran)", result.stdout)
+        self.assertTrue(self.marker.exists())
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ template installed into each repo's AGENTS.md). Summary:
 |---|---|---|
 | `.githooks/pre-commit` | commit | gitleaks + biome auto-fix on staged files |
 | `.githooks/pre-push` | push | `pnpm verify:static` — static checks only, token-gated |
-| `scripts/premerge.sh` | before squash merge | sync check → gate-integrity check → review requirement → full `pnpm verify` → e2e |
+| `scripts/premerge.sh` | before squash merge | sync check → gate-integrity check → review requirement → full `pnpm verify` → e2e (skippable via `E2E_EXEMPT_REGEX` when every changed path is docs/config-only) |
 
 Self-merge: the authoring agent may merge its own PR when `premerge.sh` passes
 (including `--review-done` after a clean review pass for code changes).
@@ -55,6 +55,11 @@ upstream it into `assets/` here first, then re-apply everywhere. Config files
 (`premerge.conf.sh`, `worktree-links.conf`, `pre-push.conf`) are repo-owned and
 only checked for presence.
 
+When a canonical template changes here, every repo still carrying the previous
+version reports `DRIFT` on that file — the audit doing its job, not a
+regression. Re-apply the template to pick up the change; a repo that leaves a
+new config knob unset in its `premerge.conf.sh` gets no behavior change.
+
 ## Apply to a repository (only on explicit request)
 
 Audit first; apply only when the user asks. One repository per commit. Steps:
@@ -67,7 +72,10 @@ Audit first; apply only when the user asks. One repository per commit. Steps:
 3. Fill `scripts/premerge.conf.sh`: set `E2E_CMD` if the repo has a merge-blocking
    e2e suite; extend `PROTECTED_EXTRA_REGEX` for repo-specific gate tooling; optionally
    set `PROTECTED_SCRIPT_KEYS` by tracing the repo's actual verify/premerge chain to the
-   script keys it calls (leave unset to keep guarding the whole `scripts` block).
+   script keys it calls (leave unset to keep guarding the whole `scripts` block); optionally
+   set `E2E_EXEMPT_REGEX` to skip `$E2E_CMD` when a diff is entirely docs/config-only —
+   independent of `REVIEW_EXEMPT_REGEX`, so a path exempt from e2e may still need
+   `--review-done` unless the repo also covers it there.
 4. Wire package.json to the naming contract above. Compose `verify:static` from the
    repo's existing static stages; move test stages out of any previous pre-push into
    `verify`/premerge. Keep every previously-gated stage somewhere — compare the
