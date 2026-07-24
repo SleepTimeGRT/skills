@@ -24,5 +24,10 @@
 # migration file paths; the lint hard-blocks self-merge when it flags a
 # destructive operation (DROP TABLE/COLUMN, TRUNCATE, DELETE without WHERE,
 # RENAME, ALTER COLUMN TYPE) with no override in this script.
+#
+# WARNING: Enabling this REPLACES the unconditional human-escalation for
+# schema/migration changes (per agents-policy.md) with lint+review-based self-merge.
+# The lint is raw-SQL-only: enabling it for non-SQL migrations (Prisma, Django, etc.)
+# provides no destructive-op protection while still allowing self-merge.
 #MIGRATION_LINT_ENABLED="true"
 #MIGRATION_LINT_REGEX='^supabase/migrations/.*\.sql$'

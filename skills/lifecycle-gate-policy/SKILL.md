@@ -71,7 +71,9 @@ Audit first; apply only when the user asks. One repository per commit. Steps:
    If the repo has SQL migrations, consider setting `MIGRATION_LINT_ENABLED="true"` and
    `MIGRATION_LINT_REGEX` to opt into the destructive-op lint — this is a separate,
    per-repo decision made only on explicit request, not a default part of applying
-   this skill.
+   this skill. Enabling this replaces the unconditional human-escalation for
+   schema/migration changes with lint+review-based self-merge, and only provides real
+   destructive-op protection if migrations are raw SQL.
 4. Wire package.json to the naming contract above. Compose `verify:static` from the
    repo's existing static stages; move test stages out of any previous pre-push into
    `verify`/premerge. Keep every previously-gated stage somewhere — compare the
