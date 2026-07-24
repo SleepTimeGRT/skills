@@ -52,8 +52,8 @@ orca orchestration task-create --spec "<issue 번호 + 제안서/구현 모드>"
 orca orchestration dispatch --task <task_id> --to <run-handle> --inject --json
 # 할당 로그 — 스폰하는 쪽이 남긴다. dispatch와 같은 블록에서 즉시 실행(누락 방지);
 # orca 상태는 reset으로 소실될 수 있어 할당의 영속 기록은 이 파일이 유일하다.
-install -d -m 700 ~/.agents/orca-workflows/logs && printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"task-runner","issue":"<issue-num>","task_id":"<task_id>","provider":"<provider>","model":"<model>","effort":"<effort>","terminal":"<run-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
-  >> ~/.agents/orca-workflows/logs/assignments.jsonl && chmod 600 ~/.agents/orca-workflows/logs/assignments.jsonl
+install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"task-runner","issue":"<issue-num>","task_id":"<task_id>","provider":"<provider>","model":"<model>","effort":"<effort>","terminal":"<run-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
+  >> ~/.local/state/orca-workflows/logs/assignments.jsonl && chmod 600 ~/.local/state/orca-workflows/logs/assignments.jsonl
 
 # evaluate 호출 — 기본 provider는 agy(Gemini): 롱컨텍스트로 agent e2e 실행·판독과 리포트 합성이
 # 이 스킬의 핵심 업무라서다(`~/.agents/orca-workflows/model-selection.md`의 Computer Use / Long-Context 축,
@@ -64,7 +64,7 @@ orca terminal create --worktree active --title task-evaluate-<n> \
 orca orchestration task-create --spec "<diff 또는 제안서 경로 + issue 번호 + 요청 모드>" --json
 orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
 printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","issue":"<issue-num>","task_id":"<task_id>","provider":"agy","model":"<model>","effort":"","terminal":"<evaluate-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
-  >> ~/.agents/orca-workflows/logs/assignments.jsonl
+  >> ~/.local/state/orca-workflows/logs/assignments.jsonl
 ```
 
 **2b. Generate** — `orca-task-runner` 호출, 결과로 **task 전체 diff 경로** 또는 **`GATE_FAIL`**을 받는다(`orca-task-runner`가 자기 task-레벨 게이트를 재시도 한도(2회) 안에 못 넘긴 경우 — `skills/orca-task-runner/SKILL.md` §6).
@@ -104,7 +104,7 @@ printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","
 
 ```bash
 printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL>","retry":<재시도 횟수>}\n' "$(date -u +%FT%TZ)" \
-  >> ~/.agents/orca-workflows/logs/assignments.jsonl
+  >> ~/.local/state/orca-workflows/logs/assignments.jsonl
 ```
 
 ## 3. Inspecting
