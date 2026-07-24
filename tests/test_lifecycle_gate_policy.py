@@ -314,6 +314,28 @@ class PathFallbackTests(GitFixture):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout, "")
 
+    def test_does_not_crash_when_home_unset_under_set_euo(self) -> None:
+        # Regression: ensure the nvm fallback guard doesn't crash under set -euo pipefail
+        # when HOME is unset. The guard should gracefully skip the fallback instead of
+        # crashing with "HOME: unbound variable".
+        script = self.write(
+            "probe-no-home.sh",
+            f"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            source {json.dumps(str(RUNNER))}
+            command -v pnpm
+            """,
+            True,
+        )
+        # Omit HOME from env entirely, provide minimal PATH for bash to work
+        result = run("bash", str(script), cwd=self.repo, check=False, env={"PATH": "/usr/bin:/bin"})
+
+        # Should not crash with unbound variable; should fail gracefully
+        self.assertNotIn("unbound variable", result.stderr, f"stderr: {result.stderr}")
+        self.assertEqual(result.returncode, 1, f"stderr: {result.stderr}")
+        self.assertEqual(result.stdout, "")
+
 
 if __name__ == "__main__":
     unittest.main()

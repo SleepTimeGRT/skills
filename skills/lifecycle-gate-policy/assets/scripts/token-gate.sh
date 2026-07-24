@@ -8,7 +8,7 @@
 # normal terminal push works fine. Resolve it directly here instead of
 # depending on the invoking process having sourced the user's shell profile.
 # nvm only — no fnm/volta/asdf/mise support without evidence they're in use.
-if ! command -v pnpm >/dev/null 2>&1 && [ -s "${HOME}/.nvm/nvm.sh" ]; then
+if ! command -v pnpm >/dev/null 2>&1 && [ -s "${HOME:-}/.nvm/nvm.sh" ]; then
   # shellcheck disable=SC1091
   . "${HOME}/.nvm/nvm.sh" --no-use
   nvm use >/dev/null 2>&1 || nvm use default >/dev/null 2>&1 || true
