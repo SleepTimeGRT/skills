@@ -6,6 +6,7 @@ from pathlib import Path
 import shlex
 import stat
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -13,6 +14,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "token-gate.sh"
+MIGRATION_LINT = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "migration-lint.py"
 
 
 def run(
@@ -233,6 +235,87 @@ class RunnerTests(GitFixture):
         self.assertNotEqual(main_log, linked_log)
         self.assertIn("main-warning", main_log.read_text(encoding="utf-8"))
         self.assertIn("linked-warning", linked_log.read_text(encoding="utf-8"))
+
+
+class MigrationLintTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory(prefix="migration lint ")
+        self.dir = Path(self.tempdir.name)
+
+    def tearDown(self) -> None:
+        self.tempdir.cleanup()
+
+    def write_sql(self, name: str, content: str) -> Path:
+        path = self.dir / name
+        path.write_text(textwrap.dedent(content).lstrip(), encoding="utf-8")
+        return path
+
+    def lint(self, *paths: Path) -> tuple[int, dict]:
+        result = subprocess.run(
+            [sys.executable, str(MIGRATION_LINT), *[str(p) for p in paths]],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode, json.loads(result.stdout)
+
+    def test_flags_drop_table(self) -> None:
+        path = self.write_sql("0001.sql", "DROP TABLE users;\n")
+        code, report = self.lint(path)
+        self.assertEqual(code, 1)
+        self.assertFalse(report["clean"])
+        self.assertEqual(report["flags"][0]["rule"], "drop-table")
+        self.assertEqual(report["flags"][0]["line"], 1)
+
+    def test_flags_drop_column(self) -> None:
+        path = self.write_sql("0002.sql", "ALTER TABLE users DROP COLUMN email;\n")
+        code, report = self.lint(path)
+        self.assertEqual(code, 1)
+        self.assertEqual({f["rule"] for f in report["flags"]}, {"drop-column"})
+
+    def test_flags_alter_column_type(self) -> None:
+        path = self.write_sql("0003.sql", "ALTER TABLE items ALTER COLUMN price TYPE integer;\n")
+        code, report = self.lint(path)
+        self.assertEqual(code, 1)
+        self.assertIn("alter-column-type", {f["rule"] for f in report["flags"]})
+
+    def test_flags_truncate(self) -> None:
+        path = self.write_sql("0004.sql", "TRUNCATE orders;\n")
+        code, report = self.lint(path)
+        self.assertEqual(code, 1)
+        self.assertEqual(report["flags"][0]["rule"], "truncate")
+
+    def test_flags_rename(self) -> None:
+        path = self.write_sql("0005.sql", "ALTER TABLE accounts RENAME TO users;\n")
+        code, report = self.lint(path)
+        self.assertEqual(code, 1)
+        self.assertEqual(report["flags"][0]["rule"], "rename")
+
+    def test_flags_delete_without_where_multiline(self) -> None:
+        path = self.write_sql(
+            "0006.sql",
+            """
+            DELETE FROM
+              sessions;
+            """,
+        )
+        code, report = self.lint(path)
+        self.assertEqual(code, 1)
+        self.assertEqual(report["flags"][0]["rule"], "delete-without-where")
+        self.assertEqual(report["flags"][0]["line"], 1)
+
+    def test_clean_migration_passes(self) -> None:
+        path = self.write_sql(
+            "0007.sql",
+            """
+            CREATE TABLE widgets (id serial primary key);
+            DELETE FROM sessions
+            WHERE created_at < now() - interval '30 days';
+            """,
+        )
+        code, report = self.lint(path)
+        self.assertEqual(code, 0)
+        self.assertTrue(report["clean"])
+        self.assertEqual(report["flags"], [])
 
 
 if __name__ == "__main__":
