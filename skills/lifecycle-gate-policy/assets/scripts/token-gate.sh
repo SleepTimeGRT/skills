@@ -3,6 +3,17 @@
 # target repository; change the copy in sleeptimegrt-skills and re-apply.
 # Source this file from a non-interactive repository gate.
 
+# A non-interactive GUI git client can spawn hooks without an interactive
+# shell's PATH, so an nvm-managed pnpm/node can be invisible even though a
+# normal terminal push works fine. Resolve it directly here instead of
+# depending on the invoking process having sourced the user's shell profile.
+# nvm only — no fnm/volta/asdf/mise support without evidence they're in use.
+if ! command -v pnpm >/dev/null 2>&1 && [ -s "${HOME}/.nvm/nvm.sh" ]; then
+  # shellcheck disable=SC1091
+  . "${HOME}/.nvm/nvm.sh" --no-use
+  nvm use >/dev/null 2>&1 || nvm use default >/dev/null 2>&1 || true
+fi
+
 token_gate_begin() {
   if [ "$#" -ne 1 ]; then
     printf '%s\n' "token_gate_begin: expected an entrypoint name" >&2
