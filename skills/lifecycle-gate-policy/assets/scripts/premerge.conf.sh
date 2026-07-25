@@ -10,6 +10,16 @@
 # Files matching this regex do not require review (docs-only PRs).
 #REVIEW_EXEMPT_REGEX='(^|/)docs/|\.(md|mdx|txt)$'
 
+# When every changed path matches this regex, premerge.sh skips $E2E_CMD (verify still
+# runs). Independent of REVIEW_EXEMPT_REGEX by design — a diff can be e2e-exempt without
+# being review-exempt, or vice versa. Share the same pattern between the two only if this
+# repo wants both skipped together; a repo that only sets this one still needs
+# --review-done for non-REVIEW_EXEMPT_REGEX paths (e.g. a bare .gitignore change is not
+# docs by default, so it still hits the review gate even once it skips e2e here).
+# This regex cannot weaken gate-integrity protection: this file is itself inside
+# PROTECTED_REGEX, so widening the pattern requires a human merge before it takes effect.
+#E2E_EXEMPT_REGEX='^\.gitignore$|(^|/)docs/|\.(md|mdx|txt)$'
+
 # Repo-specific additions to the gate-integrity protected set.
 #PROTECTED_EXTRA_REGEX='^tools/spec-trace\.mjs$'
 

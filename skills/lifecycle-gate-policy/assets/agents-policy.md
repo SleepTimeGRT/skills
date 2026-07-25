@@ -7,7 +7,7 @@
 |---|---|---|---|
 | `pre-commit` | every commit | gitleaks secret scan + biome auto-fix on staged files | auto-correction |
 | `pre-push` | every push | `pnpm verify:static` — typecheck + lint/format check + repo static lints. No tests. | fast block |
-| `scripts/premerge.sh` | right before squash merge | full `pnpm verify` + e2e (if configured) + review for code changes | final gate |
+| `scripts/premerge.sh` | right before squash merge | full `pnpm verify` + e2e (if configured, skipped when the diff is entirely docs/config-only per `E2E_EXEMPT_REGEX`) + review for code changes | final gate |
 
 `verify:static` must stay static: no test execution, no emulators, no network.
 Heavy verification is deliberately absent from hooks — it lives at the merge, where
