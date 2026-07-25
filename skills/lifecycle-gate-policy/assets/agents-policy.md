@@ -40,6 +40,8 @@ branches only, never for a branch about to merge.
 - Attribution: human interactive commits as the user; agent commits carry
   `Co-Authored-By:` naming the actual model; autonomous-loop commits identify
   themselves as autonomous.
-- Worktrees live outside the repo at `~/.worktrees/<repo>/issue-<num>-<slug>/`
-  (prevents the parent repo's lint/tsc configs from descending into them).
+- Worktrees live outside the repo at `~/worktrees/<repo>/issue-<num>-<slug>/`
+  (not dot-prefixed, so editor/tool trustedWorkspace prompts pick it up like any
+  normal project directory; also prevents the parent repo's lint/tsc configs from
+  descending into them).
   `post-checkout` symlinks gitignored env/secrets per `.githooks/worktree-links.conf`.
