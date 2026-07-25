@@ -18,7 +18,7 @@ template installed into each repo's AGENTS.md). Summary:
 |---|---|---|
 | `.githooks/pre-commit` | commit | gitleaks + biome auto-fix on staged files |
 | `.githooks/pre-push` | push | `pnpm verify:static` — static checks only, token-gated |
-| `scripts/premerge.sh` | before squash merge | sync check → gate-integrity check → review requirement → full `pnpm verify` → e2e (skippable via `E2E_EXEMPT_REGEX` when every changed path is docs/config-only) |
+| `scripts/premerge.sh` | before squash merge | sync check → gate-integrity check → migration-safety lint (opt-in) → review requirement → full `pnpm verify` → e2e (skippable via `E2E_EXEMPT_REGEX` when every changed path is docs/config-only) |
 
 Self-merge: the authoring agent may merge its own PR when `premerge.sh` passes
 (including `--review-done` after a clean review pass for code changes).
@@ -65,8 +65,8 @@ new config knob unset in its `premerge.conf.sh` gets no behavior change.
 Audit first; apply only when the user asks. One repository per commit. Steps:
 
 1. Copy `assets/githooks/{pre-commit,pre-push,post-checkout}` → `<repo>/.githooks/`,
-   `assets/scripts/{premerge.sh,token-gate.sh,premerge.conf.sh}` → `<repo>/scripts/`.
-   Mark hooks and scripts executable.
+   `assets/scripts/{premerge.sh,token-gate.sh,premerge.conf.sh,migration-lint.py}` →
+   `<repo>/scripts/`. Mark hooks and scripts executable.
 2. Write `.githooks/worktree-links.conf` with the repo's actual gitignored
    env/secret paths (inspect the previous post-checkout hook or `.gitignore`).
 3. Fill `scripts/premerge.conf.sh`: set `E2E_CMD` if the repo has a merge-blocking
@@ -76,6 +76,12 @@ Audit first; apply only when the user asks. One repository per commit. Steps:
    set `E2E_EXEMPT_REGEX` to skip `$E2E_CMD` when a diff is entirely docs/config-only —
    independent of `REVIEW_EXEMPT_REGEX`, so a path exempt from e2e may still need
    `--review-done` unless the repo also covers it there.
+   If the repo has SQL migrations, consider setting `MIGRATION_LINT_ENABLED="true"` and
+   `MIGRATION_LINT_REGEX` to opt into the destructive-op lint — this is a separate,
+   per-repo decision made only on explicit request, not a default part of applying
+   this skill. Enabling this replaces the unconditional human-escalation for
+   schema/migration changes with lint+review-based self-merge, and only provides real
+   destructive-op protection if migrations are raw SQL.
 4. Wire package.json to the naming contract above. Compose `verify:static` from the
    repo's existing static stages; move test stages out of any previous pre-push into
    `verify`/premerge. Keep every previously-gated stage somewhere — compare the

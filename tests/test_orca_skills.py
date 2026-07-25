@@ -105,3 +105,17 @@ def test_workflows_docs_reference_new_skill_names(doc):
     assert any(name in text for name in NEW_SKILLS), (
         f"{doc}: should reference at least one of {NEW_SKILLS} after the migration"
     )
+
+
+def test_orca_task_runner_declares_destructive_ops_field():
+    text = _read_skill("orca-task-runner")
+    assert "의도된 destructive 오퍼레이션" in text, (
+        "orca-task-runner's proposal format must require a declared destructive-ops field"
+    )
+
+
+def test_orca_evaluate_has_migration_escalate_condition():
+    text = _read_skill("orca-evaluate")
+    assert "destructive-op 린터가 flag" in text and "선언에 커버되지 않는다" in text, (
+        "orca-evaluate §4 must add the migration destructive-op ESCALATE condition"
+    )

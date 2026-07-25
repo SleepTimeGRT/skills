@@ -24,6 +24,9 @@ description: Use when generating the implementation for one task (issue) — pro
 
 - 구현 범위(무엇을 만들 것인가, 어떤 파일을 건드릴 것인가)
 - 검증 방법(구체적인 파일/함수/테스트로 — issue의 `## Acceptance criteria`를 어떻게 커버할지)
+- (schema/migration 파일을 건드리는 경우) **의도된 destructive 오퍼레이션 목록.** 없으면
+  명시적으로 "없음"이라고 쓴다(공란은 "언급 안 함"이지 "없음"이 아니므로 구분한다). 이 선언은
+  나중에 `orca-evaluate` §3가 diff에서 실제로 flag된 destructive-op와 대조하는 근거가 된다.
 
 `orca-evaluate`가 이 제안을 issue의 원본 acceptance criteria에 대조해 검토한다. 반려되면 수정해서 다시 제안한다. **최대 2 라운드.** 2라운드 안에 합의가 안 되면 이 스킬(generator)이 결정권을 가지고 그 제안대로 진행한다 — evaluator의 이견은 기록에 남기되 진행을 막지 않는다.
 

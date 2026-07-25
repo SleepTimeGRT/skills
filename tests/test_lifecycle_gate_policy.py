@@ -7,6 +7,7 @@ import shlex
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -14,8 +15,11 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "token-gate.sh"
-PRE_COMMIT = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "githooks" / "pre-commit"
+MIGRATION_LINT = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "migration-lint.py"
 PREMERGE = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "premerge.sh"
+AUDIT = ROOT / "skills" / "lifecycle-gate-policy" / "scripts" / "audit.py"
+ASSETS = ROOT / "skills" / "lifecycle-gate-policy" / "assets"
+PRE_COMMIT = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "githooks" / "pre-commit"
 
 
 def run(
@@ -38,6 +42,12 @@ def run(
 def retained_log(stdout: str) -> Path:
     line = next(line for line in stdout.splitlines() if "log:" in line)
     return Path(line.split(" — log: ", 1)[1])
+
+
+def test_agents_policy_escalation_mentions_migration_lint_gate() -> None:
+    text = (ASSETS / "agents-policy.md").read_text(encoding="utf-8")
+    assert "MIGRATION_LINT_ENABLED" in text
+    assert "schema/migrations/deploy configuration" not in text
 
 
 class GitFixture(unittest.TestCase):
@@ -500,6 +510,222 @@ class PremergeE2eExemptionTests(unittest.TestCase):
         self.assertNotIn("SKIP e2e", result.stdout)
         self.assertIn("PASS — self-merge allowed (e2e ran)", result.stdout)
         self.assertTrue(self.marker.exists())
+
+
+class MigrationLintTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory(prefix="migration lint ")
+        self.dir = Path(self.tempdir.name)
+
+    def tearDown(self) -> None:
+        self.tempdir.cleanup()
+
+    def write_sql(self, name: str, content: str) -> Path:
+        path = self.dir / name
+        path.write_text(textwrap.dedent(content).lstrip(), encoding="utf-8")
+        return path
+
+    def lint(self, *paths: Path) -> tuple[int, dict]:
+        result = subprocess.run(
+            [sys.executable, str(MIGRATION_LINT), *[str(p) for p in paths]],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode, json.loads(result.stdout)
+
+    def test_flags_drop_table(self) -> None:
+        path = self.write_sql("0001.sql", "DROP TABLE users;\n")
+        code, report = self.lint(path)
+        self.assertEqual(code, 1)
+        self.assertFalse(report["clean"])
+        self.assertEqual(report["flags"][0]["rule"], "drop-table")
+        self.assertEqual(report["flags"][0]["line"], 1)
+
+    def test_flags_drop_column(self) -> None:
+        path = self.write_sql("0002.sql", "ALTER TABLE users DROP COLUMN email;\n")
+        code, report = self.lint(path)
+        self.assertEqual(code, 1)
+        self.assertEqual({f["rule"] for f in report["flags"]}, {"drop-column"})
+
+    def test_flags_alter_column_type(self) -> None:
+        path = self.write_sql("0003.sql", "ALTER TABLE items ALTER COLUMN price TYPE integer;\n")
+        code, report = self.lint(path)
+        self.assertEqual(code, 1)
+        self.assertIn("alter-column-type", {f["rule"] for f in report["flags"]})
+
+    def test_flags_truncate(self) -> None:
+        path = self.write_sql("0004.sql", "TRUNCATE orders;\n")
+        code, report = self.lint(path)
+        self.assertEqual(code, 1)
+        self.assertEqual(report["flags"][0]["rule"], "truncate")
+
+    def test_flags_rename(self) -> None:
+        path = self.write_sql("0005.sql", "ALTER TABLE accounts RENAME TO users;\n")
+        code, report = self.lint(path)
+        self.assertEqual(code, 1)
+        self.assertEqual(report["flags"][0]["rule"], "rename")
+
+    def test_flags_delete_without_where_multiline(self) -> None:
+        path = self.write_sql(
+            "0006.sql",
+            """
+            DELETE FROM
+              sessions;
+            """,
+        )
+        code, report = self.lint(path)
+        self.assertEqual(code, 1)
+        self.assertEqual(report["flags"][0]["rule"], "delete-without-where")
+        self.assertEqual(report["flags"][0]["line"], 1)
+
+    def test_clean_migration_passes(self) -> None:
+        path = self.write_sql(
+            "0007.sql",
+            """
+            CREATE TABLE widgets (id serial primary key);
+            DELETE FROM sessions
+            WHERE created_at < now() - interval '30 days';
+            """,
+        )
+        code, report = self.lint(path)
+        self.assertEqual(code, 0)
+        self.assertTrue(report["clean"])
+        self.assertEqual(report["flags"], [])
+
+
+class PremergeFixture(GitFixture):
+    def setUp(self) -> None:
+        super().setUp()
+        run("git", "config", "user.email", "fixture@example.test", cwd=self.repo)
+        run("git", "config", "user.name", "Fixture", cwd=self.repo)
+        run("git", "checkout", "-q", "-b", "main", cwd=self.repo)
+        self.write("scripts/premerge.sh", PREMERGE.read_text(encoding="utf-8"), executable=True)
+        self.write("scripts/token-gate.sh", RUNNER.read_text(encoding="utf-8"), executable=True)
+        self.write("scripts/migration-lint.py", MIGRATION_LINT.read_text(encoding="utf-8"), executable=True)
+        run("git", "commit", "-qm", "init", cwd=self.repo)
+
+        self.origin = Path(self.tempdir.name) / "origin.git"
+        run("git", "init", "-q", "--bare", str(self.origin), cwd=self.repo)
+        run("git", "remote", "add", "origin", str(self.origin), cwd=self.repo)
+        run("git", "push", "-q", "-u", "origin", "main", cwd=self.repo)
+        run("git", "remote", "set-head", "origin", "main", cwd=self.repo)
+
+    def configure(self, conf: str) -> None:
+        run("git", "checkout", "-q", "main", cwd=self.repo)
+        self.write("scripts/premerge.conf.sh", conf)
+        run("git", "commit", "-qm", "configure migration lint", cwd=self.repo)
+        run("git", "push", "-q", "origin", "main", cwd=self.repo)
+        run("git", "checkout", "-q", "-b", "feature", cwd=self.repo)
+
+    def add_migration(self, relative: str, sql: str) -> None:
+        self.write(relative, sql)
+        run("git", "commit", "-qm", f"add {relative}", cwd=self.repo)
+
+    def run_premerge(self) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        runtime_tmp = Path(self.tempdir.name) / "runtime tmp"
+        runtime_tmp.mkdir(mode=0o700, exist_ok=True)
+        env["TMPDIR"] = str(runtime_tmp)
+        return run("bash", "scripts/premerge.sh", cwd=self.repo, check=False, env=env)
+
+
+class MigrationLintPremergeTests(PremergeFixture):
+    def test_flags_destructive_migration_blocks_selfmerge(self) -> None:
+        self.configure(
+            """
+            MIGRATION_LINT_ENABLED="true"
+            MIGRATION_LINT_REGEX='^supabase/migrations/.*\\.sql$'
+            """
+        )
+        self.add_migration("supabase/migrations/0001_drop_users.sql", "DROP TABLE users;\n")
+
+        result = self.run_premerge()
+
+        self.assertEqual(result.returncode, 5)
+        self.assertIn("MIGRATION_ESCALATE", result.stderr)
+        self.assertIn("drop-table", result.stderr)
+
+    def test_clean_migration_reaches_review_stage(self) -> None:
+        self.configure(
+            """
+            MIGRATION_LINT_ENABLED="true"
+            MIGRATION_LINT_REGEX='^supabase/migrations/.*\\.sql$'
+            """
+        )
+        self.add_migration(
+            "supabase/migrations/0002_add_widgets.sql",
+            "CREATE TABLE widgets (id serial primary key);\n",
+        )
+
+        result = self.run_premerge()
+
+        self.assertEqual(result.returncode, 4)
+        self.assertIn("REVIEW required", result.stdout)
+
+    def test_disabled_by_default_does_not_block_destructive_migration(self) -> None:
+        self.configure("")
+        self.add_migration("supabase/migrations/0001_drop_users.sql", "DROP TABLE users;\n")
+
+        result = self.run_premerge()
+
+        self.assertEqual(result.returncode, 4)
+        self.assertIn("REVIEW required", result.stdout)
+
+    def test_enabled_without_regex_fails_fast(self) -> None:
+        self.configure('MIGRATION_LINT_ENABLED="true"\n')
+        self.add_migration("supabase/migrations/0001_drop_users.sql", "DROP TABLE users;\n")
+
+        result = self.run_premerge()
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("MIGRATION_LINT_REGEX unset", result.stderr)
+
+
+class AuditMigrationLintTests(GitFixture):
+    def setUp(self) -> None:
+        super().setUp()
+        run("git", "config", "user.email", "fixture@example.test", cwd=self.repo)
+        run("git", "config", "user.name", "Fixture", cwd=self.repo)
+
+    def run_audit(self) -> dict:
+        result = run(
+            sys.executable, str(AUDIT), "--repo", str(self.repo), "--format", "json",
+            cwd=self.repo, check=False,
+        )
+        return json.loads(result.stdout)
+
+    def find_check(self, report: dict, name: str) -> dict:
+        return next(r for r in report["results"] if r["check"] == name)
+
+    def test_missing_migration_lint_reports_missing(self) -> None:
+        run("git", "commit", "--allow-empty", "-qm", "init", cwd=self.repo)
+
+        report = self.run_audit()
+
+        check = self.find_check(report, "scripts/migration-lint.py")
+        self.assertEqual(check["status"], "MISSING")
+
+    def test_canonical_migration_lint_reports_pass(self) -> None:
+        self.write(
+            "scripts/migration-lint.py",
+            MIGRATION_LINT.read_text(encoding="utf-8"),
+            executable=True,
+        )
+        run("git", "commit", "-qm", "add migration-lint.py", cwd=self.repo)
+
+        report = self.run_audit()
+
+        check = self.find_check(report, "scripts/migration-lint.py")
+        self.assertEqual(check["status"], "PASS")
+
+    def test_drifted_migration_lint_reports_drift(self) -> None:
+        self.write("scripts/migration-lint.py", "# hand-edited, not canonical\n")
+        run("git", "commit", "-qm", "drift migration-lint.py", cwd=self.repo)
+
+        report = self.run_audit()
+
+        check = self.find_check(report, "scripts/migration-lint.py")
+        self.assertEqual(check["status"], "DRIFT")
 
 
 if __name__ == "__main__":

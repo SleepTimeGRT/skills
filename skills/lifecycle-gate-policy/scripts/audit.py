@@ -29,6 +29,7 @@ CANONICAL = {
     ".githooks/post-checkout": ASSETS / "githooks" / "post-checkout",
     "scripts/premerge.sh": ASSETS / "scripts" / "premerge.sh",
     "scripts/token-gate.sh": ASSETS / "scripts" / "token-gate.sh",
+    "scripts/migration-lint.py": ASSETS / "scripts" / "migration-lint.py",
 }
 
 # repo-relative path -> severity when absent (repo-editable config files)
