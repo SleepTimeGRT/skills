@@ -14,6 +14,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "token-gate.sh"
+PRE_COMMIT = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "githooks" / "pre-commit"
 PREMERGE = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "premerge.sh"
 
 
@@ -235,6 +236,151 @@ class RunnerTests(GitFixture):
         self.assertNotEqual(main_log, linked_log)
         self.assertIn("main-warning", main_log.read_text(encoding="utf-8"))
         self.assertIn("linked-warning", linked_log.read_text(encoding="utf-8"))
+
+
+class PathFallbackTests(GitFixture):
+    def setUp(self) -> None:
+        super().setUp()
+        self.fixture_home = Path(self.tempdir.name) / "fixture home"
+        self.fixture_home.mkdir()
+        self.fake_bin = Path(self.tempdir.name) / "fake bin"
+        self.fake_bin.mkdir()
+        pnpm_stub = self.fake_bin / "pnpm"
+        pnpm_stub.write_text("#!/usr/bin/env bash\necho fake-pnpm \"$@\"\n", encoding="utf-8")
+        pnpm_stub.chmod(0o755)
+
+    def write_fake_nvm(self) -> None:
+        nvm_dir = self.fixture_home / ".nvm"
+        nvm_dir.mkdir()
+        (nvm_dir / "nvm.sh").write_text(
+            textwrap.dedent(
+                f"""
+                #!/usr/bin/env bash
+                nvm() {{
+                  case "${{1:-}}" in
+                    use)
+                      if [ "${{2:-}}" = "default" ]; then
+                        export PATH={json.dumps(str(self.fake_bin))}:"$PATH"
+                        return 0
+                      fi
+                      if [ -f "$(pwd)/.nvmrc" ]; then
+                        export PATH={json.dumps(str(self.fake_bin))}:"$PATH"
+                        return 0
+                      fi
+                      echo "No .nvmrc file found" >&2
+                      return 1
+                      ;;
+                  esac
+                }}
+                """
+            ).lstrip(),
+            encoding="utf-8",
+        )
+
+    def run_source_probe(self, *, home: Path, path: str) -> subprocess.CompletedProcess[str]:
+        script = self.write(
+            "probe.sh",
+            f"""
+            #!/usr/bin/env bash
+            set -u
+            source {json.dumps(str(RUNNER))}
+            command -v pnpm
+            """,
+            True,
+        )
+        return run("bash", str(script), cwd=self.repo, check=False, env={"HOME": str(home), "PATH": path})
+
+    def test_falls_back_to_nvm_default_alias_when_no_nvmrc(self) -> None:
+        self.write_fake_nvm()
+        result = self.run_source_probe(home=self.fixture_home, path="/usr/bin:/bin")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), str(self.fake_bin / "pnpm"))
+
+    def test_uses_nvmrc_version_when_present(self) -> None:
+        self.write_fake_nvm()
+        self.write(".nvmrc", "v22.18.0\n")
+        result = self.run_source_probe(home=self.fixture_home, path="/usr/bin:/bin")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), str(self.fake_bin / "pnpm"))
+
+    def test_does_not_invoke_nvm_when_pnpm_already_on_path(self) -> None:
+        result = self.run_source_probe(home=self.fixture_home, path=f"{self.fake_bin}:/usr/bin:/bin")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), str(self.fake_bin / "pnpm"))
+
+    def test_leaves_pnpm_unresolved_when_nvm_is_unavailable(self) -> None:
+        result = self.run_source_probe(home=self.fixture_home, path="/usr/bin:/bin")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+
+    def test_does_not_crash_when_home_unset_under_set_euo(self) -> None:
+        # Regression: ensure the nvm fallback guard doesn't crash under set -euo pipefail
+        # when HOME is unset. The guard should gracefully skip the fallback instead of
+        # crashing with "HOME: unbound variable".
+        script = self.write(
+            "probe-no-home.sh",
+            f"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            source {json.dumps(str(RUNNER))}
+            command -v pnpm
+            """,
+            True,
+        )
+        # Omit HOME from env entirely, provide minimal PATH for bash to work
+        result = run("bash", str(script), cwd=self.repo, check=False, env={"PATH": "/usr/bin:/bin"})
+
+        # Should not crash with unbound variable; should fail gracefully
+        self.assertNotIn("unbound variable", result.stderr, f"stderr: {result.stderr}")
+        self.assertEqual(result.returncode, 1, f"stderr: {result.stderr}")
+        self.assertEqual(result.stdout, "")
+
+
+class PreCommitHookTests(GitFixture):
+    def setUp(self) -> None:
+        super().setUp()
+        hooks_dir = self.repo / ".githooks"
+        hooks_dir.mkdir()
+        scripts_dir = self.repo / "scripts"
+        scripts_dir.mkdir()
+        shutil.copy(PRE_COMMIT, hooks_dir / "pre-commit")
+        (hooks_dir / "pre-commit").chmod(0o755)
+        shutil.copy(RUNNER, scripts_dir / "token-gate.sh")
+
+        self.stub_bin = Path(self.tempdir.name) / "stub bin"
+        self.stub_bin.mkdir()
+        self.biome_marker = Path(self.tempdir.name) / "biome-invoked.marker"
+        (self.stub_bin / "gitleaks").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        (self.stub_bin / "gitleaks").chmod(0o755)
+        (self.stub_bin / "pnpm").write_text(
+            textwrap.dedent(
+                f"""
+                #!/usr/bin/env bash
+                if [ "$1" = "exec" ] && [ "$2" = "biome" ]; then
+                  touch {json.dumps(str(self.biome_marker))}
+                fi
+                exit 0
+                """
+            ).lstrip(),
+            encoding="utf-8",
+        )
+        (self.stub_bin / "pnpm").chmod(0o755)
+
+    def run_pre_commit(self) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["PATH"] = f"{self.stub_bin}:{env['PATH']}"
+        return run("bash", str(self.repo / ".githooks" / "pre-commit"), cwd=self.repo, check=False, env=env)
+
+    def test_still_runs_gitleaks_then_biome_after_sourcing_token_gate(self) -> None:
+        self.write("src/app.ts", "export const x = 1;\n")
+        result = self.run_pre_commit()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.biome_marker.exists())
 
 
 class PremergeE2eExemptionTests(unittest.TestCase):

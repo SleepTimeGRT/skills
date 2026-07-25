@@ -7,6 +7,9 @@
 # runtime verification belongs to premerge, static verification to pre-push.
 set -euo pipefail
 
+REPO_ROOT=$(git rev-parse --show-toplevel)
+. "$REPO_ROOT/scripts/token-gate.sh"
+
 # 1. gitleaks — staged diff secret scan (unconditional: secrets must never land)
 if ! command -v gitleaks &>/dev/null; then
   printf 'pre-commit: gitleaks not found — install: brew install gitleaks\n' >&2
