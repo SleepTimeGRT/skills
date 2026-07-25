@@ -17,8 +17,8 @@ launch: `codex --model <id> -c model_reasoning_effort=<low|medium|high|xhigh>` (
 | `gpt-5.6-terra` (Terra) | Sol 근접(MRCR 89.6%, SWE-Bench Pro 63.4%, Coding Agent Index 77), 출력 절반가 $2.50/$15 | Routine tier 전반: 기능 구현·리팩터·디버깅·테스트·코드 리뷰(`model-selection.md` Routine 정의와 동일 범위). 기본 codex 리뷰어·구현 워커 | medium |
 | `gpt-5.6-luna` (Luna) | 저가 $1/$6, 고속·고볼륨. Coding Agent Index 75로 Opus 4.8(72.5) 상회 — 단 MRCR(장문 recall) 41.3%로 Sol/Terra 대비 급락 | 짧은 컨텍스트의 경량 작업: 전사·분류·라우팅, 대량 병렬 서브태스크(`model-selection.md` Simple tier). ⚠️ 대형 diff/로그를 훑는 코드 리뷰·장문 컨텍스트 작업엔 MRCR 근거로 부적합 — 이 축은 대체하지 않음 | low |
 
-effort는 `-c model_reasoning_effort=<minimal|low|medium|high|xhigh>`로 지정한다. xhigh는 medium 대비 reasoning 토큰 ~8–15배(high는 ~3–5배) — 고위험 게이트는 Claude xhigh 앵커에 맞춰 Sol도 xhigh, 비용이 문제면 high로 내린다.
+effort는 `-c model_reasoning_effort=<minimal|low|medium|high|xhigh>`로 지정한다. xhigh는 medium 대비 비용이 크게 뛴다 — 고위험 게이트는 Claude xhigh 앵커에 맞춰 Sol도 xhigh, 비용이 문제면 high로 내린다.
 
 스모크(2026-07-21, `codex exec`): `gpt-5.6-terra`(medium)·`gpt-5.6-sol`(high·xhigh) 부팅·응답 exit 0. `gpt-5.6-luna`는 아직 부팅 스모크 없음 — 실제 워커로 launch하기 전에 먼저 `codex exec`로 검증할 것. 모델 세대 교체 시 재검증 후 verified_at 갱신.
 
-Coding Agent Index 수치(Terra 77, Luna 75, Opus 4.8 72.5)는 2026-07-25 웹 리서치 근거(Artificial Analysis) — MRCR/SWE-Bench Pro와 달리 이 repo에서 직접 스모크 검증한 값이 아니므로 verified_at을 갱신하지 않았다.
+Coding Agent Index 수치(Terra 77, Luna 75, Opus 4.8 72.5): 2026-07-25 웹 리서치(Artificial Analysis) — 이 repo에서 직접 스모크 검증한 값은 아니다.

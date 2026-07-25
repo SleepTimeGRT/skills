@@ -13,13 +13,15 @@ launch: `agy -p '<지침 + diff·report 경로>' --model <token> --print-timeout
 
 **`--dangerously-skip-permissions` 필수**: 없으면 tool 호출(예: 파일 읽기용 `command`)이 headless에서 **exit 0인 채로 조용히 auto-deny**된다(`jetski: no output produced — ... auto-denied`) — 멈추는 게 아니라 아무 일도 안 하고 성공한 것처럼 끝나는 쪽이라 더 위험하다(#15, Claude 쪽 `--permission-mode bypassPermissions`와 동등한 목적).
 
-2026-07-25 실측(2×2, trusted worktree `~/worktrees/sleeptimegrt-skills/issue-15-orca-task-runner` vs 미등록 scratchpad, 파일 읽기를 강제하는 프롬프트로 tool 호출 유발): **workspace-trust 등록 여부는 이 게이트에 영향이 없었다.** 플래그 없이는 trusted/untrusted 둘 다 auto-deny, 플래그를 주면 trusted/untrusted 둘 다 실제 tool 호출 성공(unique marker로 내용 대조 확인). 즉 이 리포에서 실제로 관찰되는 건 `--dangerously-skip-permissions` 단일 게이트이고, 이슈가 제기한 "tool-permission bypass ≠ workspace trust bypass" 구조는 **최소한 이 시나리오(launch 디렉터리 내부 파일 접근)에서는 관찰되지 않았다** — 별도 workspace-trust 게이트가 존재한다면 launch 디렉터리 바깥 경로 접근처럼 아직 실측하지 않은 경우일 것. 이슈 참고: `"path is not in a workspace which you have access to"` 문구는 이번 테스트에서 재현되지 않았다.
+workspace-trust 등록 여부는 이 게이트와 무관하다(2026-07-25 실측, launch 디렉터리 내부 파일 접근 기준) — 등록/미등록 모두 플래그 없이는 auto-deny, 플래그를 주면 성공한다. launch 디렉터리 바깥 경로 접근은 미검증.
+
+agy는 `model-selection.md` Default Mapping에서 Simple tier(코드/구현 판단)와 Computer Use/Long-Context 축(실행·리포팅, 판단 아님)에만 배정된다 — Routine/High Risk 코드 판단엔 쓰지 않는다(SWE-Bench Pro 근거는 아래).
 
 | 모델 토큰 | 용도 | effort |
 |---|---|---|
-| `gemini-3.6-flash-high` | 정확성이 결정적인 리뷰·분석. flash의 effort 천장(위에 xhigh/max 없음) | high |
-| `gemini-3.6-flash-medium` | 일상 개발·리뷰, agent e2e(컴퓨터/브라우저 조작 실행 + 결과 요약 — `skills/orca-evaluate/SKILL.md` §2 참고, "판단"이 아니라 실행·리포팅이라 high가 benchmark상 강제되지 않음) | medium |
-| `gemini-3.6-flash-low` | 간단·기계적 작업 | low |
+| `gemini-3.6-flash-high` | Computer Use/Long-Context 축 내 고정확도 필요 시(예: 다중 로그 skeptical 대조). flash의 effort 천장(위에 xhigh/max 없음) | high |
+| `gemini-3.6-flash-medium` | Computer Use/Long-Context 축 기본값 — agent e2e(컴퓨터/브라우저 조작 실행 + 결과 요약, `skills/orca-evaluate/SKILL.md` §2). "판단"이 아니라 실행·리포팅이라 high가 benchmark상 강제되지 않음 | medium |
+| `gemini-3.6-flash-low` | Simple tier(간단·기계적 작업) | low |
 
 `gemini-3.5-flash-*`는 retire — `gemini-3.6-flash`(2026-07-21 릴리스, `agy models`에 노출)로 완전히 대체한다:
 
@@ -29,10 +31,10 @@ launch: `agy -p '<지침 + diff·report 경로>' --model <token> --print-timeout
 - 참고: raw Gemini API(REST/SDK) 레벨에서 `temperature`/`top_p`/`thinking_budget` 등 일부 파라미터가 3.x에서 deprecate된다는 보고가 있으나, `agy` CLI는 이 파라미터들을 노출하지 않으므로 이 리포의 launch 패턴엔 영향 없음.
 - 출처: 가격·벤치 모두 웹 검색 기준(OpenRouter/ArtificialAnalysis/Browser Use/Google 블로그 등 2026-07-21~22 게시물) — 이 리포에서 직접 측정한 수치는 아니다.
 
-`agy models`에 `gemini-3.1-pro-*`도 있다 — flash 계열이 에이전틱 벤치(Terminal-Bench·MCP Atlas 등)에서 이를 앞서 현행 기본. 단 SWE-Bench Pro 55.1%(Gemini Flash 계열 anchor, `gemini-3.6-flash` 자체 값은 미확인)로 Opus/Sol 앵커보다 낮아, 고위험 판단에는 상대적으로 약하다.
+`agy models`에 `gemini-3.1-pro-*`도 있다 — flash 계열이 에이전틱 벤치(Terminal-Bench·MCP Atlas 등)에서 이를 앞서 현행 기본. `gemini-3.6-flash` SWE-Bench Pro는 **58.7%**(2026-07-25 웹 리서치 확인: codingfleet.com SWE-bench Pro leaderboard, buildfastwithai.com 교차확인). Codex Terra(63.4%)·Sol(64.6%)·Opus 앵커보다 낮고, Coding Agent Index류 agentic 코딩 지표는 공개 자료에서 아직 못 찾음 — tier 배정은 `model-selection.md` 참고.
 
 **agent e2e(Playwright)**: agy/Antigravity CLI에 BrowserMCP를 설정하면 accessibility-tree 기반 Playwright 브라우저 조작이 가능하다(`~/.gemini/settings.json` 또는 Antigravity CLI 설정에 MCP 서버 등록). 스크린샷·좌표 클릭보다 UI 변경에 덜 깨지므로 `orca-evaluate`의 agent-e2e 스트림은 이 조합(agy + BrowserMCP)을 기본으로 한다 — 실제 launch 전 이 리포에서 BrowserMCP 연결 자체를 한 번 스모크 테스트할 것.
 
-스모크(2026-07-25, `agy -p ... --dangerously-skip-permissions`): `gemini-3.6-flash-high` 부팅·응답 exit 0. tool 호출(파일 읽기) 포함 2×2(trusted worktree/미등록 scratchpad × 플래그 유무, 저비용 모델로 게이트 자체만 확인)로 위 permission 게이트도 실측 확인(§ 위). 모델 세대 교체 시 재검증 후 verified_at 갱신.
+스모크(2026-07-25): `gemini-3.6-flash-high` 부팅·응답 exit 0, permission 게이트(위 참고)도 함께 확인. 모델 세대 교체 시 재검증 후 verified_at 갱신.
 
 quota·오류로 호출이 skip될 수 있다 — 그때의 대체 처리는 `orca-evaluate`/`orca-task-runner` 스킬의 폴백 절이 소유한다.
