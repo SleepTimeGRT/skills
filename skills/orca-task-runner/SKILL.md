@@ -17,6 +17,9 @@ description: Use when generating the implementation for one task (issue) — pro
   - `~/.agents/orca-workflows/models/claude-code.md`
   - `~/.agents/orca-workflows/models/codex.md`
   - `~/.agents/orca-workflows/models/agy.md`
+- 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 —
+  `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다. §3(launch)과 §5(폴링)에서
+  이 확인이 걸리는 지점을 표시한다.
 
 ## 1. Contract 제안 (generator 역할)
 
@@ -51,11 +54,20 @@ orca terminal create --worktree active --title task-impl-<n> \
 # codex
 orca terminal create --worktree active --title task-impl-<n> \
   --command "codex --model <model> -c model_reasoning_effort=<effort> -s workspace-write -a never" --json
-# agy
+# agy — 프롬프트는 파일에 먼저 쓰고 command substitution으로 전달한다(인라인 '<...>' quoting은
+# 괄호·따옴표·개행이 있는 프롬프트에서 라이브 셸 파싱 에러를 낸다 — orca-workflows/spawn-failures.md)
+prompt_file="$(mktemp "${TMPDIR:-/tmp}/agy-prompt-XXXXXX.txt")"
+cat > "$prompt_file" <<'PROMPT_EOF'
+<subtask 지침>
+PROMPT_EOF
 orca terminal create --worktree active --title task-impl-<n> \
-  --command "agy -p '<subtask 지침>' --model <model> --print-timeout 15m --dangerously-skip-permissions" --json
+  --command "agy -p \"\$(cat '$prompt_file')\" --model <model> --print-timeout 15m --dangerously-skip-permissions" --json
 orca terminal wait --terminal <impl-handle> --for tui-idle --timeout-ms 60000 --json   # agy는 --for exit --timeout-ms 960000
 ```
+
+`terminal wait`가 timeout이거나 생성 직후 `terminal read`에 셸 에러(예: `zsh: parse error`)가 보이면
+스폰 실패다 — 처음부터 재진단하지 않고 `~/.agents/orca-workflows/spawn-failures.md`에서 known
+signature부터 확인한다.
 
 (구현자는 빌드·테스트 실행이 필요해 Bash 전체 허용 — worktree 격리가 전제. 권한 stall 발견 시 조합을 조정하고 이 스킬에 반영.)
 
@@ -75,7 +87,8 @@ install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","even
 ```
 
 - ⚠️ **`check --wait` 단독 대기 금지**: coordinator가 Orca 터미널 내부 세션이면 worker_done이 check 큐로 안 잡힐 수 있다(task 상태는 정상 갱신됨). 기본 대기 = `task-list --brief --json` 상태 폴링 또는 커밋/파일 존재 감시(20-30s 간격), `check --wait`는 보조.
-- timeout·`count:0` = 체크포인트. `terminal read`로 생사 확인, 활동 중이면 계속 대기.
+- timeout·`count:0` = 체크포인트. `terminal read`로 생사 확인, 활동 중이면 계속 대기. 생사가 아니라
+  셸 에러/no-output이면 스폰 실패 — `~/.agents/orca-workflows/spawn-failures.md` 절차로.
 - decision_gate(워커 ask) → 판단 가능하면 `reply`, 불가하면 `orca-workflow`에 에스컬레이션.
 - worker_done 유실 복구: 커밋/산출물 확인 + `task-update --status completed` 수동 복구, 기록.
 

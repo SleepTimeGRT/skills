@@ -12,6 +12,9 @@ GitHub issue 하나를 받아 끝까지(merge까지) 가져가는 최상위 오�
 - `orca status --json` ready. 실패 시 아래 "폴백".
 - `gh issue view <num>`으로 issue 타입 확인(label 또는 body 구조로 epic/task 판별).
 - CLI 기반 coordinator(Codex/agy)는 launch 시 approval·sandbox를 명시한다. 기본 posture는 `-a never -s workspace-write`.
+- 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 —
+  `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다. §2a의 두 `terminal create` 호출
+  모두에 적용된다.
 
 ## 1. Epic 경로
 
@@ -59,8 +62,13 @@ install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","even
 # 이 스킬의 핵심 업무라서다(`~/.agents/orca-workflows/model-selection.md`의 Computer Use / Long-Context 축,
 # `skills/orca-evaluate/SKILL.md` §0 참고). 이 evaluate 세션이 diff 자체를 판단하지는 않는다 —
 # 그건 evaluate가 내부에서 스폰하는 별도 code-reviewer 세션(강한 reasoning 모델)의 몫이다.
+# 프롬프트는 파일에 먼저 쓰고 command substitution으로 전달(인라인 quoting 파싱 실패 회피 — spawn-failures.md)
+prompt_file="$(mktemp "${TMPDIR:-/tmp}/agy-prompt-XXXXXX.txt")"
+cat > "$prompt_file" <<'PROMPT_EOF'
+<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문>
+PROMPT_EOF
 orca terminal create --worktree active --title task-evaluate-<n> \
-  --command "agy -p '<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문>' --model <token> --print-timeout 15m --dangerously-skip-permissions" --json
+  --command "agy -p \"\$(cat '$prompt_file')\" --model <token> --print-timeout 15m --dangerously-skip-permissions" --json
 orca orchestration task-create --spec "<diff 또는 제안서 경로 + issue 번호 + 요청 모드>" --json
 orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
 printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","issue":"<issue-num>","task_id":"<task_id>","provider":"agy","model":"<model>","effort":"","terminal":"<evaluate-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \

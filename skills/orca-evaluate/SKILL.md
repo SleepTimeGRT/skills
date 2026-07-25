@@ -11,11 +11,16 @@ task(issue) 하나를 **1회** 평가한다(subtask마다 하지 않음). 코드
 
 ## 0. 이 세션 자체의 launch
 
-`orca-workflow`가 이 스킬을 orchestration으로 띄운다 — orca-workflow 자신이 직접 실행하는 게 아니라 별도 터미널을 만들어 넘긴다:
+`orca-workflow`가 이 스킬을 orchestration으로 띄운다 — orca-workflow 자신이 직접 실행하는 게 아니라 별도 터미널을 만들어 넘긴다. 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 — `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다. 이 확인은 여기 §0뿐 아니라 아래 §1·§2·§3의 `terminal create` 호출 전부에 적용된다.
 
 ```bash
+# 프롬프트는 파일에 먼저 쓰고 command substitution으로 전달(인라인 quoting 파싱 실패 회피 — spawn-failures.md)
+prompt_file="$(mktemp "${TMPDIR:-/tmp}/agy-prompt-XXXXXX.txt")"
+cat > "$prompt_file" <<'PROMPT_EOF'
+<이 SKILL.md 지침 + diff 경로 + issue 원문 acceptance criteria>
+PROMPT_EOF
 orca terminal create --worktree active --title task-evaluate-<n> \
-  --command "agy -p '<이 SKILL.md 지침 + diff 경로 + issue 원문 acceptance criteria>' --model <token> --print-timeout 15m --dangerously-skip-permissions" --json
+  --command "agy -p \"\$(cat '$prompt_file')\" --model <token> --print-timeout 15m --dangerously-skip-permissions" --json
 orca orchestration task-create --spec "<diff 경로 + issue 번호 + PASS/FAIL/ESCALATE 요청>" --json
 orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
 ```
@@ -51,8 +56,13 @@ install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","even
 앱을 직접 조작하는 e2e. Playwright MCP(accessibility-tree 기반이라 스크린샷·좌표 클릭보다 UI 변경에 덜 깨진다)를 붙인 agy(Gemini) 세션을 별도 터미널로 스폰한다 — 이 세션 자체가 이미 에이전트이므로, worker_done에 자기가 무엇을 했고 무엇이 실패했는지 자연어 요약을 실어 보낸다. (e2e·pgTAP은 더 이상 여기서 돌지 않는다 — `orca-task-runner`의 task-레벨 게이트로 이관되어 이 스킬에 들어오는 diff는 이미 그 둘을 통과한 상태다. evaluator는 그 사실을 전량 신뢰하고 재검증하지 않는다.)
 
 ```bash
+# 프롬프트는 파일에 먼저 쓰고 command substitution으로 전달(인라인 quoting 파싱 실패 회피 — spawn-failures.md)
+prompt_file="$(mktemp "${TMPDIR:-/tmp}/agy-prompt-XXXXXX.txt")"
+cat > "$prompt_file" <<'PROMPT_EOF'
+<Playwright MCP 지침 + 테스트 시나리오>
+PROMPT_EOF
 orca terminal create --worktree active --title eval-agent-e2e \
-  --command "agy -p '<Playwright MCP 지침 + 테스트 시나리오>' --model <token> --print-timeout 15m --dangerously-skip-permissions" --json
+  --command "agy -p \"\$(cat '$prompt_file')\" --model <token> --print-timeout 15m --dangerously-skip-permissions" --json
 orca orchestration task-create --spec "<앱 URL/worktree 경로 + 테스트 시나리오 + 실패 시 무엇을 관찰했는지 요약해서 worker_done에 실어달라는 지침>" --json
 orca orchestration dispatch --task <task_id> --to <agent-e2e-handle> --inject --json
 printf '{"ts":"%s","event":"assign","skill":"orca-evaluate","role":"agent-e2e","issue":"<issue-num>","task_id":"<task_id>","provider":"agy","model":"<model>","effort":"","terminal":"<agent-e2e-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
