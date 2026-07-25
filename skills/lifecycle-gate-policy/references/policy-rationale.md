@@ -68,6 +68,28 @@ repo self-contained (a generated repo must never depend on this skills repo at
 runtime — repository rule) while making drift visible and reversible: improve
 the template here, re-apply everywhere, or upstream a repo's local improvement.
 
+## E2E skip for diff-provably-inert changes (2026-07-25)
+
+- Motivating problem: a diff can be one file with no possible runtime effect (e.g. a
+  `.gitignore`-only change) while `premerge.sh` still runs the full e2e suite
+  unconditionally — no test-impact analysis or selective run exists in the e2e runners
+  this policy targets (Playwright et al.), and `token_gate_capture` only compacts output,
+  it never skips execution. That makes a trivial chore PR cost the same as a feature PR.
+- `E2E_EXEMPT_REGEX` closes this the same way `REVIEW_EXEMPT_REGEX` already does:
+  diff-based, opt-in (empty default = current behavior, no repo is affected until it
+  sets a pattern), and skip only when *every* changed path matches — one non-matching
+  path anywhere in the diff forces the normal run.
+- Kept independent from `REVIEW_EXEMPT_REGEX` on purpose: e2e-skippable and
+  review-skippable are different claims about a diff (an e2e suite may not exercise a
+  path that a human reviewer still cares about, or vice versa). A repo that wants both
+  skipped together points both regexes at the same pattern; the script does not merge
+  them.
+- Safety argument is mechanical, not a claim about agent good behavior:
+  `scripts/premerge.conf.sh` — where `E2E_EXEMPT_REGEX` lives — is itself inside
+  `PROTECTED_REGEX` (gate-integrity check, stage 2). An agent cannot widen the exemption
+  and have that wider exemption apply within the same PR; widening it always routes to
+  a human merge first.
+
 ## Superseded arrangements (for archaeology)
 
 - medicount: husky + `verify:ci` stamp gate in pre-push (stamp made sense when

@@ -23,6 +23,7 @@ cd "$REPO_ROOT"
 VERIFY_CMD="pnpm verify"
 E2E_CMD="" # e.g. "pnpm test:e2e:ci"; empty = repo has no merge-blocking e2e
 REVIEW_EXEMPT_REGEX='(^|/)docs/|\.(md|mdx|txt)$'
+E2E_EXEMPT_REGEX="" # empty = no exemption, e2e always runs when E2E_CMD is set
 PROTECTED_EXTRA_REGEX="" # repo-specific additions to the protected set
 PROTECTED_SCRIPT_KEYS="" # space-separated package.json script keys to guard; empty = guard the whole scripts block
 CONF="$REPO_ROOT/scripts/premerge.conf.sh"
@@ -127,8 +128,27 @@ fi
 # ---- 4. full verification -------------------------------------------------------
 # *_CMD strings run through `bash -c` so quoting inside them behaves like a shell line.
 token_gate_capture premerge:verify -- bash -c "$VERIFY_CMD"
+
+E2E_NOTE=""
 if [ -n "$E2E_CMD" ]; then
-  token_gate_capture premerge:e2e -- bash -c "$E2E_CMD"
+  # Skip only when EVERY changed path matches E2E_EXEMPT_REGEX (unset = never skip,
+  # matching prior behavior). A diff that is entirely docs/config-only cannot change
+  # e2e's outcome; anything else runs the suite as before. Widening this regex itself
+  # requires a human merge — scripts/premerge.conf.sh is inside PROTECTED_REGEX (step 2),
+  # so an agent cannot both loosen the exemption and benefit from it in the same PR.
+  E2E_NON_EXEMPT=""
+  if [ -n "$E2E_EXEMPT_REGEX" ]; then
+    E2E_NON_EXEMPT=$(printf '%s\n' "$CHANGED" | grep -Ev "$E2E_EXEMPT_REGEX" || true)
+  else
+    E2E_NON_EXEMPT=$CHANGED
+  fi
+  if [ -z "$E2E_NON_EXEMPT" ]; then
+    printf '[premerge] SKIP e2e — all changed paths match E2E_EXEMPT_REGEX\n'
+    E2E_NOTE=" (e2e skipped — E2E_EXEMPT_REGEX)"
+  else
+    token_gate_capture premerge:e2e -- bash -c "$E2E_CMD"
+    E2E_NOTE=" (e2e ran)"
+  fi
 fi
 
-printf '[premerge] PASS — self-merge allowed (squash only, one PR at a time; re-run if origin/%s moves)\n' "$DEFAULT_BRANCH"
+printf '[premerge] PASS — self-merge allowed%s (squash only, one PR at a time; re-run if origin/%s moves)\n' "$E2E_NOTE" "$DEFAULT_BRANCH"
