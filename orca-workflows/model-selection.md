@@ -54,7 +54,6 @@ Target the highest practical reasoning tier.
 |----------|-------|--------|
 | Claude | Opus 4.8 | xhigh |
 | Codex | GPT-5.6 Sol | xhigh |
-| Gemini | Flash | high (highest available) |
 
 Use these for:
 
@@ -103,23 +102,6 @@ Escalate to Sol when additional reasoning is required.
 
 ---
 
-### Gemini
-
-Generator
-
-- Flash @ high
-
-Preferred when:
-
-- quota efficiency matters
-- many parallel workers
-- drafting
-- routine implementation
-
-Escalate to Codex Terra or Claude when reasoning becomes the bottleneck.
-
----
-
 ## Simple
 
 Use the fastest inexpensive model.
@@ -149,7 +131,7 @@ Do **not** reach for this axis just because a stream produces a log. Determinist
 
 | Provider | Model | Why |
 |----------|-------|-----|
-| Gemini (agy) | `gemini-3.6-flash` | OSWorld-Verified computer use 78.4%→83%; GDM-MRCR v2 128k long-context 77.3%→91.8% (released 2026-07-21). See `~/.agents/orca-workflows/models/agy.md` for the current smoke-test status before defaulting to it — a new model generation on this axis still needs the same launch verification as any other. |
+| Gemini (agy) | `gemini-3.6-flash` | OSWorld-Verified computer use 78.4%→83%; BU Benchmark (browser automation) 58%→68%; GDM-MRCR v2 128k long-context 77.3%→91.8% (released 2026-07-21, smoke-tested — see `~/.agents/orca-workflows/models/agy.md`). |
 
 `orca-evaluate`'s own session (§2 agent-e2e test gate and its raw-trace re-check, plus §4 final report synthesis — see `skills/orca-evaluate/SKILL.md`) is the current consumer of this axis. e2e and pgTAP no longer flow through `orca-evaluate` at all (they're gated in `orca-task-runner` before handoff, deterministically, with no model involved). Its two spawned coding-agent sub-sessions (§1 contract review, §3 code review) are deliberately *not* consumers — those stay on the High Risk tier above.
 
@@ -159,9 +141,8 @@ Do **not** reach for this axis just because a stream produces a log. Determinist
 
 If multiple providers are appropriate:
 
-1. Gemini Flash
-2. Claude Sonnet 5
-3. Codex Terra
+1. Claude Sonnet 5
+2. Codex Terra
 
 Escalate immediately to higher tiers for:
 

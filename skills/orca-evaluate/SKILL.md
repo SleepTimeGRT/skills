@@ -15,12 +15,12 @@ task(issue) 하나를 **1회** 평가한다(subtask마다 하지 않음). 코드
 
 ```bash
 orca terminal create --worktree active --title task-evaluate-<n> \
-  --command "agy -p '<이 SKILL.md 지침 + diff 경로 + issue 원문 acceptance criteria>' --model <token> --print-timeout 15m" --json
+  --command "agy -p '<이 SKILL.md 지침 + diff 경로 + issue 원문 acceptance criteria>' --model <token> --print-timeout 15m --dangerously-skip-permissions" --json
 orca orchestration task-create --spec "<diff 경로 + issue 번호 + PASS/FAIL/ESCALATE 요청>" --json
 orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
 ```
 
-**이 세션은 기본적으로 agy(Gemini)로 뜬다** — §2의 agent e2e 실행과 §4의 리포트 합성이 이 세션의 핵심 업무이고, Gemini의 속도·비용·컴퓨터 사용 강점이 정확히 여기에 맞기 때문이다(`~/.agents/orca-workflows/model-selection.md`의 Computer Use / Long-Context 축, `~/.agents/orca-workflows/models/agy.md` 참고). e2e·pgTAP은 이 세션에 들어오지 않는다 — `orca-task-runner`의 task-레벨 게이트(`skills/orca-task-runner/SKILL.md` §6)를 이미 통과한 뒤에만 이 스킬이 호출되기 때문에 전량 신뢰하고 재검증하지 않는다. `gemini-3.6-flash`는 아직 이 리포에서 스모크 테스트 전이므로, 검증 전엔 `gemini-3.5-flash-high`로 launch한다.
+**이 세션은 기본적으로 agy(Gemini)로 뜬다** — §2의 agent e2e 실행과 §4의 리포트 합성이 이 세션의 핵심 업무이고, Gemini의 속도·비용·컴퓨터 사용 강점이 정확히 여기에 맞기 때문이다(`~/.agents/orca-workflows/model-selection.md`의 Computer Use / Long-Context 축, `~/.agents/orca-workflows/models/agy.md` 참고). e2e·pgTAP은 이 세션에 들어오지 않는다 — `orca-task-runner`의 task-레벨 게이트(`skills/orca-task-runner/SKILL.md` §6)를 이미 통과한 뒤에만 이 스킬이 호출되기 때문에 전량 신뢰하고 재검증하지 않는다. `gemini-3.6-flash`로 launch한다(스모크 완료, `~/.agents/orca-workflows/models/agy.md` 참고).
 
 **단, §1(Contract 검토)과 §3(Diff 리뷰)의 실제 판단은 이 세션의 몫이 아니다.** 둘 다 "코드/구현이 기술적으로 타당한가"를 보는 일이고, Gemini는 `model-selection.md`의 High Risk tier(production review/final approval)에서 SWE-Bench Pro 기준 Opus/Sol 앵커보다 낮다고 리포 스스로 표시해둔 지점이다 — 그래서 이 세션(evaluator)은 두 판단 모두 **강한 coding 모델 세션을 스폰**해서 맡기고, 자신은 relay + 최종 리포트 합성만 한다.
 
@@ -52,7 +52,7 @@ install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","even
 
 ```bash
 orca terminal create --worktree active --title eval-agent-e2e \
-  --command "agy -p '<Playwright MCP 지침 + 테스트 시나리오>' --model <token> --print-timeout 15m" --json
+  --command "agy -p '<Playwright MCP 지침 + 테스트 시나리오>' --model <token> --print-timeout 15m --dangerously-skip-permissions" --json
 orca orchestration task-create --spec "<앱 URL/worktree 경로 + 테스트 시나리오 + 실패 시 무엇을 관찰했는지 요약해서 worker_done에 실어달라는 지침>" --json
 orca orchestration dispatch --task <task_id> --to <agent-e2e-handle> --inject --json
 printf '{"ts":"%s","event":"assign","skill":"orca-evaluate","role":"agent-e2e","issue":"<issue-num>","task_id":"<task_id>","provider":"agy","model":"<model>","effort":"","terminal":"<agent-e2e-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \

@@ -53,7 +53,7 @@ orca terminal create --worktree active --title task-impl-<n> \
   --command "codex --model <model> -c model_reasoning_effort=<effort> -s workspace-write -a never" --json
 # agy
 orca terminal create --worktree active --title task-impl-<n> \
-  --command "agy -p '<subtask 지침>' --model <model> --print-timeout 15m" --json
+  --command "agy -p '<subtask 지침>' --model <model> --print-timeout 15m --dangerously-skip-permissions" --json
 orca terminal wait --terminal <impl-handle> --for tui-idle --timeout-ms 60000 --json   # agy는 --for exit --timeout-ms 960000
 ```
 
