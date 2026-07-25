@@ -60,7 +60,7 @@ install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","even
 # `skills/orca-evaluate/SKILL.md` §0 참고). 이 evaluate 세션이 diff 자체를 판단하지는 않는다 —
 # 그건 evaluate가 내부에서 스폰하는 별도 code-reviewer 세션(강한 reasoning 모델)의 몫이다.
 orca terminal create --worktree active --title task-evaluate-<n> \
-  --command "agy -p '<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문>' --model <token> --print-timeout 15m" --json
+  --command "agy -p '<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문>' --model <token> --print-timeout 15m --dangerously-skip-permissions" --json
 orca orchestration task-create --spec "<diff 또는 제안서 경로 + issue 번호 + 요청 모드>" --json
 orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
 printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","issue":"<issue-num>","task_id":"<task_id>","provider":"agy","model":"<model>","effort":"","terminal":"<evaluate-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
