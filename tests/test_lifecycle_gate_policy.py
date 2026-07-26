@@ -17,7 +17,6 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "token-gate.sh"
 MIGRATION_LINT = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "migration-lint.py"
 PREMERGE = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "scripts" / "premerge.sh"
-AUDIT = ROOT / "skills" / "lifecycle-gate-policy" / "scripts" / "audit.py"
 ASSETS = ROOT / "skills" / "lifecycle-gate-policy" / "assets"
 PRE_COMMIT = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "githooks" / "pre-commit"
 
@@ -681,51 +680,13 @@ class MigrationLintPremergeTests(PremergeFixture):
         self.assertIn("MIGRATION_LINT_REGEX unset", result.stderr)
 
 
-class AuditMigrationLintTests(GitFixture):
-    def setUp(self) -> None:
-        super().setUp()
-        run("git", "config", "user.email", "fixture@example.test", cwd=self.repo)
-        run("git", "config", "user.name", "Fixture", cwd=self.repo)
-
-    def run_audit(self) -> dict:
-        result = run(
-            sys.executable, str(AUDIT), "--repo", str(self.repo), "--format", "json",
-            cwd=self.repo, check=False,
-        )
-        return json.loads(result.stdout)
-
-    def find_check(self, report: dict, name: str) -> dict:
-        return next(r for r in report["results"] if r["check"] == name)
-
-    def test_missing_migration_lint_reports_missing(self) -> None:
-        run("git", "commit", "--allow-empty", "-qm", "init", cwd=self.repo)
-
-        report = self.run_audit()
-
-        check = self.find_check(report, "scripts/migration-lint.py")
-        self.assertEqual(check["status"], "MISSING")
-
-    def test_canonical_migration_lint_reports_pass(self) -> None:
-        self.write(
-            "scripts/migration-lint.py",
-            MIGRATION_LINT.read_text(encoding="utf-8"),
-            executable=True,
-        )
-        run("git", "commit", "-qm", "add migration-lint.py", cwd=self.repo)
-
-        report = self.run_audit()
-
-        check = self.find_check(report, "scripts/migration-lint.py")
-        self.assertEqual(check["status"], "PASS")
-
-    def test_drifted_migration_lint_reports_drift(self) -> None:
-        self.write("scripts/migration-lint.py", "# hand-edited, not canonical\n")
-        run("git", "commit", "-qm", "drift migration-lint.py", cwd=self.repo)
-
-        report = self.run_audit()
-
-        check = self.find_check(report, "scripts/migration-lint.py")
-        self.assertEqual(check["status"], "DRIFT")
+# audit.py no longer performs byte-diff (canonical sha256) checks against
+# assets/scripts/migration-lint.py or anything else — it is manifest- and
+# fixture-driven now. Equivalent coverage of the new audit.py interface
+# (MISSING/PASS/FAIL reporting, category checks, fixture results) lives in
+# tests/test_lifecycle_gate_conformance.py, kept in its own file so
+# mechanism-agnostic audit tests aren't mixed with these reference-
+# implementation behavior tests.
 
 
 if __name__ == "__main__":
