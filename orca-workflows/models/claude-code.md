@@ -17,7 +17,7 @@ launch: `claude --model <id> --effort <low|medium|high|xhigh|max>`. SDD 구현 �
 | `claude-sonnet-5` | 균형 | 통합·판단 구현 | high |
 | `claude-haiku-4-5-20251001` | 빠르고 저렴 | 전사·기계적 구현 | — (effort 미지원) |
 
-`claude-fable-5`는 사용하지 않는다 — Anthropic 공식 발표 기준(`anthropic.com/news/claude-opus-5`, 2026-07-26 확인) OSWorld 2.0·CursorBench 3.2에서 Fable 5와 동등 이상 성능을 절반 이하 가격($5/$25 vs $10/$50)으로 낸다. 상세 수치와 출처는 `../model-selection.md` Benchmarks 참조. high-risk 작업은 Opus 5로 통일한다. Fable 5가 맡던 "Routine이지만 설계 비중 큰 구현"은 Opus 5가 아니라 Sonnet 5(high)가 맡는다 — Opus 5를 primary generator로 쓰는 건 아래에 있는 대로 task 자체가 high-risk일 때뿐이고, 아키텍처 "결정" 자체는 High Risk tier로 승격한다.
+`claude-fable-5`는 사용하지 않는다 — Anthropic 공식 발표 기준(`anthropic.com/news/claude-opus-5`, 2026-07-26 확인) OSWorld 2.0·CursorBench 3.2에서 Fable 5와 동등 이상 성능을 절반 이하 가격($5/$25 vs $10/$50)으로 낸다. high-risk 작업은 Opus 5로 통일한다. Fable 5가 맡던 "Routine이지만 설계 비중 큰 구현"은 Opus 5가 아니라 Sonnet 5(high)가 맡는다 — Opus 5를 primary generator로 쓰는 건 아래에 있는 대로 task 자체가 high-risk일 때뿐이고, 아키텍처 "결정" 자체는 High Risk tier로 승격한다.
 
 **Claude Code 안전 분류기가 launch 모델을 바꿀 수 있다 (Automatic model fallback).** cybersecurity/biology로 flag된 요청은 launch한 모델이 아니라 다음 모델에서 재실행된다 — worker의 실제 실행 모델은 launch 인자만으로 보장되지 않는다:
 
@@ -34,6 +34,6 @@ launch: `claude --model <id> --effort <low|medium|high|xhigh|max>`. SDD 구현 �
 - Opus를 primary generator로 직접 쓰는 건 task가 high-risk일 때뿐.
 - Haiku 4.5는 Anthropic effort 파라미터 지원 모델 목록에 없다 → haiku 워커는 `--effort`를 **생략**한다. `--effort`는 나머지 2개 모델에만 준다.
 - effort 지원: xhigh/max는 Opus 5·Sonnet 5, high는 Haiku 제외 전 모델. **Opus 5의 API 기본값은 `high`다** — Opus 4.7/4.8의 "xhigh로 시작" 권장을 그대로 재사용하지 않는다. 공식 문서: "Start with high, the default... If you carried effort settings over from an earlier model, run a fresh effort sweep on your evals rather than reusing them"(`platform.claude.com/docs/en/build-with-claude/effort`, 2026-07-26 확인). architecture/auth/migration/crypto/production-review처럼 demanding한 coding·agentic 작업엔 `xhigh`로 올리는 것을 권장하고, `low`/`medium`은 평가로 품질이 유지되는 범위에서 주 비용 통제 수단으로 쓴다. max는 프런티어 문제 전용(과추론·비용 위험).
-- **Opus 5 @ xhigh를 다른 provider effort의 캘리브레이션 기준점으로 쓴다** — 단 Anthropic이 Opus 5의 SWE-Bench Pro 수치를 공식 공개하지 않으므로(2026-07-26 확인) 이건 "동일 축 벤치마크 비교"가 아니라 조직 내부 기준점이다. 축별 벤치마크와 출처는 `../model-selection.md` Benchmarks 참조.
+- **Opus 5 @ xhigh를 다른 provider effort의 캘리브레이션 기준점으로 쓴다** — 단 Anthropic이 Opus 5의 SWE-Bench Pro 수치를 공식 공개하지 않으므로(2026-07-26 확인) 이건 "동일 축 벤치마크 비교"가 아니라 조직 내부 기준점이다.
 
 evaluator로도 쓸 수 있다 — cross-model 강제 없음, fresh-context 원칙은 `orca-evaluate` 스킬 참조.
