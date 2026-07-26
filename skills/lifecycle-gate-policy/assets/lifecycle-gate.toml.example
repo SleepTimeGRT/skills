@@ -1,0 +1,49 @@
+# lifecycle-gate.toml — reference template.
+# This file is a reference: nothing requires copying it verbatim. Adapt
+# entrypoints, categories, and fixture config to what this repository
+# actually runs. See ../references/manifest-schema.md for the full schema
+# and ../references/policy-spec.md for what each category means and which
+# stages require which categories.
+
+policy_version = "2"
+
+# Required. A command that reproduces this repo's gate wiring in a fresh
+# checkout (e.g. `git clone --local`), where local git config such as
+# core.hooksPath is not carried over. Wiring only — never a dependency
+# install (node_modules may be symlinked from the original checkout, and an
+# install step here can mutate that original). See manifest-schema.md's
+# "Bootstrap (required)" section for why this field cannot be omitted.
+[bootstrap]
+entrypoint = "pnpm run prepare"
+
+# Each [stages.<name>] declares an observable entrypoint (a command or git
+# event) and the policy categories it is asserted to satisfy. The manifest
+# never describes *how* the entrypoint is implemented — hook manager choice
+# (husky/lefthook/.githooks/raw .git/hooks) is this repository's own call.
+
+[stages.pre-commit]
+entrypoint = "git commit"
+categories = ["secret-scan", "format-autofix"]   # secret-scan required; format-autofix optional
+
+[stages.pre-push]
+entrypoint = "git push"
+categories = ["static-verify"]                   # required
+
+[stages.premerge]
+entrypoint = "bash scripts/premerge.sh"
+categories = ["full-verify", "e2e", "protected-escalation"]
+# full-verify and protected-escalation required; e2e recommended when this
+# repo maintains an e2e suite (WARN, not FAIL, if omitted).
+
+# Optional. Names of conformance fixtures to run against this repository.
+# Omit [fixtures] entirely if none should run.
+[fixtures]
+enabled = ["biome-noop", "path-fallback", "delete-only-push"]
+
+# Fixture-specific data this repo must supply — never mechanism, only facts
+# about this repo (a real path, a timeout value).
+[fixtures.biome-noop]
+ignored_path = "src/lib/supabase/types.ts"   # a path actually in this repo's formatter ignore-set
+
+[fixtures.path-fallback]
+timeout_seconds = 60   # default is 60; override only if this repo's static-verify entrypoint is slower
