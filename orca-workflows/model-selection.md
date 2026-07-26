@@ -115,33 +115,6 @@ Escalate immediately to higher tiers for:
 
 ---
 
-# Benchmarks (Reference Only)
-
-These values are informational only. **Single-axis, cross-provider comparisons don't hold** — each lab reports its own suite, so a model leading on one axis can trail on another that neither side publishes in the same units. This is exactly why High Risk keeps cross-model gates (e.g. Claude generator + Codex reviewer) instead of picking one "best" model off this table.
-
-| Model | SWE-Bench Pro | 출처 |
-|--------|---------------|------|
-| GPT-5.6 Sol | 64.6% | 미검증 — 이번 재검증 대상은 Claude 쪽 소스뿐이었다. 출처는 `models/codex.md` 참조(거기도 출처 표기 없음) |
-| GPT-5.6 Terra | 63.4% | 미검증 — 이번 재검증 대상은 Claude 쪽 소스뿐이었다. 출처는 `models/codex.md` 참조(거기도 출처 표기 없음) |
-| Gemini 3.6 Flash | 58.7% | 2026-07-25 웹 리서치(codingfleet.com SWE-bench Pro leaderboard, buildfastwithai.com 교차확인) — `models/agy.md` |
-| Claude Opus 5 | 미공개 | Anthropic이 공식 공개하지 않음(2026-07-26 확인, `anthropic.com/news/claude-opus-5`의 벤치마크 목록은 Frontier-Bench v0.1·CursorBench 3.2·ARC-AGI 3·Zapier AutomationBench·OSWorld 2.0·GDPval-AA v2·HLEAutomationBench·DeepSearchQA뿐, SWE-Bench Pro 없음) — 위 세 수치와 직접 비교 불가 |
-
-Claude Opus 5 자체 벤치마크(Anthropic 공식 발표 원문, 2026-07-26 확인 — 수치가 아니라 정성적 비교만 공개됨):
-
-- Frontier-Bench v0.1: "Opus 5 surpasses all other models, and more than doubles Opus 4.8's performance at a lower cost per task."
-- CursorBench 3.2: "At max effort, the model performs within 0.5% of Fable 5's peak score, but at half the cost per task."
-- ARC-AGI 3: "Opus 5's score is three times as high as the next-best model."
-- OSWorld 2.0: "Opus 5 outperforms every other model at any given cost, surpassing Fable 5's best result at just over a third of the cost."
-- 가격: $5/$25 per 1M 토큰(input/output) — Opus 4.8과 동일. Fable 5는 $10/$50.
-
-이전 버전에 있던 "SWE-bench Verified 96% vs 95%", "Frontier-Bench 43.3% vs 33.7%", "GDPval-AA v2 1,861 vs 1,747" 수치는 2026-07-25 제3자 웹 리서치(codersera.com·benchlm.ai)로만 확인됐던 것으로, 이번 재검증에서 Anthropic 공식 소스로 재확인되지 않아 제거했다 — Anthropic은 이 벤치마크들에서 정성적 비교만 공개하고 구체적 스코어는 공개하지 않는다.
-
-Benchmarks help align tiers.
-
-Model selection should always be based on **task risk**, not benchmark scores alone.
-
----
-
 # Provider Documents
 
 - Claude Code
