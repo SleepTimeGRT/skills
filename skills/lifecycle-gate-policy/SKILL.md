@@ -50,10 +50,23 @@ python3 <skill-dir>/scripts/audit.py --repo <path> [--skip-fixtures] [--format t
 ```
 
 Read-only. The report checks whether manifest categories satisfy the policy and
-whether enabled conformance fixtures report `PASS`, `FAIL`, or `SKIP`; `SKIP` is
-not evidence of compliance. Premerge has no fixture and is reported as
-`NOT-EXERCISED`. The audit compares behavior and declared categories, not script
-bytes, so a repository-local implementation can conform.
+whether enabled conformance fixtures observed the declared stages. The audit
+compares behavior and declared categories, not script bytes, so a
+repository-local implementation can conform. Premerge has no fixture and is
+reported as `NOT-EXERCISED`.
+
+The verdict is fail-closed — absence of evidence is never compliance:
+
+| Verdict | Exit | Meaning |
+|---|---|---|
+| `COMPLIANT` | 0 | a fixture observed the policy holding, and nothing behavioral was inconclusive |
+| `STRUCTURE-ONLY` | 0 | `--skip-fixtures`: the declaration was checked, no stage was observed |
+| `UNVERIFIED` | 3 | nothing failed, but a fixture skipped or warned, or none ran |
+| `NON-COMPLIANT` | 1 | a check failed outright (`FAIL` / `MISSING`) |
+
+A skipped fixture, an unimplemented fixture name, a bootstrap entrypoint that
+does not run, and a manifest declaring no fixtures all keep a repository out of
+`COMPLIANT`. Treat exit 3 as "not yet shown to work", not as "fine".
 
 Read [references/policy-spec.md](references/policy-spec.md) for required stages and
 categories, [references/manifest-schema.md](references/manifest-schema.md) for the
@@ -90,9 +103,12 @@ Audit first; apply only when the user asks. One repository per commit. Steps:
 5. Insert or adapt `assets/agents-policy.md` in the repo's AGENTS.md, adjusting
    only repo-specific facts. Fix any docs the audit or diff
    reveals as stale (hooks or workflows they describe that no longer exist).
-6. Run `audit.py` — it must exit COMPLIANT. Verify hooks fire: make a scratch
-   commit (pre-commit), push a WIP branch (pre-push), run `pnpm premerge` on a
-   branch with a trivial change.
+6. Run `audit.py` — it must reach `COMPLIANT`, which requires fixtures that
+   actually observed the stages. `UNVERIFIED` (exit 3) means the manifest is
+   declared but unproven: read which fixture skipped and fix that, rather than
+   accepting the declaration. Then confirm by hand: make a scratch commit
+   (pre-commit), push a WIP branch (pre-push), run premerge on a branch with a
+   trivial change.
 
 ## Boundaries
 

@@ -10,8 +10,17 @@ in a disposable `git clone --local` copy with `origin` removed.
 Usage:
     python3 audit.py --repo /path/to/repo [--skip-fixtures] [--format text|json]
 
-Exit code 0 = compliant (only PASS/WARN/SKIP/NOT-EXERCISED present),
-1 = FAIL or MISSING present.
+The verdict is fail-closed: absence of evidence is never compliance.
+
+    COMPLIANT      exit 0  at least one fixture observed the policy holding, and
+                           nothing was inconclusive
+    STRUCTURE-ONLY exit 0  --skip-fixtures was requested, so no behavioral claim
+                           is made at all — this is not evidence of compliance
+    UNVERIFIED     exit 3  nothing failed, but the evidence is incomplete: a
+                           fixture was skipped or warned, or none ran
+    NON-COMPLIANT  exit 1  a check failed outright (FAIL / MISSING)
+
+exit 2 is reserved for usage errors (e.g. --repo is not a git repository).
 """
 
 from __future__ import annotations
@@ -26,6 +35,8 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
+
+from conformance.harness import BOOTSTRAP_FAILED_PREFIX  # noqa: E402  (needs SCRIPT_DIR on sys.path)
 
 POLICY_VERSION = "2"
 
@@ -46,6 +57,32 @@ REQUIRED_CATEGORIES = {
 }
 
 TERMINAL_FAIL_STATUSES = {"FAIL", "MISSING"}
+
+# Neither a failure nor evidence. A skipped fixture means the policy went
+# unobserved — the manifest's claim is untested, so it cannot be certified.
+INCONCLUSIVE_STATUSES = {"WARN", "SKIP"}
+
+# Checks that report what was *observed*. An inconclusive result here means the
+# behavioral claim is untested and the repo cannot be certified. Structural checks
+# are excluded on purpose: their advisory WARNs (e.g. "no e2e category declared —
+# recommended, not required") are advice about the declaration, not missing evidence.
+BEHAVIORAL_CHECK_PREFIXES = ("fixture:", "probe:", "fixtures", "behavioral-evidence", "bootstrap.behavioral")
+
+
+def is_behavioral(check: str) -> bool:
+    return check.startswith(BEHAVIORAL_CHECK_PREFIXES)
+
+VERDICT_COMPLIANT = "COMPLIANT"
+VERDICT_STRUCTURE_ONLY = "STRUCTURE-ONLY"
+VERDICT_UNVERIFIED = "UNVERIFIED"
+VERDICT_NON_COMPLIANT = "NON-COMPLIANT"
+
+EXIT_CODES = {
+    VERDICT_COMPLIANT: 0,
+    VERDICT_STRUCTURE_ONLY: 0,
+    VERDICT_NON_COMPLIANT: 1,
+    VERDICT_UNVERIFIED: 3,
+}
 
 
 def _result(check: str, status: str, detail: str) -> dict:
@@ -93,6 +130,14 @@ def check_structure(manifest: dict) -> list[dict]:
         results.append(_result("stages", "MISSING", "at least one [stages.<name>] table is required"))
 
     for stage_name, stage_cfg in stages.items():
+        if not (stage_cfg or {}).get("entrypoint"):
+            results.append(_result(
+                f"stages.{stage_name}.entrypoint",
+                "MISSING",
+                "required — the manifest's claim is that this stage is satisfied at a named "
+                "observable entrypoint; without it there is nothing to hold the repo to",
+            ))
+
         categories = set((stage_cfg or {}).get("categories") or [])
         unknown = categories - CATEGORY_VOCABULARY
         required = REQUIRED_CATEGORIES.get(stage_name)
@@ -146,7 +191,12 @@ def run_fixtures(repo: Path, manifest: dict) -> list[dict]:
     enabled = fixtures_cfg.get("enabled") or []
 
     if not enabled:
-        results.append(_result("fixtures", "SKIP", "no [fixtures].enabled declared in manifest"))
+        results.append(_result(
+            "fixtures",
+            "SKIP",
+            "no [fixtures].enabled declared — nothing observed the declared stages, so this "
+            "manifest cannot be certified compliant on its declaration alone",
+        ))
         return results
 
     for name in enabled:
@@ -169,7 +219,58 @@ def run_fixtures(repo: Path, manifest: dict) -> list[dict]:
             label = item.name if item.name.startswith("probe:") else f"fixture:{name}"
             results.append(_result(label, item.status, item.detail))
 
+    results.extend(summarize_behavior(results, enabled))
     return results
+
+
+def summarize_behavior(fixture_results: list[dict], enabled: list[str]) -> list[dict]:
+    """Top-level lines for facts that would otherwise hide inside fixture details."""
+    summary: list[dict] = []
+    fixtures = [r for r in fixture_results if r["check"].startswith("fixture:")]
+
+    # A bootstrap that cannot run is a manifest-level defect, not a fixture footnote:
+    # nothing downstream of it can produce evidence in this environment.
+    # Any one is enough: every fixture bootstraps the same way, so one failure means
+    # the declared entrypoint does not reproduce this repo's wiring here.
+    bootstrap_failed = [r for r in fixtures if BOOTSTRAP_FAILED_PREFIX in r["detail"]]
+    if bootstrap_failed:
+        summary.append(_result(
+            "bootstrap.behavioral",
+            "FAIL",
+            "[bootstrap].entrypoint did not succeed in a scratch clone, so no fixture could "
+            f"reproduce this repo's gate wiring: {bootstrap_failed[0]['detail']}",
+        ))
+
+    observed = [r["check"] for r in fixtures if r["status"] == "PASS"]
+    if observed:
+        summary.append(_result(
+            "behavioral-evidence",
+            "PASS",
+            f"{len(observed)} of {len(enabled)} declared fixture(s) observed the policy holding: "
+            + ", ".join(sorted(observed)),
+        ))
+    else:
+        summary.append(_result(
+            "behavioral-evidence",
+            "SKIP",
+            f"none of the {len(enabled)} declared fixture(s) observed the policy holding — "
+            "a skipped or unimplemented fixture is not evidence of compliance",
+        ))
+    return summary
+
+
+def decide_verdict(results: list[dict], skip_fixtures: bool) -> str:
+    """Fail-closed: only observed behavior earns COMPLIANT."""
+    if any(r["status"] in TERMINAL_FAIL_STATUSES for r in results):
+        return VERDICT_NON_COMPLIANT
+    if skip_fixtures:
+        # The caller asked for structure only, so no behavioral claim is made.
+        # Reported as its own verdict rather than as compliance.
+        return VERDICT_STRUCTURE_ONLY
+    if any(is_behavioral(r["check"]) and r["status"] in INCONCLUSIVE_STATUSES for r in results):
+        return VERDICT_UNVERIFIED
+    observed = any(r["check"].startswith("fixture:") and r["status"] == "PASS" for r in results)
+    return VERDICT_COMPLIANT if observed else VERDICT_UNVERIFIED
 
 
 def audit(repo: Path, skip_fixtures: bool) -> dict:
@@ -181,12 +282,21 @@ def audit(repo: Path, skip_fixtures: bool) -> dict:
     else:
         results.extend(check_structure(manifest))
         if skip_fixtures:
-            results.append(_result("fixtures", "SKIP", "--skip-fixtures: structural checks only"))
+            results.append(_result(
+                "fixtures",
+                "SKIP",
+                "--skip-fixtures: structural checks only — no stage was observed",
+            ))
         else:
             results.extend(run_fixtures(repo, manifest))
 
-    compliant = not any(r["status"] in TERMINAL_FAIL_STATUSES for r in results)
-    return {"repo": str(repo), "compliant": compliant, "results": results}
+    verdict = decide_verdict(results, skip_fixtures)
+    return {
+        "repo": str(repo),
+        "verdict": verdict,
+        "compliant": verdict == VERDICT_COMPLIANT,
+        "results": results,
+    }
 
 
 def render_text(report: dict) -> str:
@@ -194,9 +304,8 @@ def render_text(report: dict) -> str:
     width = max((len(r["check"]) for r in report["results"]), default=0)
     for r in report["results"]:
         lines.append(f"[{r['status']:>13}] {r['check']:<{width}}  {r['detail']}")
-    verdict = "COMPLIANT" if report["compliant"] else "NON-COMPLIANT"
     lines.append("")
-    lines.append(f"{Path(report['repo']).name}: {verdict}")
+    lines.append(f"{Path(report['repo']).name}: {report['verdict']}")
     return "\n".join(lines)
 
 
@@ -219,7 +328,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(render_text(report))
 
-    return 0 if report["compliant"] else 1
+    return EXIT_CODES[report["verdict"]]
 
 
 if __name__ == "__main__":

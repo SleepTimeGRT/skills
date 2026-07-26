@@ -75,13 +75,12 @@ proof that a stage is live.
 
 ## Why policy and implementation are separate
 
-The pilot data exposed the limit of byte-diff auditing. The current
-`.githooks/pre-commit` files in medicount, toss-samhaengsi, and toss-space-goldrush
-all report `DRIFT`: medicount has the v2 biome no-op exception improvement, while
-the other two omit the three `token-gate.sh` source lines. Treating all three as the
-same `DRIFT` loses the distinction between an improvement and a missing safety
-behavior. Behavior-based conformance can make that distinction; a hash comparison
-cannot.
+A hash comparison answers "is this file the canonical bytes?", which is not the
+question the policy asks. Two repositories can diverge from a template by the same
+measured amount while one has fixed a real hook bug and the other has dropped a
+safety behavior; byte comparison scores them identically. Only observing what the
+stage does with a commit or a push separates them, so conformance is defined by
+behavior and the audit refuses to certify a stage it did not observe.
 
 ## E2E skip for diff-provably-inert changes (2026-07-25)
 

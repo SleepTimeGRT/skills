@@ -71,7 +71,7 @@ At least one `[stages.<name>]` table must be present. Each declares:
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `entrypoint` | string | yes | An observable command/event for this stage — e.g. `git commit`, `git push`, a premerge script invocation. Mechanism-agnostic: the harness runs this and observes its outcome, never its implementation. |
+| `entrypoint` | string | yes | An observable command/event for this stage — e.g. `git commit`, `git push`, a premerge script invocation. Mechanism-agnostic: what is observed is the entrypoint's outcome, never its implementation. Its presence is checked; see the coverage note below for which entrypoints the shipped fixtures actually drive. |
 | `categories` | array of strings | yes | Category names (from the vocabulary in policy-spec.md) that this stage's entrypoint is asserted to enforce. |
 
 Recognized stage names for this manifest version: `pre-commit`, `pre-push`,
@@ -157,3 +157,31 @@ timeout_seconds = 60
 | A declared stage's `categories` does not cover that stage's required set (policy-spec.md) | `FAIL` |
 | A category name is outside the vocabulary | `FAIL` |
 | `premerge` categories omit `e2e` | `WARN` |
+
+### What the shipped fixtures actually drive
+
+The three fixtures in this skill drive `git commit` (pre-commit) and `git push`
+(pre-push) directly. A stage that declares a different entrypoint — `make gate`,
+a wrapper script — has its declaration recorded and its presence checked, but no
+shipped fixture observes it, so it cannot contribute behavioral evidence. The
+`premerge` stage is in that position by design and is reported `NOT-EXERCISED`.
+
+Declaring an entrypoint no fixture drives is allowed; mistaking it for verified
+coverage is the failure to avoid. The audit never reports `COMPLIANT` on the
+strength of a declaration alone — see [Verdicts](#verdicts).
+
+## Verdicts
+
+The audit's verdict is fail-closed: a declaration that no fixture observed is
+never reported as compliance.
+
+| Verdict | Exit | Reached when |
+|---|---|---|
+| `COMPLIANT` | 0 | at least one fixture reported `PASS` and no behavioral check was `WARN`/`SKIP` |
+| `STRUCTURE-ONLY` | 0 | `--skip-fixtures` was passed — the declaration was checked, nothing was observed |
+| `UNVERIFIED` | 3 | no failures, but evidence is incomplete: a fixture skipped or warned, an enabled fixture name is unimplemented, or `[fixtures]` declares none |
+| `NON-COMPLIANT` | 1 | any check is `FAIL` or `MISSING`, including a `[bootstrap].entrypoint` that does not succeed in a scratch clone |
+
+Advisory structural warnings (for example "no `e2e` category declared —
+recommended, not required") are advice about the declaration, not missing
+evidence, and do not block `COMPLIANT`.

@@ -329,10 +329,16 @@ class AuditStructuralTests(ManifestRepo):
         result, report = self.run_audit("--skip-fixtures")
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertTrue(report["compliant"])
-        # compliant=True already proves no check failed merely because husky is
-        # present; this additionally proves no check specifically targets husky
-        # as a mechanism (the removed LEGACY/dependency:husky machinery).
+        # Structure-only: nothing ran, so this is explicitly not a compliance claim.
+        self.assertEqual(report["verdict"], "STRUCTURE-ONLY")
+        self.assertFalse(report["compliant"])
+        self.assertFalse(
+            [r for r in report["results"] if r["status"] in ("FAIL", "MISSING")],
+            report,
+        )
+        # No check failed merely because husky is present; this additionally proves
+        # no check specifically targets husky as a mechanism (the removed
+        # LEGACY/dependency:husky machinery).
         for r in report["results"]:
             self.assertNotIn("husky", r["check"].lower())
             if r["status"] in ("FAIL", "WARN"):
@@ -349,7 +355,7 @@ class AuditFixtureTests(ManifestRepo):
         result, report = self.run_audit()
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(set(report.keys()), {"repo", "compliant", "results"})
+        self.assertEqual(set(report.keys()), {"repo", "verdict", "compliant", "results"})
         self.assertTrue(report["compliant"], report)
         for r in report["results"]:
             self.assertEqual(set(r.keys()), {"check", "status", "detail"})
@@ -472,3 +478,76 @@ class ProbeReportingTests(ManifestRepo):
         fixture_check = self.find_check(report, "fixture:biome-noop")
         self.assertEqual(fixture_check["status"], "SKIP", fixture_check["detail"])
         self.assertIn("fixture-inapplicable", fixture_check["detail"])
+
+
+class FailClosedVerdictTests(ManifestRepo):
+    """The verdict layer must never certify a repository it did not observe.
+
+    Reproduces the fail-open case found in diff review: a repo with no hooks at
+    all, a bootstrap that cannot run, and a misspelled fixture was reported
+    COMPLIANT with exit 0 because SKIP and WARN were non-terminal.
+    """
+
+    def test_audit_does_not_certify_repo_with_no_working_gates(self) -> None:
+        self.write_manifest(
+            compliant_manifest(fixtures_enabled=("delete-only-push", "typo-fixture"))
+            .replace('entrypoint = "git config core.hooksPath .githooks"', 'entrypoint = "false"')
+        )
+        self.commit("no hooks, bootstrap always fails, one fixture name misspelled")
+
+        result, report = self.run_audit()
+
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertNotEqual(report["verdict"], "COMPLIANT")
+        self.assertFalse(report["compliant"])
+        # A failing bootstrap is promoted out of the fixture detail into its own
+        # terminal line: nothing downstream of it can produce evidence.
+        bootstrap_check = self.find_check(report, "bootstrap.behavioral")
+        self.assertEqual(bootstrap_check["status"], "FAIL")
+        self.assertEqual(report["verdict"], "NON-COMPLIANT")
+
+    def test_audit_does_not_certify_when_no_fixtures_declared(self) -> None:
+        self.write_manifest(compliant_manifest())
+        self.commit("structurally valid, declares no fixtures")
+
+        result, report = self.run_audit()
+
+        self.assertEqual(report["verdict"], "UNVERIFIED")
+        self.assertFalse(report["compliant"])
+        self.assertEqual(result.returncode, 3)
+        self.assertEqual(self.find_check(report, "fixtures")["status"], "SKIP")
+
+    @pytest.mark.slow
+    def test_audit_does_not_certify_when_a_fixture_skips(self) -> None:
+        # The fixture cannot run (no ignored_path configured), so nothing observed
+        # the pre-commit stage. A SKIP must not be promoted to compliance.
+        self.install_gitleaks_pre_commit()
+        self.install_static_pre_push()
+        self.write_manifest(compliant_manifest(fixtures_enabled=("biome-noop", "delete-only-push")))
+        self.commit("one fixture observes, one skips")
+
+        result, report = self.run_audit()
+
+        self.assertEqual(self.find_check(report, "fixture:biome-noop")["status"], "SKIP")
+        self.assertEqual(self.find_check(report, "fixture:delete-only-push")["status"], "PASS")
+        self.assertEqual(report["verdict"], "UNVERIFIED")
+        self.assertEqual(result.returncode, 3)
+
+    @pytest.mark.slow
+    def test_advisory_structural_warning_does_not_block_compliance(self) -> None:
+        # compliant_manifest() omits the premerge 'e2e' category, which is advice
+        # about the declaration, not missing evidence. It must not downgrade a repo
+        # whose fixtures actually observed the policy holding.
+        self.install_static_pre_push()
+        self.write_manifest(compliant_manifest(fixtures_enabled=("delete-only-push",)))
+        self.commit("advisory warning present, behavior observed")
+
+        result, report = self.run_audit()
+
+        e2e_advice = [
+            r for r in report["results"]
+            if r["check"] == "stages.premerge.categories" and r["status"] == "WARN"
+        ]
+        self.assertTrue(e2e_advice, report)
+        self.assertEqual(report["verdict"], "COMPLIANT")
+        self.assertEqual(result.returncode, 0)

@@ -19,6 +19,11 @@ from typing import Iterator, Optional, Sequence
 
 STATUSES = ("PASS", "WARN", "FAIL", "SKIP")
 
+# Marker the audit's top-level summary looks for. A bootstrap that cannot run is a
+# manifest-level defect, not a per-fixture footnote — every fixture in that clone is
+# blind, so the audit promotes it to its own terminal check line.
+BOOTSTRAP_FAILED_PREFIX = "bootstrap-failed:"
+
 # Not `AKIAIOSFODNN7EXAMPLE` (the AWS-docs example key): verified against
 # gitleaks 8.30.1's default ruleset that key is allowlisted and produces no
 # finding, which would make probe_pre_commit report stage-not-live on every

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..harness import Result, probe_pre_commit, scratch_clone
+from ..harness import BOOTSTRAP_FAILED_PREFIX, Result, probe_pre_commit, scratch_clone
 
 FORMATTER_EXTENSIONS = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".jsonc"}
 
@@ -42,7 +42,7 @@ def run(source: Path, manifest: dict, cfg: dict) -> Result:
 
     with scratch_clone(source, manifest) as repo:
         if repo.bootstrap_result is not None and repo.bootstrap_result.status != "PASS":
-            return Result(NAME, "SKIP", f"bootstrap-failed: {repo.bootstrap_result.detail}")
+            return Result(NAME, "SKIP", f"{BOOTSTRAP_FAILED_PREFIX} {repo.bootstrap_result.detail}")
 
         # The formatter has to be resolvable or this fixture cannot observe anything.
         repo.link_node_modules()

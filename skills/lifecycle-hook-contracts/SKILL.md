@@ -22,13 +22,13 @@ regression this skill exists to catch).
 Both `assets/hooks/stop-adapter-claude.sh` and
 `assets/hooks/stop-adapter-codex.sh` implement exactly this, wrapping the
 repo's existing capture engine unmodified. The engine path and command naming are
-repository-defined and may be declared in `lifecycle-gate.toml`. Neither adapter emits a
+repository-defined. Neither adapter emits a
 `decision` field — no runtime-specific JSON schema is needed for the
 Stop-only scope this skill covers.
 
 **Dependency**: the target repo must provide a capture engine. Its path and the
-validation command are repository choices; follow `lifecycle-gate.toml` when it
-declares them. This skill does not ship its own copy of the capture engine.
+validation command are repository choices; read them from the repo's own
+conventions. This skill does not ship its own copy of the capture engine.
 
 ## Audit a repository
 

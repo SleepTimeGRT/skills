@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..harness import Result, commit_invalid_static, scratch_clone
+from ..harness import BOOTSTRAP_FAILED_PREFIX, Result, commit_invalid_static, scratch_clone
 
 NAME = "delete-only-push"
 STAGE = "pre-push"
@@ -27,7 +27,7 @@ def _looks_like_static_verify_ran(text: str) -> bool:
 def run(source: Path, manifest: dict, cfg: dict) -> Result:
     with scratch_clone(source, manifest) as repo:
         if repo.bootstrap_result is not None and repo.bootstrap_result.status != "PASS":
-            return Result(NAME, "SKIP", f"bootstrap-failed: {repo.bootstrap_result.detail}")
+            return Result(NAME, "SKIP", f"{BOOTSTRAP_FAILED_PREFIX} {repo.bootstrap_result.detail}")
 
         remote = repo.temp_remote()
 
