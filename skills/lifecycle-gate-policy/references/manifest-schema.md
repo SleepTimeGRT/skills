@@ -161,19 +161,30 @@ timeout_seconds = 60
 ### What the shipped fixtures actually drive
 
 The three fixtures in this skill drive `git commit` (pre-commit) and `git push`
-(pre-push) directly. A stage that declares a different entrypoint — `make gate`,
-a wrapper script — has its declaration recorded and its presence checked, but no
-shipped fixture observes it, so it cannot contribute behavioral evidence. The
-`premerge` stage is in that position by design and is reported `NOT-EXERCISED`.
+(pre-push) directly, and they do so regardless of what a stage declares. A stage
+that names a different entrypoint — `make gate`, a wrapper script — has its
+declaration recorded and its presence checked, but the audit never runs that
+command. The `premerge` stage is in that position by design and is reported
+`NOT-EXERCISED`.
+
+Two things follow, and the second one surprises people:
+
+1. A named-but-undriven entrypoint is never verified. Nothing observed whether
+   `make gate` blocks anything.
+2. A fixture's `PASS` is attributed to the fixture, not to the declared
+   entrypoint. So a `pre-push` stage declaring `make gate` can still show
+   `fixture:delete-only-push PASS` — that result came from `git push`, and it
+   says nothing about `make gate`.
 
 Declaring an entrypoint no fixture drives is allowed; mistaking it for verified
-coverage is the failure to avoid. The audit never reports `COMPLIANT` on the
-strength of a declaration alone — see [Verdicts](#verdicts).
+coverage is the failure to avoid. Keep declared entrypoints aligned with what
+the fixtures actually drive if you want the report to mean what it appears to
+mean — see [Verdicts](#verdicts) for the scope the verdict does cover.
 
 ## Verdicts
 
-The audit's verdict is fail-closed: a declaration that no fixture observed is
-never reported as compliance.
+The verdict describes the run as a whole. At that scope it is fail-closed: a run
+in which nothing was observed is never reported as compliance.
 
 | Verdict | Exit | Reached when |
 |---|---|---|
@@ -185,3 +196,25 @@ never reported as compliance.
 Advisory structural warnings (for example "no `e2e` category declared —
 recommended, not required") are advice about the declaration, not missing
 evidence, and do not block `COMPLIANT`.
+
+### The scope the verdict does not cover
+
+`COMPLIANT` is not a per-stage certificate. It is reached when at least one
+enabled fixture reported `PASS` and no behavioral check was inconclusive — the
+declared stages that no enabled fixture drives are not counted against it. A
+repository with no pre-commit hook at all reaches `COMPLIANT` if its single
+enabled fixture is `delete-only-push`, and the report contains no line saying
+pre-commit went unobserved (only `premerge` gets `NOT-EXERCISED`).
+
+The practical trap: `pre-commit` is observed only inside `biome-noop`, which
+needs `[fixtures.biome-noop].ignored_path` and otherwise reports `SKIP` — which
+holds the run at `UNVERIFIED`. Deleting that fixture from `enabled` therefore
+*raises* the verdict to `COMPLIANT` while removing the last observation of
+pre-commit. Do not resolve an `UNVERIFIED` that way; resolve it by making the
+skipped fixture able to run.
+
+Capping the verdict per declared stage — every declared stage needing its own
+observation — is a follow-up rather than a tweak: `premerge` cannot be exercised
+at all, so it needs an explicit exemption, and pre-commit observation has to be
+promoted out of `biome-noop` into a standalone probe first, or repositories with
+no eligible `ignored_path` could never reach `COMPLIANT`.

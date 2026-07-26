@@ -10,7 +10,10 @@ in a disposable `git clone --local` copy with `origin` removed.
 Usage:
     python3 audit.py --repo /path/to/repo [--skip-fixtures] [--format text|json]
 
-The verdict is fail-closed: absence of evidence is never compliance.
+The verdict describes the run as a whole and is fail-closed at that scope: a run
+that observed nothing is never reported as compliance. It is not a per-stage
+certificate — a declared stage that no enabled fixture drives is unobserved, and
+COMPLIANT stays reachable without it (see references/manifest-schema.md).
 
     COMPLIANT      exit 0  at least one fixture observed the policy holding, and
                            nothing was inconclusive

@@ -62,8 +62,17 @@ whether an entrypoint actually blocks — its exit code, whether it stops the
 operation (commit/push/merge), and what it prints — is not "reading the
 script." It is the *only* way to know a stage is actually live rather than
 declared-but-inert, and this policy requires it: a manifest declaration with
-no corresponding observed behavior is not evidence of compliance. Concretely,
-allowed and required observations include:
+no corresponding observed behavior is not evidence that *that stage* complies.
+
+That is the policy's requirement. The shipped audit implements it one run at a
+time, not one stage at a time: it refuses to certify a run that observed
+nothing, but a run that observed one stage can still report `COMPLIANT` while
+another declared stage went unobserved. Closing that gap per stage is a known
+follow-up — see the verdict scope section in `manifest-schema.md`. Until then,
+read the per-stage lines rather than the headline verdict when you need to know
+whether a specific stage was exercised.
+
+Concretely, allowed and required observations include:
 
 - the process exit code of the entrypoint command,
 - whether the git operation it gates (commit/push/merge) was actually
@@ -81,5 +90,11 @@ not violated mechanism-agnosticism no matter how much output it inspects.
 This policy does not prefer husky, lefthook, `.githooks` + `core.hooksPath`,
 raw `.git/hooks`, or any other mechanism over another. A repository picks
 whichever fits its stack. What the policy requires is that the repository's
-manifest name an observable entrypoint for each required category — the
-entrypoint is what gets exercised, never the mechanism behind it.
+manifest name an observable entrypoint for each required category, and that
+conformance be judged by an entrypoint's observable outcome rather than by the
+mechanism behind it.
+
+What gets exercised is a separate question from what is declared. The fixtures
+shipped here drive `git commit` and `git push`; a stage naming some other
+command has that name recorded but not run, so its declaration stays unverified
+(`manifest-schema.md` states this per stage).

@@ -55,7 +55,8 @@ compares behavior and declared categories, not script bytes, so a
 repository-local implementation can conform. Premerge has no fixture and is
 reported as `NOT-EXERCISED`.
 
-The verdict is fail-closed — absence of evidence is never compliance:
+The verdict covers the run as a whole, and is fail-closed at that scope: a run
+that observed nothing is never reported as compliance.
 
 | Verdict | Exit | Meaning |
 |---|---|---|
@@ -67,6 +68,23 @@ The verdict is fail-closed — absence of evidence is never compliance:
 A skipped fixture, an unimplemented fixture name, a bootstrap entrypoint that
 does not run, and a manifest declaring no fixtures all keep a repository out of
 `COMPLIANT`. Treat exit 3 as "not yet shown to work", not as "fine".
+
+**What `COMPLIANT` does not certify.** It is not a per-stage guarantee. It says
+one or more enabled fixtures observed the stage each of them drives, and nothing
+behavioral was inconclusive. A stage that no enabled fixture drives is simply
+unobserved, and `COMPLIANT` stays reachable without it — a repository with no
+pre-commit hook at all can reach exit 0 on the strength of a pre-push fixture.
+Two consequences to know before trusting the exit code:
+
+- Removing a fixture that skips *raises* the verdict, because the gap stops
+  being reported. Read the per-check lines, not the exit code alone.
+- Only `premerge` gets a `NOT-EXERCISED` line; an unobserved `pre-commit` or
+  `pre-push` currently produces no line of its own.
+
+Capping the verdict per declared stage is left to a follow-up, not an oversight:
+`premerge` cannot be exercised at all, and pre-commit observation lives inside
+the `biome-noop` fixture rather than in a standalone probe, so per-stage evidence
+is a redesign rather than an edit.
 
 Read [references/policy-spec.md](references/policy-spec.md) for required stages and
 categories, [references/manifest-schema.md](references/manifest-schema.md) for the
