@@ -55,6 +55,22 @@ worktree symlinks — editing `skills/` does nothing until redeployed. After com
 skill change, run `scripts/deploy-skills.sh [skill-name ...]` (no args = all skills). It
 refuses dirty skills so the recorded commit never lies about the deployed content.
 
+### `orca-workflows/` deploy path (decision, #22)
+
+`orca-workflows/` is intentionally *not* brought under the commit-pinned mechanism above.
+`~/.agents/orca-workflows/` is a plain symlink to this repo's local main-branch checkout
+(single machine, single consumer: the three `orca-*` skills that read
+`model-selection.md`/`spawn-failures.md` from it). It isn't installed by other repos via
+`npx skills add`, so `skills/`'s N-repo integrity guarantees don't apply here — changes go
+live the moment they merge to main, with no separate deploy step to forget.
+
+Known risk from this choice (accepted, not fixed): the symlink has no dirty-tree refusal or
+sha256 verification, so an edit committed directly to the main checkout (bypassing PR review)
+goes live instantly with no integrity check — the inverse of `skills/`'s stale-deployed-copy
+risk. Separately, edits made in a feature worktree are invisible at `~/.agents/orca-workflows/`
+until merged to main, since the symlink always resolves to the main checkout, never the
+worktree currently in use.
+
 ## Repository operations
 
 - Do not run deploy, release, migration, seed, wipe, or other external-write commands merely to measure output.
