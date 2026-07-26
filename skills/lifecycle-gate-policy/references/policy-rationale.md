@@ -60,13 +60,28 @@ below would flip; do not transplant this policy without re-checking the profile.
   for code changes only; docs-only PRs pass on verify(+e2e) to keep trivial-PR
   throughput and token cost sane.
 
-## Why canonical copies instead of a shared runtime dependency
+## From canonical copies to policy conformance
 
-Three repos previously carried three drifting variants of the same token-gate
-script and three different pre-push semantics. Copies with hash-audit keep each
-repo self-contained (a generated repo must never depend on this skills repo at
-runtime — repository rule) while making drift visible and reversible: improve
-the template here, re-apply everywhere, or upstream a repo's local improvement.
+Historically, three repos carried drifting variants of the same token-gate script
+and different pre-push semantics. Copying scripts with a hash audit was chosen to
+keep each repository self-contained; that constraint remains: a generated repository
+must never depend on this skills repository at runtime.
+
+The current decision separates policy from implementation. This skill specifies the
+required stage categories, records each repository's entrypoints in
+`lifecycle-gate.toml`, and evaluates behavior with conformance fixtures. Reference
+scripts remain available for opt-in use, but byte equality is neither the policy nor
+proof that a stage is live.
+
+## Why policy and implementation are separate
+
+The pilot data exposed the limit of byte-diff auditing. The current
+`.githooks/pre-commit` files in medicount, toss-samhaengsi, and toss-space-goldrush
+all report `DRIFT`: medicount has the v2 biome no-op exception improvement, while
+the other two omit the three `token-gate.sh` source lines. Treating all three as the
+same `DRIFT` loses the distinction between an improvement and a missing safety
+behavior. Behavior-based conformance can make that distinction; a hash comparison
+cannot.
 
 ## E2E skip for diff-provably-inert changes (2026-07-25)
 

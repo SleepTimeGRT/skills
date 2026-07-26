@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# lifecycle-gate-policy: canonical scripts/token-gate.sh v1 — do not hand-edit in the
-# target repository; change the copy in sleeptimegrt-skills and re-apply.
+# lifecycle-gate-policy reference implementation — copying is optional; a repository
+# may implement the same policy any way it likes and declare it in lifecycle-gate.toml.
 # Source this file from a non-interactive repository gate.
 
 # A non-interactive GUI git client can spawn hooks without an interactive

@@ -1,4 +1,6 @@
-# lifecycle-gate-policy: repo config (edit freely) — sourced by scripts/premerge.sh.
+# lifecycle-gate-policy reference implementation config (edit freely) — sourced by
+# scripts/premerge.sh. Copying is optional; a repository may implement the same policy
+# any way it likes and declare it in lifecycle-gate.toml.
 # Uncomment and adjust for this repository. Deleting this file falls back to defaults.
 
 # Full verification command (default: "pnpm verify").

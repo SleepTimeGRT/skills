@@ -1,4 +1,3 @@
-<!-- lifecycle-gate-policy: policy v1 — keep this marker line; the drift audit checks for it. -->
 ## Harness policy (common across repositories)
 
 ### Verification gates — three layers
@@ -13,6 +12,10 @@
 Heavy verification is deliberately absent from hooks — it lives at the merge, where
 code actually enters the default branch. `git push --no-verify` is acceptable on WIP
 branches only, never for a branch about to merge.
+
+The hook manager is a repository choice. Each repository declares its observable
+stage entrypoints and categories in `lifecycle-gate.toml`; the policy checks that
+declaration and conformance behavior rather than requiring a particular hook layout.
 
 ### Merge policy
 

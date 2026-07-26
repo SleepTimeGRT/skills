@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""lifecycle-gate-policy: canonical scripts/migration-lint.py v1 — do not
-hand-edit in the target repository; change the copy in sleeptimegrt-skills
-and re-apply.
+"""lifecycle-gate-policy reference implementation — copying is optional; a
+repository may implement the same policy any way it likes and declare it in
+lifecycle-gate.toml.
 
 Deterministic destructive-op deny-list scan for SQL migration files. Tuned
 for recall, not precision: narrowing vs widening ALTER COLUMN TYPE is not

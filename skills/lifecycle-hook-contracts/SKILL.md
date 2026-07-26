@@ -21,14 +21,14 @@ regression this skill exists to catch).
 
 Both `assets/hooks/stop-adapter-claude.sh` and
 `assets/hooks/stop-adapter-codex.sh` implement exactly this, wrapping the
-repo's existing `scripts/token-gate.sh` (from `token-efficient-gates`,
-installed by `lifecycle-gate-policy`) unmodified. Neither adapter emits a
+repo's existing capture engine unmodified. The engine path and command naming are
+repository-defined and may be declared in `lifecycle-gate.toml`. Neither adapter emits a
 `decision` field — no runtime-specific JSON schema is needed for the
 Stop-only scope this skill covers.
 
-**Dependency**: the target repo must already have `lifecycle-gate-policy`
-applied (`scripts/token-gate.sh` and a `verify:static` package script must
-exist). This skill does not ship its own copy of the capture engine.
+**Dependency**: the target repo must provide a capture engine. Its path and the
+validation command are repository choices; follow `lifecycle-gate.toml` when it
+declares them. This skill does not ship its own copy of the capture engine.
 
 ## Audit a repository
 
