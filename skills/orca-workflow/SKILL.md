@@ -96,28 +96,52 @@ printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","
     || gh pr edit "$pr_num" --body "$(gh pr view "$pr_num" --json body -q .body)
 
   Closes #<task-issue-num>"
-  gh pr merge "$pr_num" --squash --delete-branch
-  # closing 키워드는 base가 default branch일 때만 자동 종료를 트리거한다(예: task PR이 epic 통합 브랜치로
-  # 들어가는 구성이면 키워드가 아예 동작하지 않는다) — 그래서 아래 확인·폴백이 부수적 안전장치가 아니라
-  # 실질적으로 issue를 닫는 유일한 경로일 수 있다. 상태 확인 후에도 항상 실행한다.
-  [ "$(gh issue view <task-issue-num> --json state -q .state)" = "OPEN" ] \
-    && gh issue close <task-issue-num> --comment "Merged via PR #$pr_num"
+
+  # premerge 게이트 — orca-evaluate의 PASS는 "코드가 acceptance criteria를 충족하는가"만 보고,
+  # "지금 이 브랜치를 origin/main에 얹어도 안전한가"(stale-main, gate-integrity 자기수정 여부)는
+  # 안 본다. 그건 lifecycle-gate-policy의 premerge.sh 몫이라 merge 직전에 따로 불러야 한다.
+  # 이 레포가 그 컨벤션을 아직 안 썼으면(scripts/premerge.sh 자체가 없으면) 예전처럼 바로 merge —
+  # 여기서 새로 강제하지 않는다.
+  if [ -f scripts/premerge.sh ]; then
+    # --review-done: orca-evaluate §3의 code review가 이미 그 review 통과를 의미한다.
+    if ! bash scripts/premerge.sh --review-done; then
+      premerge_exit=$?
+      printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"PREMERGE_FAIL","retry":0,"premerge_exit":%s}\n' \
+        "$(date -u +%FT%TZ)" "$premerge_exit" >> ~/.local/state/orca-workflows/logs/assignments.jsonl
+      # 여기서 merge하지 않는다 — gh pr merge를 건너뛰고 바로 아래 "3. Inspecting"으로 분기한다
+      # (GATE_FAIL과 같은 원칙: 여기서 추가 재시도 걸지 않음).
+      # premerge.sh exit code: 2=precondition(stale-main 등) 3=PROTECTED 4=REVIEW 5=MIGRATION_ESCALATE
+      # 그 외=verify/e2e 실패 통과값. Inspecting 보고에 이 exit code와 마지막 stderr 몇 줄을 그대로 첨부한다.
+    else
+      gh pr merge "$pr_num" --squash --delete-branch
+      # closing 키워드는 base가 default branch일 때만 자동 종료를 트리거한다(예: task PR이 epic 통합
+      # 브랜치로 들어가는 구성이면 키워드가 아예 동작하지 않는다) — 그래서 아래 확인·폴백이 부수적
+      # 안전장치가 아니라 실질적으로 issue를 닫는 유일한 경로일 수 있다. 상태 확인 후에도 항상 실행한다.
+      [ "$(gh issue view <task-issue-num> --json state -q .state)" = "OPEN" ] \
+        && gh issue close <task-issue-num> --comment "Merged via PR #$pr_num"
+    fi
+  else
+    gh pr merge "$pr_num" --squash --delete-branch
+    [ "$(gh issue view <task-issue-num> --json state -q .state)" = "OPEN" ] \
+      && gh issue close <task-issue-num> --comment "Merged via PR #$pr_num"
+  fi
   ```
 
-  task 종료.
+  task 종료(premerge.sh가 있고 실패한 경우는 예외 — 아래 PREMERGE_FAIL 참고, task 종료가 아니라 inspecting으로 간다).
 - FAIL → 재시도 카운터 확인. **2회 미만이면** feedback과 함께 `orca-task-runner`에 재-dispatch(2b로). **2회 도달하면** inspecting으로.
 - ESCALATE → 재시도 카운트 무관하게 즉시 inspecting.
+- PREMERGE_FAIL → (PASS 라우팅 안에서만 발생 — 위 참고) 추가 재시도 없이 즉시 inspecting. `orca-evaluate`는 이미 PASS를 냈으므로 재-dispatch 대상이 아니다 — merge 직전 게이트가 별도로 막은 것.
 
 라우팅 판정마다 outcome 이벤트를 할당 로그와 같은 파일에 남긴다 — `issue`/`task_id`로 assign 이벤트와 join해야 "어떤 할당이 어떤 결과를 냈는지"를 사후 감사할 수 있다(할당 기록만으로는 품질 판정 불가):
 
 ```bash
-printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL>","retry":<재시도 횟수>}\n' "$(date -u +%FT%TZ)" \
+printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|PREMERGE_FAIL>","retry":<재시도 횟수>}\n' "$(date -u +%FT%TZ)" \
   >> ~/.local/state/orca-workflows/logs/assignments.jsonl
 ```
 
 ## 3. Inspecting
 
-사람 체크포인트. 보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. 사람이 고를 수 있는 것: 계속(피드백 반영해 재시도) / 재계획(요구사항 자체를 다시 논의 — 1a 또는 issue 수정으로 복귀) / 중단.
+사람 체크포인트. 보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/PREMERGE_FAIL 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **PREMERGE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 merge 직전 게이트에서 막혔다는 뜻이므로, premerge.sh의 exit code(2=stale-main 등 precondition, 3=PROTECTED, 4=REVIEW, 5=MIGRATION_ESCALATE, 그 외=verify/e2e 실패)와 마지막 출력 몇 줄을 그대로 표시한다 — 사람이 그 의미를 다시 유추하지 않게. 사람이 고를 수 있는 것: 계속(피드백 반영해 재시도) / 재계획(요구사항 자체를 다시 논의 — 1a 또는 issue 수정으로 복귀) / 중단.
 
 ## 폴백
 
