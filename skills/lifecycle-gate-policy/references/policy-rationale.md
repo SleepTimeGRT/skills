@@ -80,7 +80,9 @@ question the policy asks. Two repositories can diverge from a template by the sa
 measured amount while one has fixed a real hook bug and the other has dropped a
 safety behavior; byte comparison scores them identically. Only observing what the
 stage does with a commit or a push separates them, so conformance is defined by
-behavior and the audit refuses to certify a stage it did not observe.
+behavior, and the audit refuses to certify a run in which nothing was observed.
+Capping the verdict per declared stage is a follow-up — see the verdict scope
+section in [manifest-schema.md](manifest-schema.md).
 
 ## E2E skip for diff-provably-inert changes (2026-07-25)
 

@@ -76,8 +76,10 @@ unobserved, and `COMPLIANT` stays reachable without it — a repository with no
 pre-commit hook at all can reach exit 0 on the strength of a pre-push fixture.
 Two consequences to know before trusting the exit code:
 
-- Removing a fixture that skips *raises* the verdict, because the gap stops
-  being reported. Read the per-check lines, not the exit code alone.
+- Removing a fixture that skips *raises* the verdict whenever another enabled
+  fixture is still passing, because the gap stops being reported. (Remove the
+  only enabled fixture and the run stays at `UNVERIFIED` instead.) Read the
+  per-check lines, not the exit code alone.
 - Only `premerge` gets a `NOT-EXERCISED` line; an unobserved `pre-commit` or
   `pre-push` currently produces no line of its own.
 
@@ -121,12 +123,13 @@ Audit first; apply only when the user asks. One repository per commit. Steps:
 5. Insert or adapt `assets/agents-policy.md` in the repo's AGENTS.md, adjusting
    only repo-specific facts. Fix any docs the audit or diff
    reveals as stale (hooks or workflows they describe that no longer exist).
-6. Run `audit.py` — it must reach `COMPLIANT`, which requires fixtures that
-   actually observed the stages. `UNVERIFIED` (exit 3) means the manifest is
-   declared but unproven: read which fixture skipped and fix that, rather than
-   accepting the declaration. Then confirm by hand: make a scratch commit
-   (pre-commit), push a WIP branch (pre-push), run premerge on a branch with a
-   trivial change.
+6. Run `audit.py` — it must reach `COMPLIANT`, which requires at least one
+   enabled fixture to have observed the stage it drives, not every declared
+   stage (see "What `COMPLIANT` does not certify" above). `UNVERIFIED` (exit 3)
+   means the manifest is declared but unproven: read which fixture skipped and
+   fix that, rather than accepting the declaration. Then confirm by hand: make a
+   scratch commit (pre-commit), push a WIP branch (pre-push), run premerge on a
+   branch with a trivial change.
 
 ## Boundaries
 

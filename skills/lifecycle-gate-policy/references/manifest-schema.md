@@ -71,7 +71,7 @@ At least one `[stages.<name>]` table must be present. Each declares:
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `entrypoint` | string | yes | An observable command/event for this stage — e.g. `git commit`, `git push`, a premerge script invocation. Mechanism-agnostic: what is observed is the entrypoint's outcome, never its implementation. Its presence is checked; see the coverage note below for which entrypoints the shipped fixtures actually drive. |
+| `entrypoint` | string | yes | An observable command/event for this stage — e.g. `git commit`, `git push`, a premerge script invocation. Mechanism-agnostic: what is observed is the entrypoint's outcome, never its implementation. The audit checks that the declaration is present and non-empty — it does not check that the named command exists or run it; see the coverage note below for which entrypoints the shipped fixtures actually drive. |
 | `categories` | array of strings | yes | Category names (from the vocabulary in policy-spec.md) that this stage's entrypoint is asserted to enforce. |
 
 Recognized stage names for this manifest version: `pre-commit`, `pre-push`,
@@ -162,10 +162,10 @@ timeout_seconds = 60
 
 The three fixtures in this skill drive `git commit` (pre-commit) and `git push`
 (pre-push) directly, and they do so regardless of what a stage declares. A stage
-that names a different entrypoint — `make gate`, a wrapper script — has its
-declaration recorded and its presence checked, but the audit never runs that
-command. The `premerge` stage is in that position by design and is reported
-`NOT-EXERCISED`.
+that names a different entrypoint — `make gate`, a wrapper script — has the
+presence of its declaration checked and nothing more: the audit never resolves
+or runs that command. The `premerge` stage is in that position by design and
+is reported `NOT-EXERCISED`.
 
 Two things follow, and the second one surprises people:
 
@@ -209,9 +209,11 @@ pre-commit went unobserved (only `premerge` gets `NOT-EXERCISED`).
 The practical trap: `pre-commit` is observed only inside `biome-noop`, which
 needs `[fixtures.biome-noop].ignored_path` and otherwise reports `SKIP` — which
 holds the run at `UNVERIFIED`. Deleting that fixture from `enabled` therefore
-*raises* the verdict to `COMPLIANT` while removing the last observation of
-pre-commit. Do not resolve an `UNVERIFIED` that way; resolve it by making the
-skipped fixture able to run.
+*raises* the verdict to `COMPLIANT`, provided another enabled fixture is still
+passing, while removing the last observation of pre-commit. (If it was the only
+enabled fixture, the run stays at `UNVERIFIED` — nothing is observed at all.) Do
+not resolve an `UNVERIFIED` that way; resolve it by making the skipped fixture
+able to run.
 
 Capping the verdict per declared stage — every declared stage needing its own
 observation — is a follow-up rather than a tweak: `premerge` cannot be exercised
