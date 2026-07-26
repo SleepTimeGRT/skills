@@ -17,6 +17,13 @@ branches only, never for a branch about to merge.
 ### Merge policy
 
 - Squash merge only: `gh pr merge --squash --delete-branch`. Never `--merge`/`--rebase`.
+- **Issue closure**: if the PR resolves an issue, include a closing keyword
+  (`Closes #N` / `Fixes #N` / `Resolves #N`) in the PR body. Right after the
+  merge, check the issue's state — if it is still OPEN, close it explicitly:
+  `gh issue close <N> --comment "Merged via PR #<PR-number>"`. The fallback is
+  required because the closing keyword only auto-closes an issue when the PR's
+  base is the repository's default branch; PRs based on anything else (e.g. an
+  epic integration branch) never trigger it.
 - **Self-merge**: the agent that authored a PR may merge it itself when
   `scripts/premerge.sh` exits PASS. For code changes this includes a clean
   review pass, then `premerge.sh --review-done`.

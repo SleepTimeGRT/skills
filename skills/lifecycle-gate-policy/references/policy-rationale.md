@@ -90,6 +90,23 @@ the template here, re-apply everywhere, or upstream a repo's local improvement.
   and have that wider exemption apply within the same PR; widening it always routes to
   a human merge first.
 
+## Issue auto-close fallback (2026-07-25)
+
+- Motivating problem: `MediCount/MediCount` #360 — a PR merged without a `Closes #N`
+  keyword in its body, so GitHub never auto-closed the issue it resolved. The issue
+  sat OPEN, invisible to anything that trusts issue state as the source of truth for
+  "is this done."
+- Closing keywords are necessary but not sufficient: GitHub only wires them up when
+  the PR's base branch is the repository's *default* branch. A PR based on anything
+  else — an epic integration branch, a stacked-PR base — never triggers auto-close,
+  keyword or not. Relying on the keyword alone silently fails in exactly the
+  workflows this policy already uses (epics, task graphs).
+- The policy responds with both a habit (always include the keyword — it costs
+  nothing and covers the common default-branch case) and a mechanical check (verify
+  the issue's state right after merging; close it explicitly if still OPEN) rather
+  than either alone, since the habit fails silently on non-default bases and the
+  check alone would be an easy step to forget without the reminder to look for it.
+
 ## Superseded arrangements (for archaeology)
 
 - medicount: husky + `verify:ci` stamp gate in pre-push (stamp made sense when
