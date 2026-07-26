@@ -40,11 +40,11 @@ Never assume the CLI automatically chooses effort.
 
 When reusing an existing worker, verify that its launch model still matches the current task.
 
-**Launch precondition (Claude Code)**: `claude-opus-5` requires Claude Code >= 2.1.219. Below that version it doesn't appear in the `/model` picker and can't be selected at all — check `claude --version` before assuming a launch script's `--model claude-opus-5` will work. Source: `code.claude.com/docs/en/model-config` (2026-07-26 확인).
+**Launch precondition (Claude Code)**: `claude-opus-5` 실행 전 CLI 버전을 확인한다 — 최소 버전 기준과 출처는 `models/claude-code.md` 참조.
 
 **Claude Code 런타임이 이 원칙(model/effort fixed at launch)을 깬다.** `claude-opus-5`로 launch해도 Claude Code의 안전 분류기가 요청을 cybersecurity/biology로 flag하면 세션이 자동으로 다른 모델에서 재실행된다 — launch 인자만으로는 워커가 실제로 어느 모델에서 응답을 만들었는지 보장되지 않는다. 정확한 동작은 `models/claude-code.md`("Automatic model fallback"), 탐지 신호는 `spawn-failures.md` 참조.
 
-**High Risk 게이트 워커는 반드시 확인한다**: `--output-format json` 실행이면 결과의 `modelUsage`에 `claude-opus-4-8` 키가 잡히는지, 대화형이면 transcript의 모델 치환 notice를 확인한다. 잡히면 게이트 리포트에 "Opus 5 xhigh로 실행"이 아니라 "cybersecurity 재실행으로 Opus 4.8에서 실행됨"이라고 정정해서 기록한다. High Risk 작업 정의(auth/RLS/crypto/security review)가 정확히 cyber 분류기를 트리거하는 영역과 겹치므로, 이 확인을 생략하면 게이트가 침묵 속에 4.8로 실행되고도 리포트는 Opus 5로 실행됐다고 주장하게 된다. biology flag로 refusal이 나면 fallback이 없으므로(Opus 5는 자체 biology 분류기를 돌리며 fallback 모델이 없다) PASS/FAIL이 아니라 인간 리뷰로 ESCALATE한다.
+**High Risk 게이트 워커는 확인한다**: `modelUsage`(json 실행) 또는 transcript notice(대화형)에 `claude-opus-4-8`이 잡히면 리포트를 "Opus 4.8에서 실행됨"으로 정정, biology-flag refusal이면 PASS/FAIL 대신 인간 ESCALATE. 상세: `spawn-failures.md`.
 
 ---
 
@@ -61,17 +61,11 @@ When reusing an existing worker, verify that its launch model still matches the 
 | Simple | Codex | `gpt-5.6-luna` | low | ⚠️ 부팅 스모크 미검증 — launch 전 `codex exec`로 먼저 확인(`models/codex.md`). MRCR 41.3%로 대형 diff/장문 컨텍스트엔 부적합 |
 | Simple | Gemini (agy) | `gemini-3.6-flash-low` | low | 간단·기계적 작업. Routine 승격은 보류 — SWE-Bench Pro 58.7%(Terra 63.4% 대비 -4.7pt) |
 
-`claude-fable-5`는 사용하지 않는다 — Anthropic 공식 발표(`anthropic.com/news/claude-opus-5`, 2026-07-26 확인) 기준 OSWorld 2.0에서 "Opus 5 outperforms every other model at any given cost, surpassing Fable 5's best result at just over a third of the cost", CursorBench 3.2에서 "at max effort, the model performs within 0.5% of Fable 5's peak score, but at half the cost per task" — Fable 5와 동등 이상 성능을 절반 이하 가격($5/$25 vs $10/$50, 1M 토큰당)으로 낸다. 상세는 Benchmarks 섹션. High Risk 티어도 동일하게 Opus 5를 쓴다.
+`claude-fable-5`는 사용하지 않는다 — Anthropic 공식 발표(`anthropic.com/news/claude-opus-5`, 2026-07-26 확인) 기준 OSWorld 2.0·CursorBench 3.2에서 Fable 5와 동등 이상 성능을 절반 이하 가격($5/$25 vs $10/$50, 1M 토큰당)으로 낸다. High Risk 티어도 동일하게 Opus 5를 쓴다.
 
-**Effort는 이전 모델에서 그대로 들고 오지 않는다.** Opus 5의 API 기본값은 `high`다 — Opus 4.7/4.8의 "xhigh로 시작" 권장을 그대로 재사용하면 안 된다. 공식 문서: "If you carried effort settings over from an earlier model, run a fresh effort sweep on your evals rather than reusing them"(`platform.claude.com/docs/en/build-with-claude/effort`, 2026-07-26 확인). 위 표의 xhigh는 그 스윕 결과가 아니라 architecture/auth/migration/crypto/production-review처럼 "demanding coding and agentic work"에 해당한다는 판단으로 유지한 것이며, 공식 문서도 이런 작업엔 xhigh로 올릴 것을 권장한다 — Routine 이하로 내려가는 재사용은 금지한다는 뜻이다.
+**Effort는 이전 모델에서 그대로 들고 오지 않는다** — Opus 5 API 기본값은 `high`이며, 공식 문서는 이전 모델 값 재사용 대신 새 effort sweep을 권장한다(원문 인용·상세 근거는 `models/claude-code.md` effort 항목 참조). 위 표의 xhigh는 그 스윕 결과가 아니라 architecture/auth/migration/crypto/production-review급 demanding 작업이라는 판단으로 유지한 것 — Routine 이하로 내려가는 재사용은 금지한다는 뜻이다.
 
 **Claude Sonnet 5 pattern**: Sonnet 5(high)로 생성하고, 더 깊은 리뷰가 필요하면 generator effort를 올리는 대신 `/advisor`(Opus 5 xhigh)로 리뷰받는다.
-
-```
-Sonnet 5 (high)
-      ↓
-/advisor opus (xhigh)
-```
 
 ---
 
