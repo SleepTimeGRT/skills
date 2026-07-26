@@ -1,6 +1,6 @@
 # Model Selection
 
-> verified_at: 2026-07-21
+> verified_at: 2026-07-26 — re-verify trigger: any new Claude model release (check `https://platform.claude.com/docs/en/about-claude/models/overview`), not a calendar cadence. Four Claude releases landed between 2026-06-09 and 2026-07-24; a fixed re-check interval will always lag that.
 
 Select the model and effort **before launch**.
 
@@ -40,29 +40,32 @@ Never assume the CLI automatically chooses effort.
 
 When reusing an existing worker, verify that its launch model still matches the current task.
 
+**Launch precondition (Claude Code)**: `claude-opus-5` 실행 전 CLI 버전을 확인한다 — 최소 버전 기준과 출처는 `models/claude-code.md` 참조.
+
+**Claude Code 런타임이 이 원칙(model/effort fixed at launch)을 깬다.** `claude-opus-5`로 launch해도 Claude Code의 안전 분류기가 요청을 cybersecurity/biology로 flag하면 세션이 자동으로 다른 모델에서 재실행된다 — launch 인자만으로는 워커가 실제로 어느 모델에서 응답을 만들었는지 보장되지 않는다. 정확한 동작은 `models/claude-code.md`("Automatic model fallback"), 탐지 신호는 `spawn-failures.md` 참조.
+
+**High Risk 게이트 워커는 확인한다**: `modelUsage`(json 실행) 또는 transcript notice(대화형)에 `claude-opus-4-8`이 잡히면 리포트를 "Opus 4.8에서 실행됨"으로 정정, biology-flag refusal이면 PASS/FAIL 대신 인간 ESCALATE. 상세: `spawn-failures.md`.
+
 ---
 
 # Default Mapping
 
 | Tier | Provider | Model | Effort | Note |
 |------|----------|-------|--------|------|
-| High Risk | Claude | `claude-opus-4-8` | xhigh | architecture / auth / migration / crypto / production review / final approval |
-| High Risk | Codex | `gpt-5.6-sol` | xhigh (high = cost floor) | architecture / auth / migration / crypto / production review / final approval |
-| Routine | Claude | `claude-sonnet-5` | high | primary generator |
-| Routine | Claude | `claude-fable-5` | high (보안·high-risk 하위작업은 xhigh) | 설계 비중 큰 구현(아키텍처 "결정" 자체는 High Risk tier로 승격). `/advisor` 붙이지 않음 |
-| Routine | Claude | `claude-opus-4-8` | xhigh | advisor/reviewer only — not primary generator unless the task itself is High Risk |
+| High Risk | Claude | `claude-opus-5` | xhigh | architecture / auth / migration / crypto / production review / final approval. Review는 오탐 비용이 클 때 이쪽(정밀도 우선) |
+| High Risk | Codex | `gpt-5.6-sol` | xhigh (high = cost floor) | architecture / auth / migration / crypto / production review / final approval. Review는 놓치면 안 될 때 이쪽(재현율 우선) |
+| Routine | Claude | `claude-sonnet-5` | high | primary generator, 설계 비중 큰 구현 포함(Fable 5가 맡던 자리) — 아키텍처 "결정" 자체는 High Risk tier로 승격 |
+| Routine | Claude | `claude-opus-5` | xhigh | advisor/reviewer only — not primary generator unless the task itself is High Risk |
 | Routine | Codex | `gpt-5.6-terra` | medium | primary generator; escalate to Sol when additional reasoning is required |
 | Simple | Claude | `claude-haiku-4-5-20251001` | — (effort 미지원) | transcription, boilerplate, mechanical edits |
 | Simple | Codex | `gpt-5.6-luna` | low | ⚠️ 부팅 스모크 미검증 — launch 전 `codex exec`로 먼저 확인(`models/codex.md`). MRCR 41.3%로 대형 diff/장문 컨텍스트엔 부적합 |
 | Simple | Gemini (agy) | `gemini-3.6-flash-low` | low | 간단·기계적 작업. Routine 승격은 보류 — SWE-Bench Pro 58.7%(Terra 63.4% 대비 -4.7pt) |
 
-**Claude Sonnet 5 pattern** (Fable 5엔 적용 안 함 — 위 Note 참고): Sonnet 5(high)로 생성하고, 더 깊은 리뷰가 필요하면 generator effort를 올리는 대신 `/advisor`(Opus 4.8 xhigh)로 리뷰받는다.
+`claude-fable-5`는 사용하지 않는다 — Anthropic 공식 발표(`anthropic.com/news/claude-opus-5`, 2026-07-26 확인) 기준 OSWorld 2.0·CursorBench 3.2에서 Fable 5와 동등 이상 성능을 절반 이하 가격($5/$25 vs $10/$50, 1M 토큰당)으로 낸다. High Risk 티어도 동일하게 Opus 5를 쓴다.
 
-```
-Sonnet 5 (high)
-      ↓
-/advisor opus (xhigh)
-```
+**Effort는 이전 모델에서 그대로 들고 오지 않는다** — Opus 5 API 기본값은 `high`이며, 공식 문서는 이전 모델 값 재사용 대신 새 effort sweep을 권장한다(원문 인용·상세 근거는 `models/claude-code.md` effort 항목 참조). 위 표의 xhigh는 그 스윕 결과가 아니라 architecture/auth/migration/crypto/production-review급 demanding 작업이라는 판단으로 유지한 것 — Routine 이하로 내려가는 재사용은 금지한다는 뜻이다.
+
+**Claude Sonnet 5 pattern**: Sonnet 5(high)로 생성하고, 더 깊은 리뷰가 필요하면 generator effort를 올리는 대신 `/advisor`(Opus 5 xhigh)로 리뷰받는다.
 
 ---
 
@@ -84,6 +87,8 @@ Do **not** use this axis just because a stream produces a log — deterministic 
 | Gemini (agy) | `gemini-3.6-flash-medium` | Computer use 83%, browser automation 68%, long-context (MRCR v2 128k) 91.8% — see `~/.agents/orca-workflows/models/agy.md`. |
 
 Consumer: `orca-evaluate` §2 (agent-e2e gate + raw-trace re-check) and §4 (report synthesis). Its §1/§3 sub-sessions are deliberately *not* consumers — those stay on High Risk.
+
+⚠️ **Long-context 근거 재확인 필요**: 위 라우팅의 long-context 수치는 128k MRCR v2 기준이다. Claude Opus 5는 1M 토큰 컨텍스트를 기본값이자 최댓값으로 갖는다(`anthropic.com/news/claude-opus-5`, 2026-07-26 확인). 이 축의 라우팅 근거는 computer-use·browser-automation 강점이지 long-context 단독이 아니므로 그대로 유지하지만, long-context만 필요한 작업이라면 128k 대 1M 비교 없이 Gemini 우위를 전제할 수 없다 — A/B 없이는 이 축을 long-context 단독 사유로 확장하지 말 것.
 
 ---
 
@@ -107,25 +112,6 @@ Escalate immediately to higher tiers for:
 - migration
 - production incidents
 - final review
-
----
-
-# Benchmarks (Reference Only)
-
-These values are informational only.
-
-| Model | SWE-Bench Pro |
-|--------|---------------|
-| Claude Opus 4.8 | Reference anchor |
-| GPT-5.6 Sol | 64.6% |
-| GPT-5.6 Terra | 63.4% |
-| Gemini 3.6 Flash | 58.7% |
-
-Gemini 3.6 Flash 수치는 2026-07-25 웹 리서치로 확인(codingfleet.com SWE-bench Pro leaderboard, buildfastwithai.com 교차확인) — 상세는 `models/agy.md`.
-
-Benchmarks help align tiers.
-
-Model selection should always be based on **task risk**, not benchmark scores alone.
 
 ---
 
