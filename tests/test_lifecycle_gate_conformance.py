@@ -412,3 +412,63 @@ class AuditFixtureTests(ManifestRepo):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# A pre-commit hook whose scanner runs and speaks but never objects. This is the
+# medicount shape found by the task-level gate: a scanner config that replaces the
+# default ruleset leaves the stage live with zero rules. "Live" and "effective" are
+# different claims and the report must not collapse them.
+INEFFECTIVE_SCANNER_PRE_COMMIT = """\
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'scan: 0 rules loaded, no findings\\n' >&2
+exit 0
+"""
+
+
+class ProbeReportingTests(ManifestRepo):
+    """Semantics added after the task-level gate ran against real pilot repositories."""
+
+    @pytest.mark.slow
+    def test_probe_warns_when_stage_runs_but_does_not_block(self) -> None:
+        if shutil.which("gitleaks") is None:
+            self.skipTest("gitleaks not installed")
+
+        self.write("src/lib/ignored.ts", "export const ignored = true;\n")
+        self.write(".githooks/pre-commit", INEFFECTIVE_SCANNER_PRE_COMMIT, executable=True)
+        self.write_manifest(
+            compliant_manifest(
+                fixtures_enabled=("biome-noop",),
+                fixtures_extra='\n[fixtures.biome-noop]\nignored_path = "src/lib/ignored.ts"\n',
+            )
+        )
+        self.commit("pre-commit stage live but scanner has no rules")
+
+        _, report = self.run_audit()
+
+        # The stage fires, so the fixture is not vacuous and still reports its own verdict.
+        fixture_check = self.find_check(report, "fixture:biome-noop")
+        self.assertEqual(fixture_check["status"], "PASS", fixture_check["detail"])
+
+        # ...and the ineffective scanner is a finding in its own right, on its own line.
+        probe_check = self.find_check(report, "probe:pre-commit")
+        self.assertEqual(probe_check["status"], "WARN", probe_check["detail"])
+        self.assertIn("did not block", probe_check["detail"])
+
+    @pytest.mark.slow
+    def test_biome_noop_skips_when_path_is_not_formatter_processed(self) -> None:
+        self.write("docs/notes.md", "# notes\n")
+        self.install_gitleaks_pre_commit()
+        self.write_manifest(
+            compliant_manifest(
+                fixtures_enabled=("biome-noop",),
+                fixtures_extra='\n[fixtures.biome-noop]\nignored_path = "docs/notes.md"\n',
+            )
+        )
+        self.commit("ignored_path the formatter would never process")
+
+        _, report = self.run_audit()
+
+        fixture_check = self.find_check(report, "fixture:biome-noop")
+        self.assertEqual(fixture_check["status"], "SKIP", fixture_check["detail"])
+        self.assertIn("fixture-inapplicable", fixture_check["detail"])

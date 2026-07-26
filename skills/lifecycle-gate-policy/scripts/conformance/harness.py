@@ -271,7 +271,16 @@ def probe_pre_commit(repo: ScratchRepo) -> Result:
     # Not blocked. Did the stage run at all? A commit that only git itself handled
     # prints nothing but git's own summary; a stage that ran leaves its tooling's
     # output behind. This observes output, never hook file contents.
-    repo.run(["git", "reset", "--hard", "HEAD~1"])
+    cleanup = repo.run(["git", "reset", "--hard", "HEAD~1"])
+    if cleanup.returncode != 0:
+        # The probe's secret commit is still in this clone; anything running next in it
+        # would inherit contaminated state. Refuse to report a usable verdict.
+        return Result(
+            "probe:pre-commit",
+            "SKIP",
+            "probe-cleanup-failed: could not undo the probe commit, so this clone cannot "
+            f"carry a trustworthy fixture result: {_decode(cleanup.stderr).strip()[-160:]}",
+        )
     if _stage_spoke(commit):
         return Result(
             "probe:pre-commit",
