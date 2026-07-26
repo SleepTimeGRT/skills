@@ -13,7 +13,7 @@ launch: `claude --model <id> --effort <low|medium|high|xhigh|max>`. SDD 구현 �
 
 | 모델 | 강점 | 용도 | effort |
 |---|---|---|---|
-| `claude-opus-5` | 최상위 판단 | coordinator, high-risk 직접 작업, Claude Code `/advisor` 리뷰 백엔드 | xhigh (coordinator는 세션값) |
+| `claude-opus-5` | 최상위 판단 | coordinator, high-risk 직접 작업, Claude Code `/advisor` 리뷰 백엔드. **오탐 비용이 큰 리뷰엔 Opus 5** — 정밀도 우선, Sol보다 커버리지 낮음(2026-07 웹 리서치, CodeRabbit·BSWEN 방향 일치·수치 미확정) | xhigh (coordinator는 세션값) |
 | `claude-sonnet-5` | 균형 | 통합·판단 구현 | high |
 | `claude-haiku-4-5-20251001` | 빠르고 저렴 | 전사·기계적 구현 | — (effort 미지원) |
 

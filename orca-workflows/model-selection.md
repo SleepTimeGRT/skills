@@ -52,8 +52,8 @@ When reusing an existing worker, verify that its launch model still matches the 
 
 | Tier | Provider | Model | Effort | Note |
 |------|----------|-------|--------|------|
-| High Risk | Claude | `claude-opus-5` | xhigh | architecture / auth / migration / crypto / production review / final approval |
-| High Risk | Codex | `gpt-5.6-sol` | xhigh (high = cost floor) | architecture / auth / migration / crypto / production review / final approval |
+| High Risk | Claude | `claude-opus-5` | xhigh | architecture / auth / migration / crypto / production review / final approval. Review는 오탐 비용이 클 때 이쪽(정밀도 우선) |
+| High Risk | Codex | `gpt-5.6-sol` | xhigh (high = cost floor) | architecture / auth / migration / crypto / production review / final approval. Review는 놓치면 안 될 때 이쪽(재현율 우선) |
 | Routine | Claude | `claude-sonnet-5` | high | primary generator, 설계 비중 큰 구현 포함(Fable 5가 맡던 자리) — 아키텍처 "결정" 자체는 High Risk tier로 승격 |
 | Routine | Claude | `claude-opus-5` | xhigh | advisor/reviewer only — not primary generator unless the task itself is High Risk |
 | Routine | Codex | `gpt-5.6-terra` | medium | primary generator; escalate to Sol when additional reasoning is required |
