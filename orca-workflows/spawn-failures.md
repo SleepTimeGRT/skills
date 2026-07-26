@@ -1,6 +1,6 @@
 # Spawn Failures
 
-> verified_at: 2026-07-25
+> verified_at: 2026-07-26
 
 Shared reference for `orca-workflow`/`orca-task-runner`/`orca-evaluate` so a spawn failure gets checked
 against known causes before re-diagnosing from scratch. The recurring problem (issue #16) wasn't that
@@ -20,7 +20,9 @@ starting a fresh investigation.
 ## Procedure
 
 Run this whenever a spawn produces no usable output, a shell error, or a timeout with zero output (each
-skill's launch section says where in its own flow to check for this).
+skill's launch section says where in its own flow to check for this). One row below is unconditional
+rather than failure-triggered: every High Risk `claude-opus-5` launch, check for it regardless of whether
+the run looked like it succeeded — see that row's fix column.
 
 1. grep the `failure_signature` column below for a substring match against what was actually observed.
    - **Match found** → apply the documented fix, cite the `known_issue`. Do not re-diagnose from scratch.
@@ -42,6 +44,7 @@ skill's launch section says where in its own flow to check for this).
 | `zsh: parse error` (or similar shell syntax error surfacing on the *target* terminal right after `orca terminal create`/`terminal send`) | `orca terminal create --command` / `terminal send` type the string into a live shell character-by-character instead of exec'ing it atomically — parens, quotes, and newlines inside an inline multi-line prompt (e.g. `agy -p '<prompt>'`) get parsed as shell metacharacters by the target shell | write the prompt to a file first, then pass `-p "$(cat <prompt-file>)"` — text captured inside double quotes via command substitution isn't re-parsed | #16 |
 | `jetski: no output produced` (agy headless call silently produces nothing, exit 0) | agy headless auto-denies tool calls when `--dangerously-skip-permissions` is missing — equivalent to Claude's `--permission-mode bypassPermissions` | add `--dangerously-skip-permissions` to the agy launch command | #15 |
 | `terminal list` shows a terminal with `worktreePath: ""` and `branch: ""` that no longer responds, coinciding with a worktree base-path rename (e.g. `~/.worktrees` → `~/worktrees`) | orca's terminal/worktree registry doesn't track path renames — a session bound to the old path is orphaned, not migrated | none (structural orca limitation) — avoid renaming worktree base paths while sessions are active; re-spawn the terminal under the new path if orphaned | #14 |
+| `claude-opus-4-8` shows up in `modelUsage` (`--output-format json`) or in the transcript's model-substitution notice for a worker launched with `--model claude-opus-5` | Claude Code's cybersecurity safety classifier flagged the request (often just the first request's workspace context — CLAUDE.md, git status) and auto-reran it on Opus 4.8, Opus 5's only classifier fallback; a biology flag has no fallback and ends in refusal instead. This isn't a launch failure — the run "succeeds" silently on the wrong model. Requires Claude Code >= 2.1.219 for category-based fallback | not a bug to fix — a required check. After every High Risk `claude-opus-5` launch, grep for `claude-opus-4-8` in `modelUsage`/transcript before trusting the gate report; if found, correct the report to say it ran on Opus 4.8, not Opus 5 xhigh. A biology-flag refusal has no fallback — ESCALATE to human review instead of PASS/FAIL | #21 |
 
 ## Adding a new row
 
