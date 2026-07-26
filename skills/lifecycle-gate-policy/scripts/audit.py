@@ -161,7 +161,13 @@ def run_fixtures(repo: Path, manifest: dict) -> list[dict]:
         except Exception as exc:  # a broken fixture must not crash the whole audit
             results.append(_result(f"fixture:{name}", "FAIL", f"fixture raised {type(exc).__name__}: {exc}"))
             continue
-        results.append(_result(f"fixture:{name}", fixture_result.status, fixture_result.detail))
+        # A fixture may return one Result or several: its own plus any stage-level
+        # finding its probe surfaced (e.g. a live pre-commit stage whose secret scan
+        # is ineffective). Those are policy findings in their own right, not fixture
+        # detail, so they get their own report lines.
+        for item in fixture_result if isinstance(fixture_result, (list, tuple)) else [fixture_result]:
+            label = item.name if item.name.startswith("probe:") else f"fixture:{name}"
+            results.append(_result(label, item.status, item.detail))
 
     return results
 

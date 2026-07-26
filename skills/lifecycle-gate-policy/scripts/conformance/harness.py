@@ -162,8 +162,12 @@ class ScratchRepo:
         return target
 
     def stage(self, *relpaths: str) -> None:
+        # -f: a path can be both git-ignored and inside the repository's formatter
+        # ignore-set (e.g. a tracked file under an ignored log directory). The
+        # fixture's subject is the formatter's ignore-set, not git's, so staging
+        # must not fail on git's.
         subprocess.run(
-            ["git", "-C", str(self.path), "add", *relpaths],
+            ["git", "-C", str(self.path), "add", "-f", *relpaths],
             check=True,
             capture_output=True,
             text=True,
@@ -240,7 +244,18 @@ def commit_invalid_static(repo: ScratchRepo, message: str) -> subprocess.Complet
 
 
 def probe_pre_commit(repo: ScratchRepo) -> Result:
-    """Stage a synthetic secret and commit (hooks live). Blocked => PASS."""
+    """Stage a synthetic secret and commit (hooks live).
+
+    Three outcomes, deliberately distinguished — collapsing them misreports a
+    working stage with an ineffective scanner as an absent stage:
+
+    * blocked                      -> PASS: stage is live *and* the scan catches secrets.
+    * not blocked, stage spoke     -> WARN: the stage ran (its tooling produced output)
+      but let a synthetic secret through. The declared ``secret-scan`` category is
+      ineffective — commonly a scanner config that replaces the default ruleset
+      instead of extending it. Fixtures on this stage may still run: the stage fires.
+    * not blocked, stage silent    -> FAIL: nothing ran. Fixtures here would be vacuous.
+    """
     if not _tool_available("gitleaks"):
         return Result("probe:pre-commit", "SKIP", "gitleaks not found on PATH")
 
@@ -252,11 +267,42 @@ def probe_pre_commit(repo: ScratchRepo) -> Result:
         # clone is back to its pre-probe state for whatever runs next in it.
         repo.run(["git", "reset", "--hard", "HEAD"])
         return Result("probe:pre-commit", "PASS", "commit blocked — pre-commit stage is live")
+
+    # Not blocked. Did the stage run at all? A commit that only git itself handled
+    # prints nothing but git's own summary; a stage that ran leaves its tooling's
+    # output behind. This observes output, never hook file contents.
+    repo.run(["git", "reset", "--hard", "HEAD~1"])
+    if _stage_spoke(commit):
+        return Result(
+            "probe:pre-commit",
+            "WARN",
+            "pre-commit stage ran but did not block a synthetic secret — the declared "
+            "secret-scan category is ineffective (check whether the scanner config "
+            "extends the default ruleset instead of replacing it)",
+        )
     return Result(
         "probe:pre-commit",
         "FAIL",
-        "commit succeeded — pre-commit stage did not block a synthetic secret",
+        "commit succeeded with no stage output — pre-commit stage is not live",
     )
+
+
+# Output that git itself emits for a successful commit. Anything beyond these
+# markers means some stage spoke during the commit.
+_GIT_COMMIT_CHATTER = ("file changed", "files changed", "insertion", "deletion", "create mode", "delete mode")
+
+
+def _stage_spoke(proc: subprocess.CompletedProcess) -> bool:
+    """True when the commit produced output that git alone would not have produced."""
+    text = f"{_decode(proc.stdout)}\n{_decode(proc.stderr)}"
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("["):  # "[main abc1234] message"
+            continue
+        if any(marker in line for marker in _GIT_COMMIT_CHATTER):
+            continue
+        return True
+    return False
 
 
 def probe_pre_push(repo: ScratchRepo) -> Result:

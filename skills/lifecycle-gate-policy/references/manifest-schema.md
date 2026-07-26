@@ -87,6 +87,21 @@ enabled = ["biome-noop", "path-fallback", "delete-only-push"]
 [fixtures.biome-noop]
 ignored_path = "src/lib/supabase/types.ts"
 
+### `[fixtures.biome-noop].ignored_path` — two requirements
+
+The path must satisfy both, or the fixture reports `SKIP` rather than a verdict:
+
+1. **Inside the formatter's ignore-set.** That is the condition the fixture reproduces.
+2. **A file extension the formatter would otherwise process** (`.ts`, `.tsx`, `.js`,
+   `.jsx`, `.mjs`, `.cjs`, `.json`, `.jsonc`). A path the formatter never looks at —
+   markdown, logs, docs — makes the commit succeed for an unrelated reason. That is a
+   vacuous PASS, the failure mode this fixture set exists to prevent.
+
+If the formatter cannot be resolved inside the scratch clone (for example a workspace
+whose per-package dependencies are not installed there), the fixture reports
+`SKIP (tooling-unavailable)`: a blocked commit caused by a missing tool says nothing
+about the repository's policy.
+
 [fixtures.path-fallback]
 timeout_seconds = 60
 ```
