@@ -5,7 +5,7 @@ description: agy(Gemini/Google) 모델·effort 용도 — coordinator·구현 �
 
 # agy (Gemini / Google)
 
-**verified_at: 2026-07-25**
+**verified_at: 2026-07-26**
 
 quota가 넉넉해 coordinator·구현 워커·evaluator 어디에든 적합한 작업엔 우선 고려한다.
 
@@ -31,7 +31,7 @@ agy는 `model-selection.md` Default Mapping에서 Simple tier(코드/구현 판�
 - 참고: raw Gemini API(REST/SDK) 레벨에서 `temperature`/`top_p`/`thinking_budget` 등 일부 파라미터가 3.x에서 deprecate된다는 보고가 있으나, `agy` CLI는 이 파라미터들을 노출하지 않으므로 이 리포의 launch 패턴엔 영향 없음.
 - 출처: 가격·벤치 모두 웹 검색 기준(OpenRouter/ArtificialAnalysis/Browser Use/Google 블로그 등 2026-07-21~22 게시물) — 이 리포에서 직접 측정한 수치는 아니다.
 
-`agy models`에 `gemini-3.1-pro-*`도 있다 — flash 계열이 에이전틱 벤치(Terminal-Bench·MCP Atlas 등)에서 이를 앞서 현행 기본. `gemini-3.6-flash` SWE-Bench Pro는 **58.7%**(2026-07-25 웹 리서치 확인: codingfleet.com SWE-bench Pro leaderboard, buildfastwithai.com 교차확인). Codex Terra(63.4%)·Sol(64.6%)·Opus 앵커보다 낮고, Coding Agent Index류 agentic 코딩 지표는 공개 자료에서 아직 못 찾음 — tier 배정은 `model-selection.md` 참고.
+`agy models`에 `gemini-3.1-pro-*`도 있다 — flash 계열이 에이전틱 벤치(Terminal-Bench·MCP Atlas 등)에서 이를 앞서 현행 기본. `gemini-3.6-flash` SWE-Bench Pro는 **58.7%**(2026-07-25 웹 리서치 확인: codingfleet.com SWE-bench Pro leaderboard, buildfastwithai.com 교차확인). Codex Terra(63.4%)·Sol(64.6%)보다 낮다(단 두 수치 모두 `codex.md` 자체엔 출처 표기가 없다). Claude Opus 5의 SWE-Bench Pro는 Anthropic이 공개하지 않아 이 축 비교에 넣을 수 없다 — 그래서 "Opus 앵커" 비교는 쓰지 않는다. Coding Agent Index류 agentic 코딩 지표는 공개 자료에서 아직 못 찾음 — tier 배정은 `model-selection.md` 참고.
 
 **agent e2e(Playwright)**: agy/Antigravity CLI에 BrowserMCP를 설정하면 accessibility-tree 기반 Playwright 브라우저 조작이 가능하다(`~/.gemini/settings.json` 또는 Antigravity CLI 설정에 MCP 서버 등록). 스크린샷·좌표 클릭보다 UI 변경에 덜 깨지므로 `orca-evaluate`의 agent-e2e 스트림은 이 조합(agy + BrowserMCP)을 기본으로 한다 — 실제 launch 전 이 리포에서 BrowserMCP 연결 자체를 한 번 스모크 테스트할 것.
 
