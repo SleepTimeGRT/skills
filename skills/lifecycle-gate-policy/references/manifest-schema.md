@@ -24,7 +24,7 @@ manifest must never itself require a package install.
 | `policy_version` | string | yes | — | Schema version this manifest conforms to. Currently only `"2"` is valid. |
 | `[bootstrap]` | table | yes | — | See [Bootstrap](#bootstrap-required) below. |
 | `[stages.*]` | table | at least one | — | Per-stage entrypoint + declared categories. See [Stages](#stages). |
-| `[fixtures]` | table | no | absent = no fixtures run | Which conformance fixtures to exercise against this repository. |
+| `[fixtures]` | table | no, but required to reach `COMPLIANT` | absent = nothing is observed, so the audit reports `UNVERIFIED` (exit 3) and `COMPLIANT` is unreachable | Which conformance fixtures to exercise against this repository. See [Verdicts](#verdicts). |
 | `[fixtures.<name>]` | table | no, per fixture | `{}` | Fixture-specific configuration data (never mechanism — see policy-spec's mechanism-agnostic section). |
 
 ## Bootstrap (required)
