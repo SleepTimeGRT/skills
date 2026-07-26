@@ -54,7 +54,7 @@ When reusing an existing worker, verify that its launch model still matches the 
 |------|----------|-------|--------|------|
 | High Risk | Claude | `claude-opus-5` | xhigh | architecture / auth / migration / crypto / production review / final approval |
 | High Risk | Codex | `gpt-5.6-sol` | xhigh (high = cost floor) | architecture / auth / migration / crypto / production review / final approval |
-| Routine | Claude | `claude-sonnet-5` | high | primary generator |
+| Routine | Claude | `claude-sonnet-5` | high | primary generator, 설계 비중 큰 구현 포함(Fable 5가 맡던 자리) — 아키텍처 "결정" 자체는 High Risk tier로 승격 |
 | Routine | Claude | `claude-opus-5` | xhigh | advisor/reviewer only — not primary generator unless the task itself is High Risk |
 | Routine | Codex | `gpt-5.6-terra` | medium | primary generator; escalate to Sol when additional reasoning is required |
 | Simple | Claude | `claude-haiku-4-5-20251001` | — (effort 미지원) | transcription, boilerplate, mechanical edits |
@@ -127,8 +127,8 @@ These values are informational only. **Single-axis, cross-provider comparisons d
 
 | Model | SWE-Bench Pro | 출처 |
 |--------|---------------|------|
-| GPT-5.6 Sol | 64.6% | Codex 자체 공개 수치 |
-| GPT-5.6 Terra | 63.4% | Codex 자체 공개 수치 |
+| GPT-5.6 Sol | 64.6% | 미검증 — 이번 재검증 대상은 Claude 쪽 소스뿐이었다. 출처는 `models/codex.md` 참조(거기도 출처 표기 없음) |
+| GPT-5.6 Terra | 63.4% | 미검증 — 이번 재검증 대상은 Claude 쪽 소스뿐이었다. 출처는 `models/codex.md` 참조(거기도 출처 표기 없음) |
 | Gemini 3.6 Flash | 58.7% | 2026-07-25 웹 리서치(codingfleet.com SWE-bench Pro leaderboard, buildfastwithai.com 교차확인) — `models/agy.md` |
 | Claude Opus 5 | 미공개 | Anthropic이 공식 공개하지 않음(2026-07-26 확인, `anthropic.com/news/claude-opus-5`의 벤치마크 목록은 Frontier-Bench v0.1·CursorBench 3.2·ARC-AGI 3·Zapier AutomationBench·OSWorld 2.0·GDPval-AA v2·HLEAutomationBench·DeepSearchQA뿐, SWE-Bench Pro 없음) — 위 세 수치와 직접 비교 불가 |
 

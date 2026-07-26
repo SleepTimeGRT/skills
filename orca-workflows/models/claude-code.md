@@ -17,7 +17,7 @@ launch: `claude --model <id> --effort <low|medium|high|xhigh|max>`. SDD 구현 �
 | `claude-sonnet-5` | 균형 | 통합·판단 구현 | high |
 | `claude-haiku-4-5-20251001` | 빠르고 저렴 | 전사·기계적 구현 | — (effort 미지원) |
 
-`claude-fable-5`는 사용하지 않는다 — Anthropic 공식 발표 기준(`anthropic.com/news/claude-opus-5`, 2026-07-26 확인) OSWorld 2.0·CursorBench 3.2에서 Fable 5와 동등 이상 성능을 절반 이하 가격($5/$25 vs $10/$50)으로 낸다. 상세 수치와 출처는 `../model-selection.md` Benchmarks 참조. 아키텍처·설계 비중 큰 구현과 high-risk 작업 모두 Opus 5로 통일한다.
+`claude-fable-5`는 사용하지 않는다 — Anthropic 공식 발표 기준(`anthropic.com/news/claude-opus-5`, 2026-07-26 확인) OSWorld 2.0·CursorBench 3.2에서 Fable 5와 동등 이상 성능을 절반 이하 가격($5/$25 vs $10/$50)으로 낸다. 상세 수치와 출처는 `../model-selection.md` Benchmarks 참조. high-risk 작업은 Opus 5로 통일한다. Fable 5가 맡던 "Routine이지만 설계 비중 큰 구현"은 Opus 5가 아니라 Sonnet 5(high)가 맡는다 — Opus 5를 primary generator로 쓰는 건 아래에 있는 대로 task 자체가 high-risk일 때뿐이고, 아키텍처 "결정" 자체는 High Risk tier로 승격한다.
 
 **Claude Code 안전 분류기가 launch 모델을 바꿀 수 있다 (Automatic model fallback).** cybersecurity/biology로 flag된 요청은 launch한 모델이 아니라 다음 모델에서 재실행된다 — worker의 실제 실행 모델은 launch 인자만으로 보장되지 않는다:
 
