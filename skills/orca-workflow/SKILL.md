@@ -102,6 +102,7 @@ printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","
   `orca-workflow`는 어느 백엔드인지 몰라도 되고 그 로직을 여기 복제하지 않는다.
 
   ```bash
+  pr_num="$(gh pr list --head "<task-branch>" --json number -q '.[0].number')"
   # premerge 게이트 — orca-evaluate의 PASS는 "코드가 acceptance criteria를 충족하는가"만 보고,
   # "지금 이 브랜치를 origin/main에 얹어도 안전한가"(stale-main, gate-integrity 자기수정 여부)는
   # 안 본다. 그건 lifecycle-gate-policy의 premerge.sh 몫이라 merge 직전에 따로 불러야 한다.
