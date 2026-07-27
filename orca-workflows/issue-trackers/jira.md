@@ -1,9 +1,12 @@
 # Issue Tracker Adapter — Jira
 
-Atlassian MCP 툴(`mcp__claude_ai_Atlassian__*`) 사용. **repo의 tracker 문서 없이는 이 adapter가 아예
-동작하지 않는다** — `getJiraIssue`/`searchJiraIssuesUsingJql`/`transitionJiraIssue` 등 모든 호출이
-`cloudId`를 필수 파라미터로 받는데, 그 값은 대상 repo의 tracker 문서에만 있다(예: vprop의
-`docs/agents/issue-tracker.md`). 이 파일에는 project key·transition ID 같은 repo 고유 값을 넣지 않는다 —
+현재 runtime에 설치·연결된 Atlassian connector를 사용한다. 이 adapter가 요구하는 capability는 **issue
+조회**, **JQL 검색**, **transition 목록 조회**, **상태 전환**, **comment 추가**다. Claude Code, Codex,
+Antigravity가 노출하는 실제 tool namespace와 이름은 다를 수 있으므로, 실행 시 이 capability를 현재
+connector tool에 매핑한다.
+
+**repo의 tracker 문서 없이는 이 adapter가 동작하지 않는다.** 각 capability가 요구하는 `cloudId`는 대상
+repo의 tracker 문서에만 있다. 이 파일에는 project key·transition ID 같은 repo 고유 값을 넣지 않는다 —
 전부 대상 repo의 tracker 문서에서 온다.
 
 ## 전제 — repo 문서에서 읽어야 하는 값

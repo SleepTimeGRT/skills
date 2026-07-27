@@ -34,5 +34,12 @@ adapter가 정의하는 오퍼레이션은 모든 백엔드에서 이름과 시�
 - `close_issue(id, note)` — 종료 처리
 - `link_pr_for_close(pr_number, id)` — PR 머지가 issue를 자동으로 닫아주는지
 
-Linear 등 세 번째 백엔드가 필요해지면 이 파일의 1·2·3은 그대로 두고 `linear.md`만 추가한다 — 이 문서와
-`orca-workflow` 쪽 변경은 필요 없다.
+Linear 등 세 번째 백엔드를 추가할 때 adapter 파일만 만들면 끝나지 않는다:
+
+- `linear.md`에 위 공통 오퍼레이션을 구현한다.
+- 이 파일 §3의 backend 목록에 Linear를 추가한다.
+- Jira와 Linear 모두 `PROJECT-123`형 식별자를 쓸 수 있으므로 §2에서 모양만 보고 둘을 구분하지 않는다.
+  tracker 문서가 없으면 기존처럼 온보딩으로 보내고, 온보딩 문서가 backend를 명시하게 한다.
+
+공통 오퍼레이션 시그니처가 유지되면 `orca-workflow`/`orca-task-runner`/`orca-evaluate`의 실행 단계는
+변경하지 않아도 된다.
