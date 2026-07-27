@@ -21,14 +21,22 @@ regression this skill exists to catch).
 
 Both `assets/hooks/stop-adapter-claude.sh` and
 `assets/hooks/stop-adapter-codex.sh` implement exactly this, wrapping the
-repo's existing capture engine unmodified. The engine path and command naming are
-repository-defined. Neither adapter emits a
+repo's existing capture engine unmodified. Both source
+`$REPO_ROOT/scripts/token-gate.sh` and call `token_gate_capture`; those two
+names are literal in the adapter, not configurable — `lifecycle-hook.conf`
+defines `STOP_HOOK_CMD` and nothing else. Neither adapter emits a
 `decision` field — no runtime-specific JSON schema is needed for the
 Stop-only scope this skill covers.
 
-**Dependency**: the target repo must provide a capture engine. Its path and the
-validation command are repository choices; read them from the repo's own
-conventions. This skill does not ship its own copy of the capture engine.
+**Dependency**: the target repo must provide a capture engine at
+`scripts/token-gate.sh` that defines a `token_gate_capture` function.
+`lifecycle-gate-policy` no longer installs that file — its
+`assets/scripts/token-gate.sh` is an optional reference implementation you may
+copy. If the repo's real engine lives elsewhere, put a shim at
+`scripts/token-gate.sh` that sources it; do not repoint the adapter, because
+`scripts/audit.py` below compares the installed adapter against the canonical
+one by hash and reports `canonical-hash DRIFT` (exit 1) for any edit. This skill
+does not ship its own copy of the capture engine.
 
 ## Audit a repository
 
@@ -64,8 +72,10 @@ Audit first; apply only when the user asks. One repository per commit.
 - **lifecycle-gate-policy** owns Git-native hooks (pre-commit/pre-push/premerge)
   only; it does not gain a lifecycle-hook asset. This skill owns agent
   lifecycle hooks — Stop today, other events only if a real need appears.
-- **token-efficient-gates** owns `scripts/token-gate.sh`; this skill wraps it
-  unmodified via command substitution and never forks it.
+- **token-efficient-gates** owns the capture-and-inspect convention that
+  `scripts/token-gate.sh` implements, but ships no copy of it; the only bundled
+  implementation is `lifecycle-gate-policy`'s optional reference asset. This
+  skill wraps whatever the repo has at that path, unmodified, and never forks it.
 - Antigravity has a third, distinct Stop contract (`decision: "continue"`,
   no documented exit-2 escape hatch) and is not covered — see
   `references/protocol-contracts.md`.
