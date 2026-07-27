@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # deploy-skills.sh — 이 repo의 skills/를 글로벌 agent 경로에 배포한다.
 #
-# 배포 구조(기존 수동 배포 형식을 그대로 복제):
+# 배포 구조:
 #   ~/.agents/skills/<name>/   전체 스킬 디렉터리 복사(정본 저장소)
-#   ~/.codex/skills/<name>/    전체 스킬 디렉터리 복사
 #   ~/.claude/skills/<name>    → ../../.agents/skills/<name> 상대 symlink(없으면 생성)
-#   각 복사본에 .installed-version.json (version/commit/date/hash) 기록
+#   ~/.codex/skills/<name>/    과거 배포본은 commit-pin 메타데이터가 있을 때 제거
+#   배포본에 .installed-version.json (version/commit/date/hash) 기록
 #     - hash = SKILL.md의 sha256 (기존 형식과 호환)
 #     - version = 사람이 관리하는 라벨. --version 없으면 기존 설치본 값을 유지,
 #       설치본이 없으면 v0.0.0. 실질적 pin은 commit+hash다.
@@ -67,17 +67,20 @@ for name in "${NAMES[@]}"; do
     fi
   fi
 
-  for base in "$HOME_DIR/.agents/skills" "$HOME_DIR/.codex/skills"; do
-    dst="$base/$name"
-    mkdir -p "$dst"
-    rsync -a --delete "$src/" "$dst/"
-    printf '{\n  "version": "%s",\n  "commit": "%s",\n  "date": "%s",\n  "hash": "%s"\n}\n' \
-      "$version" "$COMMIT" "$DATE" "$hash" > "$dst/.installed-version.json"
-    got="$(shasum -a 256 "$dst/SKILL.md" | awk '{print $1}')"
-    if [ "$got" != "$hash" ]; then
-      echo "FAIL $name: $dst/SKILL.md sha256 불일치" >&2; FAIL=1; skill_fail=1
-    fi
-  done
+  dst="$HOME_DIR/.agents/skills/$name"
+  mkdir -p "$dst"
+  rsync -a --delete "$src/" "$dst/"
+  printf '{\n  "version": "%s",\n  "commit": "%s",\n  "date": "%s",\n  "hash": "%s"\n}\n' \
+    "$version" "$COMMIT" "$DATE" "$hash" > "$dst/.installed-version.json"
+  got="$(shasum -a 256 "$dst/SKILL.md" | awk '{print $1}')"
+  if [ "$got" != "$hash" ]; then
+    echo "FAIL $name: $dst/SKILL.md sha256 불일치" >&2; FAIL=1; skill_fail=1
+  fi
+
+  legacy="$HOME_DIR/.codex/skills/$name"
+  if [ -f "$legacy/.installed-version.json" ]; then
+    rm -rf -- "$legacy"
+  fi
 
   link="$HOME_DIR/.claude/skills/$name"
   if [ -L "$link" ]; then

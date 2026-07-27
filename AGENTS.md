@@ -49,11 +49,13 @@ For skills that inspect or modify hooks, verify commands, CI, shell scripts, or 
 
 ## Skill deployment
 
-This repo's skills are installed globally as commit-pinned copies (`~/.agents/skills/` +
-`~/.codex/skills/`, with `~/.claude/skills/` symlinking into `~/.agents/skills/`), not
-worktree symlinks — editing `skills/` does nothing until redeployed. After committing a
-skill change, run `scripts/deploy-skills.sh [skill-name ...]` (no args = all skills). It
-refuses dirty skills so the recorded commit never lies about the deployed content.
+This repo's skills are installed globally as commit-pinned copies in
+`~/.agents/skills/`, with `~/.claude/skills/` symlinking into that user-scope directory.
+The deploy script removes its own commit-pinned legacy copies from `~/.codex/skills/` but
+leaves unmarked manual installs untouched. These are not worktree symlinks — editing
+`skills/` does nothing until redeployed. After committing a skill change, run
+`scripts/deploy-skills.sh [skill-name ...]` (no args = all skills). It refuses dirty
+skills so the recorded commit never lies about the deployed content.
 
 ### `orca-workflows/` deploy path (decision, #22)
 
