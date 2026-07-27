@@ -20,7 +20,7 @@ template installed into each repo's AGENTS.md). Summary:
 |---|---|---|
 | `.githooks/pre-commit` | commit | gitleaks + biome auto-fix on staged files |
 | `.githooks/pre-push` | push | `pnpm verify:static` — static checks only, token-gated |
-| `scripts/premerge.sh` | before squash merge | sync check → gate-integrity check → migration-safety lint (opt-in) → review requirement → full `pnpm verify` → e2e (skippable via `E2E_EXEMPT_REGEX` when every changed path is docs/config-only) |
+| `scripts/premerge.sh` | before squash merge | sync check → independent gitleaks rescan (`origin/main..HEAD`, catches commits that bypassed pre-commit) → gate-integrity check → migration-safety lint (opt-in) → review requirement → full `pnpm verify` → e2e (skippable via `E2E_EXEMPT_REGEX` when every changed path is docs/config-only) |
 
 Self-merge: the authoring agent may merge its own PR when `premerge.sh` passes
 (including `--review-done` after a clean review pass for code changes).
@@ -52,8 +52,11 @@ python3 <skill-dir>/scripts/audit.py --repo <path> [--skip-fixtures] [--format t
 Read-only. The report checks whether manifest categories satisfy the policy and
 whether enabled conformance fixtures observed the declared stages. The audit
 compares behavior and declared categories, not script bytes, so a
-repository-local implementation can conform. Premerge has no fixture and is
-reported as `NOT-EXERCISED`.
+repository-local implementation can conform. Premerge is reported as
+`NOT-EXERCISED` unless the `premerge-secret-scan` fixture is enabled — that one
+fixture drives the declared premerge entrypoint directly (see
+[manifest-schema.md](references/manifest-schema.md)); every other stage
+observation comes from `pre-commit`/`pre-push` fixtures only.
 
 The verdict covers the run as a whole, and is fail-closed at that scope: a run
 that observed nothing is never reported as compliance.
@@ -84,9 +87,11 @@ Two consequences to know before trusting the exit code:
   `pre-push` currently produces no line of its own.
 
 Capping the verdict per declared stage is left to a follow-up, not an oversight:
-`premerge` cannot be exercised at all, and pre-commit observation lives inside
-the `biome-noop` fixture rather than in a standalone probe, so per-stage evidence
-is a redesign rather than an edit.
+`premerge` is exercised only when `premerge-secret-scan` is enabled (and only for
+the `secret-scan` category — a passing run says nothing about `full-verify` or
+`protected-escalation` there), and pre-commit observation lives inside the
+`biome-noop` fixture rather than in a standalone probe, so per-stage evidence
+for every category at every stage is a redesign rather than an edit.
 
 Read [references/policy-spec.md](references/policy-spec.md) for required stages and
 categories, [references/manifest-schema.md](references/manifest-schema.md) for the

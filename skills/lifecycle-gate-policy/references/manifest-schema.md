@@ -139,10 +139,10 @@ categories = ["static-verify"]
 
 [stages.premerge]
 entrypoint = "bash scripts/premerge.sh"
-categories = ["full-verify", "e2e", "protected-escalation"]
+categories = ["full-verify", "e2e", "protected-escalation", "secret-scan"]
 
 [fixtures]
-enabled = ["biome-noop", "path-fallback", "delete-only-push"]
+enabled = ["biome-noop", "path-fallback", "delete-only-push", "premerge-secret-scan"]
 
 [fixtures.biome-noop]
 ignored_path = "src/lib/supabase/types.ts"
@@ -168,11 +168,14 @@ Four fixtures ship with this skill. Three drive `git commit` (pre-commit) and `g
 directly, regardless of what a stage declares. The fourth, `premerge-secret-scan`, is the one
 exception described above: it reads and runs whichever command `[stages.premerge].entrypoint` names,
 so unlike the other three, its liveness check is only as good as that declared entrypoint actually
-being the repo's real premerge command. A stage
-that names a different entrypoint — `make gate`, a wrapper script — has the
-presence of its declaration checked and nothing more: the audit never resolves
-or runs that command. The `premerge` stage is in that position by design and
-is reported `NOT-EXERCISED`.
+being the repo's real premerge command. A `pre-commit` or `pre-push` stage that names a different
+entrypoint — `make gate`, a wrapper script — has the presence of its declaration checked and nothing
+more: the audit never resolves or runs that command, because none of the `pre-commit`/`pre-push`
+fixtures read the manifest's declared entrypoint at all (they always drive `git commit`/`git push`
+directly). `premerge` does not share that limitation once `premerge-secret-scan` is enabled — that
+fixture resolves and runs the declared `[stages.premerge].entrypoint` verbatim. Without
+`premerge-secret-scan` enabled, `premerge` is in the same position as an undriven `pre-commit`/
+`pre-push` entrypoint and is reported `NOT-EXERCISED`.
 
 Two things follow, and the second one surprises people:
 
@@ -223,7 +226,10 @@ not resolve an `UNVERIFIED` that way; resolve it by making the skipped fixture
 able to run.
 
 Capping the verdict per declared stage — every declared stage needing its own
-observation — is a follow-up rather than a tweak: `premerge` cannot be exercised
-at all, so it needs an explicit exemption, and pre-commit observation has to be
-promoted out of `biome-noop` into a standalone probe first, or repositories with
-no eligible `ignored_path` could never reach `COMPLIANT`.
+observation — is a follow-up rather than a tweak: `premerge` is exercised only
+when `premerge-secret-scan` is enabled, and even then only for the `secret-scan`
+category — `full-verify` and `protected-escalation` at `premerge` still have no
+fixture of their own, so `premerge` needs a category-scoped exemption rather than
+an all-or-nothing one, and pre-commit observation has to be promoted out of
+`biome-noop` into a standalone probe first, or repositories with no eligible
+`ignored_path` could never reach `COMPLIANT`.
