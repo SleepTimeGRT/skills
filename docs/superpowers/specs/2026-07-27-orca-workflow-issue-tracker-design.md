@@ -73,7 +73,27 @@ issue tracking과 workflow orchestration은 분리 가능한 축인데 지금은
 
 **1단 — 백엔드 선택**: 대상 repo의 AGENTS.md/CLAUDE.md에서 "Issue tracker" 섹션(예: vprop의
 `### Issue tracker` → `docs/agents/issue-tracker.md` 링크 패턴)을 찾는다. 있으면 그 문서가 명시하는 백엔드를
-쓴다. 없으면 GitHub Issues 기본값(현재 동작과 동일, 변경 없음).
+쓴다.
+
+**문서가 없을 때**, 곧바로 GitHub 기본값으로 넘어가지 않고 먼저 issue 식별자의 모양을 본다 — GitHub Issues는
+순수 숫자(`123`)를, Jira/Linear는 `PROJECT-123` 형태(`VP-456`)를 쓴다:
+
+- 숫자 형태 → GitHub 기본값(현재 동작과 동일, 변경 없음).
+- `PROJECT-숫자` 형태인데 문서가 없음 → **온보딩**으로 넘어간다(아래). cloudId 같은 값은 추측으로 채울 수 없어
+  여기서 GitHub로 조용히 넘어가면 안 된다.
+
+### 온보딩 — 미문서화 repo
+
+트리거: 위에서 "문서 없음 + GitHub 형식이 아닌 이슈 ID"로 판정된 경우. `orca-workflow`가 사용자에게 직접 묻는다:
+
+1. 어떤 tracker를 쓰는지(Jira/Linear/기타), 그 tracker의 API를 부르는 데 필요한 최소 정보(Jira: site·
+   cloudId·project key / Linear: workspace·team key 등).
+2. "완료"에 해당하는 상태·transition 이름, acceptance-criteria가 적히는 섹션 이름 — vprop의
+   `docs/agents/issue-tracker.md`와 같은 항목.
+
+받은 답으로 그 문서와 같은 형식의 초안(예: `docs/agents/issue-tracker.md`)을 작성해 사용자에게 보여주고, 승인
+받으면 별도의 작은 커밋으로 repo에 반영한 뒤 — 이번 실행은 그 문서를 1단에서 방금 찾은 것처럼 이어서 진행한다.
+이후 실행부터는 문서가 이미 있으므로 온보딩이 다시 트리거되지 않는다.
 
 Jira의 경우 이 문서 읽기는 선택이 아니라 **필수 전제조건**이다 — `getJiraIssue`/`searchJiraIssuesUsingJql`/
 `transitionJiraIssue` 등 Atlassian MCP 툴은 전부 `cloudId`를 필수 파라미터로 받는데, 이 값 자체가 repo 문서
@@ -112,7 +132,8 @@ repo 문서에 정식 워크플로 표/완료 transition이 아예 없으면 ada
 
 **`orca-workflow` SKILL.md**
 
-- §0 전제: 위 3단 해석 단계 신설(맨 처음, 1회).
+- §0 전제: 위 3단 해석 단계 신설(맨 처음, 1회) + 미문서화 repo용 온보딩 서브플로우(문서 없음 + 비-GitHub 형식
+  이슈 ID일 때 트리거).
 - §1 Epic 경로: `gh issue view/list` 호출을 `get_issue`/`list_children`으로, 순서 결정을 `get_child_order`로,
   closing 체크+`gh issue close`를 `is_open`+`close_issue`로 교체.
 - §2a Contract 협상 relay: `orca orchestration task-create --spec`에 acceptance-criteria 섹션명을 포함해
