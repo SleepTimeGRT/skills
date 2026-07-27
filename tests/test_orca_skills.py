@@ -119,3 +119,105 @@ def test_orca_evaluate_has_migration_escalate_condition():
     assert "destructive-op 린터가 flag" in text and "선언에 커버되지 않는다" in text, (
         "orca-evaluate §4 must add the migration destructive-op ESCALATE condition"
     )
+
+
+ISSUE_TRACKERS_DIR = REPO_ROOT / "orca-workflows" / "issue-trackers"
+TRACKER_ADAPTER_FILES = ["github.md", "jira.md"]
+TRACKER_ALL_FILES = ["selection.md", "github.md", "jira.md"]
+TRACKER_OPERATIONS = [
+    "get_issue",
+    "get_issue_type",
+    "list_children",
+    "get_child_order",
+    "is_open",
+    "close_issue",
+    "link_pr_for_close",
+]
+VPROP_SPECIFIC_LEAKS = ["VP-", "voyagerx", "fb59360c"]
+
+
+@pytest.mark.parametrize("filename", TRACKER_ALL_FILES)
+def test_issue_tracker_file_exists(filename):
+    assert (ISSUE_TRACKERS_DIR / filename).is_file(), (
+        f"orca-workflows/issue-trackers/{filename} missing"
+    )
+
+
+@pytest.mark.parametrize("filename", TRACKER_ADAPTER_FILES)
+def test_issue_tracker_adapter_defines_all_operations(filename):
+    text = (ISSUE_TRACKERS_DIR / filename).read_text()
+    for op in TRACKER_OPERATIONS:
+        assert f"`{op}(" in text, f"{filename}: must define operation '{op}'"
+
+
+@pytest.mark.parametrize("term", VPROP_SPECIFIC_LEAKS)
+def test_jira_adapter_has_no_vprop_specific_values(term):
+    text = (ISSUE_TRACKERS_DIR / "jira.md").read_text()
+    assert term not in text, (
+        f"jira.md must stay repo-agnostic — found vprop-specific value '{term}'"
+    )
+
+
+def test_jira_adapter_uses_structural_fields():
+    text = (ISSUE_TRACKERS_DIR / "jira.md").read_text()
+    for field in ("hierarchyLevel", "parent", "statusCategory", "getTransitionsForJiraIssue"):
+        assert field in text, f"jira.md must use the structural field/tool '{field}'"
+
+
+def test_github_adapter_uses_gh_cli():
+    text = (ISSUE_TRACKERS_DIR / "github.md").read_text()
+    for call in ("gh issue view", "gh issue list", "gh issue close"):
+        assert call in text, f"github.md must define '{call}'"
+
+
+def test_selection_doc_defines_backend_choice_and_onboarding_trigger():
+    text = (ISSUE_TRACKERS_DIR / "selection.md").read_text()
+    assert "Issue tracker" in text, (
+        "selection.md must describe the AGENTS.md/CLAUDE.md pointer lookup"
+    )
+    assert "온보딩" in text, (
+        "selection.md must reference the onboarding trigger for undocumented repos"
+    )
+
+
+def test_orca_workflow_no_hardcoded_gh_issue_calls():
+    text = _read_skill("orca-workflow")
+    for term in ("gh issue view", "gh issue list", "gh issue close"):
+        assert term not in text, (
+            f"orca-workflow must not call '{term}' directly — route through the issue-tracker adapter"
+        )
+    assert "gh pr" in text, (
+        "orca-workflow must keep gh pr calls — code hosting stays GitHub-specific"
+    )
+
+
+def test_orca_workflow_references_issue_tracker_selection():
+    text = _read_skill("orca-workflow")
+    assert "issue-trackers/selection.md" in text, (
+        "orca-workflow §0 must resolve the backend via issue-trackers/selection.md"
+    )
+
+
+def test_orca_workflow_has_onboarding_subflow():
+    text = _read_skill("orca-workflow")
+    assert "온보딩" in text, (
+        "orca-workflow §0 must define the onboarding subflow for undocumented repos"
+    )
+
+
+def test_orca_workflow_uses_abstract_tracker_operations():
+    text = _read_skill("orca-workflow")
+    for op in ("get_issue", "list_children", "get_child_order", "is_open", "close_issue"):
+        assert op in text, f"orca-workflow must route issue-tracker access through '{op}'"
+
+
+@pytest.mark.parametrize("name", NEW_SKILLS)
+def test_no_hardcoded_acceptance_criteria_heading(name):
+    text = _read_skill(name)
+    assert "## Acceptance criteria" not in text, (
+        f"{name}: acceptance-criteria heading must come from the resolved tracker marker, "
+        "not a hardcoded GitHub heading"
+    )
+    assert "## What to build" not in text, (
+        f"{name}: 'what to build' heading must not be hardcoded either"
+    )
