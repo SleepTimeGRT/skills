@@ -26,7 +26,7 @@ description: Use when generating the implementation for one task (issue) — pro
 `orca-workflow`가 이 task를 넘기면, 코드를 쓰기 전에 **제안서**를 먼저 쓴다:
 
 - 구현 범위(무엇을 만들 것인가, 어떤 파일을 건드릴 것인가)
-- 검증 방법(구체적인 파일/함수/테스트로 — issue의 `## Acceptance criteria`를 어떻게 커버할지)
+- 검증 방법(구체적인 파일/함수/테스트로 — issue의 acceptance-criteria 섹션[`orca-workflow`가 §0에서 해석해 dispatch spec으로 넘겨준 섹션명 — 트래커 백엔드마다 다르다]을 어떻게 커버할지)
 - (schema/migration 파일을 건드리는 경우) **의도된 destructive 오퍼레이션 목록.** 없으면
   명시적으로 "없음"이라고 쓴다(공란은 "언급 안 함"이지 "없음"이 아니므로 구분한다). 이 선언은
   나중에 `orca-evaluate` §3가 diff에서 실제로 flag된 destructive-op와 대조하는 근거가 된다.

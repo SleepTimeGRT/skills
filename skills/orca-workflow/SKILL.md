@@ -1,16 +1,19 @@
 ---
 name: orca-workflow
-description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-matching, which collides with Orca's built-in `orchestration` skill (multi-agent coordination, task dispatch, coordinator loops). Picks up a GitHub issue and drives it through its full lifecycle — branches on issue type (epic vs task), runs issue-drain validation for epics, builds an issue-graph task-queue, and for each task relays the orca-task-runner/orca-evaluate contract negotiation, routes PASS/FAIL/ESCALATE (and GATE_FAIL straight to inspecting), and escalates to a human inspection checkpoint. Never generates or evaluates code directly — pure orchestration, kept context-light. Self-relative.
+description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-matching, which collides with Orca's built-in `orchestration` skill (multi-agent coordination, task dispatch, coordinator loops). Picks up an issue (GitHub Issues or Jira, resolved per repo — see `~/.agents/orca-workflows/issue-trackers/selection.md`) and drives it through its full lifecycle — branches on issue type (epic vs task), runs issue-drain validation for epics, builds an issue-graph task-queue, and for each task relays the orca-task-runner/orca-evaluate contract negotiation, routes PASS/FAIL/ESCALATE (and GATE_FAIL straight to inspecting), and escalates to a human inspection checkpoint. Never generates or evaluates code directly — pure orchestration, kept context-light. Self-relative.
 ---
 
 # Orca Workflow
 
-GitHub issue 하나를 받아 끝까지(merge까지) 가져가는 최상위 오케스트레이터다. **코드를 생성하지도, 평가하지도 않는다** — 그 일은 각각 `orca-task-runner`, `orca-evaluate`가 한다. 이 스킬의 컨텍스트에는 issue 번호·task 상태·짧은 판정 결과만 남긴다. diff나 report 본문을 직접 읽지 않는다.
+이슈 하나를 받아 끝까지(merge까지) 가져가는 최상위 오케스트레이터다. **코드를 생성하지도, 평가하지도 않는다** — 그 일은 각각 `orca-task-runner`, `orca-evaluate`가 한다. 이 스킬의 컨텍스트에는 issue 번호·task 상태·짧은 판정 결과만 남긴다. diff나 report 본문을 직접 읽지 않는다.
 
 ## 0. 전제
 
 - `orca status --json` ready. 실패 시 아래 "폴백".
-- `gh issue view <num>`으로 issue 타입 확인(label 또는 body 구조로 epic/task 판별).
+- **이슈 트래커 해석** (실행 시작 시 1회, 캐싱 없이 — 매 실행마다 새로 읽는다): `~/.agents/orca-workflows/issue-trackers/selection.md`가 정의하는 절차로 백엔드를 정하고, 그 백엔드의 `~/.agents/orca-workflows/issue-trackers/{github,jira}.md`가 정의하는 `get_issue`/`get_issue_type`/`list_children`/`get_child_order`/`is_open`/`close_issue`/`link_pr_for_close`를 이후 전체 실행에서 쓴다. 구체 값(project key, transition id 등)은 이 스킬에 복제하지 않는다 — 항상 selection.md가 가리키는 대상 repo의 tracker 문서에서 얻는다.
+- **이슈 타입 판별** — `get_issue_type(issue-num)`으로 epic/task를 판별해 아래 "1. Epic 경로"/"2. Task 경로"로 분기한다.
+- **acceptance-criteria 섹션명** — 백엔드가 resolve한 tracker 문서(`~/.agents/orca-workflows/issue-trackers/{github,jira}.md`, 또는 온보딩으로 만들어진 대상 repo 문서)가 명시하는 이름을 쓴다. 이 스킬은 그 값을 복제하지 않는다 — 아래 §1·§2a의 "§0에서 해석한 acceptance-criteria 섹션명"은 이 값을 가리킨다.
+- **온보딩** — selection.md가 "문서 없음 + GitHub 형식이 아닌 이슈 ID"로 판정하면, 곧바로 GitHub로 넘어가지 않고 사용자에게 직접 묻는다: ①어떤 tracker를 쓰는지 + 그 API를 부르는 데 필요한 최소 정보(Jira라면 site·cloudId·project key) ②"완료" transition/상태 이름, acceptance-criteria 섹션 이름. 받은 답으로 `docs/agents/issue-tracker.md` 형식의 초안을 작성해 보여주고, 승인되면 별도의 작은 커밋으로 대상 repo에 반영한 뒤 이번 실행을 이어간다. 이후 실행부터는 문서가 있으므로 다시 트리거되지 않는다.
 - CLI 기반 coordinator(Codex/agy)는 launch 시 approval·sandbox를 명시한다. 기본 posture는 `-a never -s workspace-write`.
 - 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 —
   `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다. §2a의 두 `terminal create` 호출
@@ -20,28 +23,34 @@ GitHub issue 하나를 받아 끝까지(merge까지) 가져가는 최상위 오�
 
 **1a. issue-drain** — 별도 subagent(이 세션과 다른, 별도로 뜬 세션)에게 child issue 전체 검증을 맡긴다:
 
-- 각 child issue가 self-contained한지(`## What to build` + `## Acceptance criteria`)
-- `Blocked by` / `Refs` 관계가 실제로 존재하고 방향이 맞는지
+- 각 child issue가 self-contained한지(§0에서 해석한 acceptance-criteria 섹션 + "무엇을 만들지"가 본문에 있는지)
+- 의존 관계가 있다면(`get_child_order`가 참고하는 것과 같은 그래프) 그게 실제로 존재하고 방향이 맞는지 — 의존 링크 자체가 없는 건 실패가 아니다
 - 그래프상 빠진 child나 순환 의존이 없는지
 
-```bash
-gh issue view <epic-num> --json body,title
-gh issue list --search "epic:<epic-num> in:body" --json number,title,body   # 또는 epic body에 나열된 child 번호 파싱
+```
+get_issue(epic-num)
+list_children(epic-num)
 ```
 
 검증 실패 → 사용자에게 보고하고 멈춘다(수정 후 재호출). 통과 → **1b**.
 
-**1b. task-queue 확정** — child issue 그래프(`Blocked by`/`Refs`/epic body 나열 순서)로 실행 순서를 정한다. file-overlap이 아니라 **issue 그래프 기준**이다(구현 전이라 파일 목록을 아직 모른다).
+**1b. task-queue 확정** — `get_child_order(epic-num, children)`로 실행 순서를 정한다. file-overlap이 아니라 **issue 그래프 기준**이다(구현 전이라 파일 목록을 아직 모른다).
 
-**1c. 순회** — ready task마다 아래 "2. Task 경로"를 실행. 완료되면 dequeue하고 의존이 풀린 다음 task로 진행. 이번 큐가 비었다고 바로 epic을 닫지 않는다 — 이번 실행 밖에서 처리된 child가 있을 수 있으므로, 닫기 전에 child 전체가 실제로 닫혀 있는지 확인한다(GitHub는 child issue 완료를 자동으로 epic에 반영하지 않으므로 이 확인·종료는 항상 명시적으로 한다):
+**1c. 순회** — ready task마다 아래 "2. Task 경로"를 실행. 완료되면 dequeue하고 의존이 풀린 다음 task로 진행. 이번 큐가 비었다고 바로 epic을 닫지 않는다 — 이번 실행 밖에서 처리된 child가 있을 수 있으므로, 닫기 전에 child 전체가 실제로 닫혀 있는지 확인한다(child 완료가 epic에 자동 반영되지 않는 tracker일 수 있으므로 이 확인·종료는 항상 명시적으로 한다):
 
-```bash
-gh issue list --search "epic:<epic-num> in:body" --json number,state -q '.[] | select(.state=="OPEN")'
-# 위 출력이 비어 있을 때만(=열린 child가 없을 때만) epic을 닫는다
-gh issue close <epic-num> --comment "All child tasks complete: <child-num-1>, <child-num-2>, ..."
+```
+list_children(epic-num)의 각 항목에 is_open() 확인
+# 전부 닫혀 있을 때만(=열린 child가 없을 때만) epic을 닫는다
+close_issue(epic-num, "All child tasks complete: <child-num-1>, <child-num-2>, ...")
 ```
 
 ## 2. Task 경로
+
+**2. 전제 — acceptance-criteria 섹션 존재 확인**: `orca-task-runner`를 dispatch하기 전에, §0에서 해석한
+acceptance-criteria 섹션명이 issue body에 실제로 있는지 먼저 확인한다. 없으면 **`orca-task-runner`를 호출하지
+않고** 바로 **3. Inspecting**으로 보고한다(outcome: `NO_ACCEPTANCE_CRITERIA`) — issue 생성 시 이 섹션을
+보장하는 절차는 아직 없어서다(별도 후속 이슈; 임시로는 `/triage` 리다이렉트 대상으로 취급). 이 확인은 여기
+한 곳에서만 하고 `orca-task-runner`/`orca-evaluate`에 반복하지 않는다.
 
 **2a. Contract 협상 relay** — `orca-task-runner`를 "제안서 작성" 모드로 호출 → 나온 제안서 파일 경로를 `orca-evaluate`에 "검토" 모드로 전달 → 반려면 파일 경로를 다시 `orca-task-runner`에 전달. **파일 내용은 읽지 않고 경로만 중계**한다. 최대 2라운드, 그 이후는 `orca-task-runner`가 결정권을 가지고 진행(그대로 2b로 넘어감).
 
@@ -51,7 +60,7 @@ gh issue close <epic-num> --comment "All child tasks complete: <child-num-1>, <c
 # task-runner 호출 (provider는 model-selection.md 기준 선택 — 코드 생성이라 Routine/High-Risk tier)
 orca terminal create --worktree active --title task-run-<n> \
   --command "<provider의 launch 문법 — provider 문서에서 resolve>" --json
-orca orchestration task-create --spec "<issue 번호 + 제안서/구현 모드>" --json
+orca orchestration task-create --spec "<issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 제안서/구현 모드>" --json
 orca orchestration dispatch --task <task_id> --to <run-handle> --inject --json
 # 할당 로그 — 스폰하는 쪽이 남긴다. dispatch와 같은 블록에서 즉시 실행(누락 방지);
 # orca 상태는 reset으로 소실될 수 있어 할당의 영속 기록은 이 파일이 유일하다.
@@ -69,7 +78,7 @@ cat > "$prompt_file" <<'PROMPT_EOF'
 PROMPT_EOF
 orca terminal create --worktree active --title task-evaluate-<n> \
   --command "agy -p \"\$(cat '$prompt_file')\" --model <token> --print-timeout 15m --dangerously-skip-permissions" --json
-orca orchestration task-create --spec "<diff 또는 제안서 경로 + issue 번호 + 요청 모드>" --json
+orca orchestration task-create --spec "<diff 또는 제안서 경로 + issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 요청 모드>" --json
 orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
 printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","issue":"<issue-num>","task_id":"<task_id>","provider":"agy","model":"<model>","effort":"","terminal":"<evaluate-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
   >> ~/.local/state/orca-workflows/logs/assignments.jsonl
@@ -88,15 +97,18 @@ printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","
   # task 브랜치에 열린 PR이 있는지 확인 — 없으면 여기서 만든다(할당 로그의 worktree/branch 사용)
   pr_num="$(gh pr list --head "<task-branch>" --json number -q '.[0].number')"
   if [ -z "$pr_num" ]; then
-    gh pr create --head "<task-branch>" --title "<task 제목>" --body "Closes #<task-issue-num>"
+    gh pr create --head "<task-branch>" --title "<task 제목>" --body "<task 설명 — 트래커별 텍스트는 아래 link_pr_for_close가 처리하므로 여기선 안 넣는다>"
     pr_num="$(gh pr view "<task-branch>" --json number -q .number)"  # gh pr create는 URL만 출력, --json 미지원
   fi
-  # 기존 PR이면 closing 키워드가 있는지 확인 — 없으면 squash merge로도 issue가 자동으로 닫히지 않는다
-  gh pr view "$pr_num" --json body -q .body | grep -qiE "(closes|fixes|resolves) #<task-issue-num>" \
-    || gh pr edit "$pr_num" --body "$(gh pr view "$pr_num" --json body -q .body)
+  ```
 
-  Closes #<task-issue-num>"
+  PR이 확보되면(신규든 기존이든) **`link_pr_for_close(pr_num, task-issue-num)`를 호출**한다 — 이건 질의가 아니라
+  액션이다: GitHub adapter는 그 안에서 "Closes #N" 키워드 존재를 확인·보강하고, Jira adapter는 아무것도 안
+  한다(no-op, merge-magic 없음). 그 구체 로직(grep 패턴, 키워드 문자열 등)은 각 adapter 파일이 소유하므로
+  `orca-workflow`는 어느 백엔드인지 몰라도 되고 그 로직을 여기 복제하지 않는다.
 
+  ```bash
+  pr_num="$(gh pr list --head "<task-branch>" --json number -q '.[0].number')"
   # premerge 게이트 — orca-evaluate의 PASS는 "코드가 acceptance criteria를 충족하는가"만 보고,
   # "지금 이 브랜치를 origin/main에 얹어도 안전한가"(stale-main, gate-integrity 자기수정 여부)는
   # 안 본다. 그건 lifecycle-gate-policy의 premerge.sh 몫이라 merge 직전에 따로 불러야 한다.
@@ -114,18 +126,13 @@ printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","
       # 그 외=verify/e2e 실패 통과값. Inspecting 보고에 이 exit code와 마지막 stderr 몇 줄을 그대로 첨부한다.
     else
       gh pr merge "$pr_num" --squash --delete-branch
-      # closing 키워드는 base가 default branch일 때만 자동 종료를 트리거한다(예: task PR이 epic 통합
-      # 브랜치로 들어가는 구성이면 키워드가 아예 동작하지 않는다) — 그래서 아래 확인·폴백이 부수적
-      # 안전장치가 아니라 실질적으로 issue를 닫는 유일한 경로일 수 있다. 상태 확인 후에도 항상 실행한다.
-      [ "$(gh issue view <task-issue-num> --json state -q .state)" = "OPEN" ] \
-        && gh issue close <task-issue-num> --comment "Merged via PR #$pr_num"
     fi
   else
     gh pr merge "$pr_num" --squash --delete-branch
-    [ "$(gh issue view <task-issue-num> --json state -q .state)" = "OPEN" ] \
-      && gh issue close <task-issue-num> --comment "Merged via PR #$pr_num"
   fi
   ```
+
+  머지 성공 시(둘 중 어느 분기든) **`is_open(task-issue-num)`이 true면 `close_issue(task-issue-num, "Merged via PR #$pr_num")`를 호출**한다 — 코드호스팅(PR 머지)은 GitHub 전용이라 미변경이고, issue 종료는 트래커 무관하게 이 한 경로로 처리된다: GitHub는 위 `link_pr_for_close`가 보통 이미 닫아둬서 여기선 안전망(no-op)이고, Jira 등 merge-magic이 없는 트래커는 이 호출이 유일한 종료 경로다. (`is_open`/`close_issue`/`link_pr_for_close`는 실제 셸 커맨드가 아니라 tracker adapter 오퍼레이션이다 — 문자 그대로 셸에 붙여넣지 말 것.)
 
   task 종료(premerge.sh가 있고 실패한 경우는 예외 — 아래 PREMERGE_FAIL 참고, task 종료가 아니라 inspecting으로 간다).
 - FAIL → 재시도 카운터 확인. **2회 미만이면** feedback과 함께 `orca-task-runner`에 재-dispatch(2b로). **2회 도달하면** inspecting으로.
@@ -135,13 +142,13 @@ printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","
 라우팅 판정마다 outcome 이벤트를 할당 로그와 같은 파일에 남긴다 — `issue`/`task_id`로 assign 이벤트와 join해야 "어떤 할당이 어떤 결과를 냈는지"를 사후 감사할 수 있다(할당 기록만으로는 품질 판정 불가):
 
 ```bash
-printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|PREMERGE_FAIL>","retry":<재시도 횟수>}\n' "$(date -u +%FT%TZ)" \
+printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|PREMERGE_FAIL|NO_ACCEPTANCE_CRITERIA|NO_DONE_TRANSITION>","retry":<재시도 횟수>}\n' "$(date -u +%FT%TZ)" \
   >> ~/.local/state/orca-workflows/logs/assignments.jsonl
 ```
 
 ## 3. Inspecting
 
-사람 체크포인트. 보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/PREMERGE_FAIL 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **PREMERGE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 merge 직전 게이트에서 막혔다는 뜻이므로, premerge.sh의 exit code(2=stale-main 등 precondition, 3=PROTECTED, 4=REVIEW, 5=MIGRATION_ESCALATE, 그 외=verify/e2e 실패)와 마지막 출력 몇 줄을 그대로 표시한다 — 사람이 그 의미를 다시 유추하지 않게. 사람이 고를 수 있는 것: 계속(피드백 반영해 재시도) / 재계획(요구사항 자체를 다시 논의 — 1a 또는 issue 수정으로 복귀) / 중단.
+사람 체크포인트. 보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/PREMERGE_FAIL/NO_ACCEPTANCE_CRITERIA/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **PREMERGE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 merge 직전 게이트에서 막혔다는 뜻이므로, premerge.sh의 exit code(2=stale-main 등 precondition, 3=PROTECTED, 4=REVIEW, 5=MIGRATION_ESCALATE, 그 외=verify/e2e 실패)와 마지막 출력 몇 줄을 그대로 표시한다 — 사람이 그 의미를 다시 유추하지 않게. **NO_ACCEPTANCE_CRITERIA**는 §2 전제 확인에서 acceptance-criteria 섹션이 issue body에 없어 `orca-task-runner`를 아예 호출하지 않았다는 뜻이다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음). 두 outcome 모두 §2d를 거치지 않고 발생하므로(GATE_FAIL과 같은 이유), 발생 시점에서 즉시 위 outcome 로그 라인을 해당 outcome 값으로 직접 남긴다. 사람이 고를 수 있는 것: 계속(피드백 반영해 재시도) / 재계획(요구사항 자체를 다시 논의 — 1a 또는 issue 수정으로 복귀) / 중단.
 
 ## 폴백
 
