@@ -60,13 +60,29 @@ below would flip; do not transplant this policy without re-checking the profile.
   for code changes only; docs-only PRs pass on verify(+e2e) to keep trivial-PR
   throughput and token cost sane.
 
-## Why canonical copies instead of a shared runtime dependency
+## From canonical copies to policy conformance
 
-Three repos previously carried three drifting variants of the same token-gate
-script and three different pre-push semantics. Copies with hash-audit keep each
-repo self-contained (a generated repo must never depend on this skills repo at
-runtime — repository rule) while making drift visible and reversible: improve
-the template here, re-apply everywhere, or upstream a repo's local improvement.
+Historically, three repos carried drifting variants of the same token-gate script
+and different pre-push semantics. Copying scripts with a hash audit was chosen to
+keep each repository self-contained; that constraint remains: a generated repository
+must never depend on this skills repository at runtime.
+
+The current decision separates policy from implementation. This skill specifies the
+required stage categories, records each repository's entrypoints in
+`lifecycle-gate.toml`, and evaluates behavior with conformance fixtures. Reference
+scripts remain available for opt-in use, but byte equality is neither the policy nor
+proof that a stage is live.
+
+## Why policy and implementation are separate
+
+A hash comparison answers "is this file the canonical bytes?", which is not the
+question the policy asks. Two repositories can diverge from a template by the same
+measured amount while one has fixed a real hook bug and the other has dropped a
+safety behavior; byte comparison scores them identically. Only observing what the
+stage does with a commit or a push separates them, so conformance is defined by
+behavior, and the audit refuses to certify a run in which nothing was observed.
+Capping the verdict per declared stage is a follow-up — see the verdict scope
+section in [manifest-schema.md](manifest-schema.md).
 
 ## E2E skip for diff-provably-inert changes (2026-07-25)
 

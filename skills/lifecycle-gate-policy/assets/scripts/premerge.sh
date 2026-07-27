@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# lifecycle-gate-policy: canonical scripts/premerge.sh v1 — do not hand-edit in the
-# target repository; change the copy in sleeptimegrt-skills and re-apply.
+# lifecycle-gate-policy reference implementation — copying is optional; a repository
+# may implement the same policy any way it likes and declare it in lifecycle-gate.toml.
 #
 # The merge gate. Run from the PR branch's worktree before `gh pr merge --squash`.
 # Self-merge policy: an agent may merge its own PR only when this script prints PASS.
