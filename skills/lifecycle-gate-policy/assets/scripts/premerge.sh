@@ -14,7 +14,7 @@
 #      review process first, then re-run with --review-done
 #   5  MIGRATION_ESCALATE — destructive-op lint flagged a migration change;
 #      a human must review and merge this PR (opt-in via MIGRATION_LINT_ENABLED)
-#   *  verify/e2e failure (their exit codes pass through)
+#   *  verify/e2e/secret-scan failure (their exit codes pass through)
 set -euo pipefail
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
@@ -69,7 +69,19 @@ if [ -z "$CHANGED" ]; then
   exit 2
 fi
 
-# ---- 2. gate integrity --------------------------------------------------------
+# ---- 2. independent secret rescan --------------------------------------------
+# Unconditional, like pre-commit's own gitleaks call (assets/githooks/pre-commit) — this stage
+# must run before gate integrity/review below so a synthetic-secret-only commit is never
+# misattributed to the review gate. Scans the full commit range (not a single staged diff), so a
+# commit that bypassed pre-commit (git commit --no-verify) is still caught here.
+if ! command -v gitleaks &>/dev/null; then
+  printf '[premerge] FAIL — gitleaks not found — install: brew install gitleaks\n' >&2
+  exit 1
+fi
+token_gate_capture premerge:secret-scan -- gitleaks detect --source . \
+  --log-opts "origin/$DEFAULT_BRANCH..HEAD" --no-banner --redact
+
+# ---- 3. gate integrity --------------------------------------------------------
 # The gate an agent is judged by must not be editable by that agent in the same PR
 # (a green result must mean "code is correct", never "gate was weakened").
 PROTECTED_REGEX='^\.githooks/|^scripts/(premerge\.sh|premerge\.conf\.sh|token-gate\.sh|migration-lint\.py)$|^biome\.json$|^\.gitleaks\.toml$'
@@ -120,7 +132,7 @@ if [ -n "$PROTECTED_HITS" ]; then
   exit 3
 fi
 
-# ---- 3. migration safety (opt-in) --------------------------------------------
+# ---- 4. migration safety (opt-in) --------------------------------------------
 # Deterministic destructive-op scan for schema/migration files. Disabled by
 # default; a repo opts in via scripts/premerge.conf.sh. When enabled and the
 # lint flags something, this hard-blocks self-merge with no override — a
@@ -142,7 +154,7 @@ if [ "$MIGRATION_LINT_ENABLED" = "true" ]; then
   fi
 fi
 
-# ---- 4. review requirement ----------------------------------------------------
+# ---- 5. review requirement ----------------------------------------------------
 CODE_CHANGES=$(printf '%s\n' "$CHANGED" | grep -Ev "$REVIEW_EXEMPT_REGEX" || true)
 if [ -n "$CODE_CHANGES" ] && [ "$REVIEW_DONE" -ne 1 ]; then
   CODE_COUNT=$(printf '%s\n' "$CODE_CHANGES" | wc -l | tr -d ' ')
@@ -152,7 +164,7 @@ if [ -n "$CODE_CHANGES" ] && [ "$REVIEW_DONE" -ne 1 ]; then
   exit 4
 fi
 
-# ---- 5. full verification -------------------------------------------------------
+# ---- 6. full verification -------------------------------------------------------
 # *_CMD strings run through `bash -c` so quoting inside them behaves like a shell line.
 token_gate_capture premerge:verify -- bash -c "$VERIFY_CMD"
 

@@ -31,14 +31,14 @@ categories = ["static-verify"]                   # required
 
 [stages.premerge]
 entrypoint = "bash scripts/premerge.sh"
-categories = ["full-verify", "e2e", "protected-escalation"]
-# full-verify and protected-escalation required; e2e recommended when this
+categories = ["full-verify", "e2e", "protected-escalation", "secret-scan"]
+# full-verify, protected-escalation, and secret-scan required; e2e recommended when this
 # repo maintains an e2e suite (WARN, not FAIL, if omitted).
 
 # Optional. Names of conformance fixtures to run against this repository.
 # Omit [fixtures] entirely if none should run.
 [fixtures]
-enabled = ["biome-noop", "path-fallback", "delete-only-push"]
+enabled = ["biome-noop", "path-fallback", "delete-only-push", "premerge-secret-scan"]
 
 # Fixture-specific data this repo must supply — never mechanism, only facts
 # about this repo (a real path, a timeout value).
