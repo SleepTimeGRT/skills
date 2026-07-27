@@ -85,6 +85,13 @@ def run(source: Path, manifest: dict, cfg: dict) -> Result:
         branch = _current_branch(repo.path)
         remote_name = "origin"
         bare_dir = Path(tempfile.mkdtemp(prefix="lgp-premerge-origin-"))
+        init_bare = subprocess.run(
+            ["git", "init", "--quiet", "--bare", str(bare_dir)],
+            capture_output=True, text=True, check=False,
+        )
+        if init_bare.returncode != 0:
+            return Result(NAME, "FAIL", f"could not init bare origin remote: {(init_bare.stderr or '').strip()[-300:]}")
+
         add_remote = repo.run(["git", "remote", "add", remote_name, str(bare_dir)])
         if add_remote.returncode != 0:
             return Result(NAME, "FAIL", f"could not add origin remote in scratch clone: {(add_remote.stderr or '').strip()[-300:]}")
@@ -92,6 +99,15 @@ def run(source: Path, manifest: dict, cfg: dict) -> Result:
         base_push = repo.run(["git", "push", remote_name, f"HEAD:refs/heads/{branch}"])
         if base_push.returncode != 0:
             return Result(NAME, "FAIL", f"could not push baseline to origin: {(base_push.stderr or '').strip()[-300:]}")
+
+        # Premerge entrypoints commonly fall back to a hardcoded "main" default branch when
+        # refs/remotes/origin/HEAD isn't set. A plain `git remote add` + `git push` never
+        # creates that symbolic ref, so without this the fixture would misattribute a
+        # branch-name mismatch (e.g. a pilot repo not checked out on "main") to secret-scan
+        # never having run.
+        set_head = repo.run(["git", "remote", "set-head", remote_name, branch])
+        if set_head.returncode != 0:
+            return Result(NAME, "FAIL", f"could not set {remote_name}/HEAD to {branch}: {(set_head.stderr or '').strip()[-300:]}")
 
         repo.write(SYNTHETIC_SECRET_RELPATH, SYNTHETIC_SECRET)
         repo.stage(SYNTHETIC_SECRET_RELPATH)
