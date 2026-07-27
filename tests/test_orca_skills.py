@@ -28,6 +28,11 @@ WORKFLOWS_DOCS = [
     "models/codex.md",
     "models/agy.md",
 ]
+PROVIDER_REFERENCES = {
+    "models/claude-code.md": "../references/models/claude-code.md",
+    "models/codex.md": "../references/models/codex.md",
+    "models/agy.md": "../references/models/agy.md",
+}
 
 
 def _read_skill(name: str) -> str:
@@ -98,12 +103,28 @@ def test_orca_workflow_never_generates_or_evaluates_itself():
 
 
 @pytest.mark.parametrize("doc", WORKFLOWS_DOCS)
-def test_workflows_docs_reference_new_skill_names(doc):
+def test_workflows_docs_do_not_reference_retired_skill_names(doc):
     text = (WORKFLOWS_DIR / doc).read_text()
     for term in RETIRED_SKILLS:
         assert term not in text, f"{doc}: stale reference '{term}'"
-    assert any(name in text for name in NEW_SKILLS), (
-        f"{doc}: should reference at least one of {NEW_SKILLS} after the migration"
+
+
+def test_model_selection_references_current_workflow_skills():
+    text = (WORKFLOWS_DIR / "model-selection.md").read_text()
+    for name in NEW_SKILLS:
+        assert name in text, (
+            f"model-selection.md: workflow entry point should reference {name}"
+        )
+
+
+@pytest.mark.parametrize(("doc", "reference"), PROVIDER_REFERENCES.items())
+def test_provider_docs_link_their_evidence_reference(doc, reference):
+    text = (WORKFLOWS_DIR / doc).read_text()
+    assert f"]({reference})" in text, (
+        f"{doc}: should link its provider evidence at {reference}"
+    )
+    assert (WORKFLOWS_DIR / "models" / reference).resolve().is_file(), (
+        f"{doc}: evidence link target does not exist: {reference}"
     )
 
 
