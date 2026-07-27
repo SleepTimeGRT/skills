@@ -191,6 +191,19 @@ def test_github_adapter_uses_gh_cli():
         assert call in text, f"github.md must define '{call}'"
 
 
+def test_github_adapter_prefers_native_sub_issues_and_exact_close_match():
+    text = (ISSUE_TRACKERS_DIR / "github.md").read_text()
+    assert "sub_issues" in text, "github.md must query GitHub's native sub-issues API"
+    assert re.search(
+        r"Refs #N.*?의존 edge로 취급하지 않는다",
+        text,
+        re.S,
+    ), "github.md must explicitly exclude informational refs from dependency edges"
+    assert "([^0-9]|$)" in text, (
+        "github.md closing-keyword check must not match #12 inside #123"
+    )
+
+
 def test_selection_doc_defines_backend_choice_and_onboarding_trigger():
     text = (ISSUE_TRACKERS_DIR / "selection.md").read_text()
     assert "Issue tracker" in text, (
@@ -198,6 +211,41 @@ def test_selection_doc_defines_backend_choice_and_onboarding_trigger():
     )
     assert "온보딩" in text, (
         "selection.md must reference the onboarding trigger for undocumented repos"
+    )
+
+
+def test_linear_adapter_requires_selection_disambiguation():
+    text = (ISSUE_TRACKERS_DIR / "selection.md").read_text()
+    assert "Jira와 Linear" in text and "식별자" in text, (
+        "selection.md must disambiguate Jira and Linear project-style identifiers"
+    )
+    assert "변경은 필요 없다" not in text, (
+        "selection.md must not claim a Linear adapter is sufficient by itself"
+    )
+
+
+def test_jira_adapter_is_runtime_portable():
+    text = (ISSUE_TRACKERS_DIR / "jira.md").read_text()
+    assert "mcp__claude_ai_Atlassian" not in text, (
+        "jira.md must not pin the adapter to Claude's MCP namespace"
+    )
+    for capability in (
+        r"issue\s+조회",
+        r"JQL\s+검색",
+        r"transition\s+목록",
+        r"상태\s+전환",
+        r"comment\s+추가",
+    ):
+        assert re.search(capability, text), (
+            f"jira.md must name the Atlassian capability matching {capability!r}"
+        )
+
+
+def test_spawn_failure_log_uses_json_encoder():
+    text = (WORKFLOWS_DIR / "spawn-failures.md").read_text()
+    assert "jq -cn" in text, "spawn-failures.md must encode JSONL with jq"
+    assert "printf '{\"ts\"" not in text, (
+        "spawn-failures.md must not interpolate unescaped values into JSON"
     )
 
 

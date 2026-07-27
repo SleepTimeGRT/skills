@@ -32,10 +32,28 @@ the run looked like it succeeded — see that row's fix column.
 
    ```bash
    install -d -m 700 ~/.local/state/orca-workflows/logs
-   printf '{"ts":"%s","skill":"<skill>","role":"<role>","provider":"<provider>","failure_signature":"<signature>","fix_applied":"<fix or null>","known_issue":<issue-num-or-null>}\n' \
-     "$(date -u +%FT%TZ)" >> ~/.local/state/orca-workflows/logs/spawn-failures.jsonl
+   jq -cn \
+     --arg ts "$(date -u +%FT%TZ)" \
+     --arg skill "<skill>" \
+     --arg role "<role>" \
+     --arg provider "<provider>" \
+     --arg failure_signature "<signature>" \
+     --arg fix_applied "<fix or empty>" \
+     --argjson known_issue '<issue-num-or-null>' \
+     '{
+       ts: $ts,
+       skill: $skill,
+       role: $role,
+       provider: $provider,
+       failure_signature: $failure_signature,
+       fix_applied: (if $fix_applied == "" then null else $fix_applied end),
+       known_issue: $known_issue
+     }' >> ~/.local/state/orca-workflows/logs/spawn-failures.jsonl
    chmod 600 ~/.local/state/orca-workflows/logs/spawn-failures.jsonl
    ```
+
+   `known_issue`에는 issue 번호 또는 JSON `null`을 넣는다. `jq`가 signature/fix의 따옴표·역슬래시·개행을
+   escape하므로 각 append는 유효한 JSON 한 줄을 유지한다.
 
 ## Known signatures
 
