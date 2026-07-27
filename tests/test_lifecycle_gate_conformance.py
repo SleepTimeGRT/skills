@@ -25,6 +25,7 @@ TOKEN_EFFICIENT_GATES_DIR = ROOT / "skills" / "token-efficient-gates"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 import audit  # noqa: E402  (module under test — imported for its constants, not run as __main__)
+from conformance.fixtures import premerge_secret_scan  # noqa: E402  (needs SCRIPTS_DIR on sys.path)
 
 
 def run(
@@ -215,7 +216,7 @@ def compliant_manifest(
         'categories = ["static-verify"]\n\n'
         "[stages.premerge]\n"
         'entrypoint = "bash scripts/premerge.sh"\n'
-        'categories = ["full-verify", "protected-escalation"]\n'
+        'categories = ["full-verify", "protected-escalation", "secret-scan"]\n'
         f"{fixtures_block}"
     )
 
@@ -299,7 +300,7 @@ class AuditStructuralTests(ManifestRepo):
 
             [stages.premerge]
             entrypoint = "bash scripts/premerge.sh"
-            categories = ["full-verify", "protected-escalation"]
+            categories = ["full-verify", "protected-escalation", "secret-scan"]
             """
         )
         self.commit("manifest without bootstrap")
@@ -414,6 +415,161 @@ class AuditFixtureTests(ManifestRepo):
         self.assertFalse(report2["compliant"])
         fixture_check2 = self.find_check(report2, "fixture:delete-only-push")
         self.assertEqual(fixture_check2["status"], "FAIL", fixture_check2["detail"])
+
+
+NO_SECRET_SCAN_PREMERGE = r"""
+#!/usr/bin/env bash
+set -euo pipefail
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || true)
+[ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH=main
+git fetch --quiet origin "$DEFAULT_BRANCH"
+if ! git merge-base --is-ancestor "origin/$DEFAULT_BRANCH" HEAD; then
+  echo "[premerge] FAIL — behind origin/$DEFAULT_BRANCH" >&2
+  exit 2
+fi
+CHANGED=$(git diff --name-only "origin/$DEFAULT_BRANCH..HEAD")
+if [ -z "$CHANGED" ]; then
+  echo "[premerge] FAIL — nothing to merge" >&2
+  exit 2
+fi
+# no secret-scan stage in this version — reproduces the pre-#26 shape
+echo "[premerge] REVIEW required" >&2
+exit 4
+"""
+
+
+class PremergeSecretScanFixtureTests(ManifestRepo):
+    """Behavioral coverage for the premerge-secret-scan fixture (#26) — the one fixture that
+    actually drives the declared premerge entrypoint. See .orca/task-26-proposal.md §1-4/§1-7."""
+
+    def install_reference_premerge(self, *, gitleaks_toml: str | None) -> None:
+        premerge_src = (SKILL_DIR / "assets" / "scripts" / "premerge.sh").read_text(encoding="utf-8")
+        token_gate_src = (SKILL_DIR / "assets" / "scripts" / "token-gate.sh").read_text(encoding="utf-8")
+        self.write("scripts/premerge.sh", premerge_src, executable=True)
+        self.write("scripts/token-gate.sh", token_gate_src, executable=True)
+        self.write("scripts/premerge.conf.sh", 'VERIFY_CMD="true"\n')
+        if gitleaks_toml is not None:
+            self.write(".gitleaks.toml", gitleaks_toml)
+
+    @pytest.mark.slow
+    def test_reference_premerge_blocks_and_oracle_confirms_finding(self) -> None:
+        """case a) — working ruleset: PASS."""
+        if shutil.which("gitleaks") is None:
+            self.skipTest("gitleaks not installed")
+        self.install_reference_premerge(gitleaks_toml="[extend]\nuseDefault = true\n")
+        self.write_manifest(compliant_manifest(fixtures_enabled=("premerge-secret-scan",)))
+        self.commit("reference premerge with working gitleaks ruleset")
+
+        result, report = self.run_audit()
+
+        fixture_check = self.find_check(report, "fixture:premerge-secret-scan")
+        self.assertEqual(fixture_check["status"], "PASS", fixture_check["detail"])
+
+    @pytest.mark.slow
+    def test_reference_premerge_with_empty_ruleset_warns_not_fails(self) -> None:
+        """case b) — no [extend] block (medicount's actual current shape, measured 2026-07-27:
+        finding=0 against a synthetic secret). The stage runs and speaks (gitleaks itself exits 0
+        cleanly), so this must be WARN — same class as probe_pre_commit's "stage ran but did not
+        block" — never FAIL, which is reserved for a stage that never ran at all (case c below).
+        A WARN here must also drag the overall verdict to UNVERIFIED/exit 3 — assert both, since
+        that link (audit.INCONCLUSIVE_STATUSES) is exactly what the vacuous-pass AC depends on."""
+        if shutil.which("gitleaks") is None:
+            self.skipTest("gitleaks not installed")
+        self.install_reference_premerge(
+            gitleaks_toml='[allowlist]\ndescription = "no [extend] block — reproduces medicount\'s bug"\n'
+        )
+        self.write_manifest(compliant_manifest(fixtures_enabled=("premerge-secret-scan",)))
+        self.commit("reference premerge with empty gitleaks ruleset (vacuous-pass repro)")
+
+        result, report = self.run_audit()
+
+        fixture_check = self.find_check(report, "fixture:premerge-secret-scan")
+        self.assertEqual(fixture_check["status"], "WARN", fixture_check["detail"])
+        self.assertEqual(report["verdict"], "UNVERIFIED", report)
+        self.assertEqual(result.returncode, 3)
+
+    @pytest.mark.slow
+    def test_premerge_without_secret_scan_stage_fails(self) -> None:
+        """case c) — declared premerge entrypoint never runs gitleaks; it blocks for an unrelated
+        reason (review requirement). The fixture must not misattribute that block to secret-scan."""
+        if shutil.which("gitleaks") is None:
+            self.skipTest("gitleaks not installed")
+        self.write("scripts/premerge.sh", NO_SECRET_SCAN_PREMERGE, executable=True)
+        self.write_manifest(compliant_manifest(fixtures_enabled=("premerge-secret-scan",)))
+        self.commit("premerge entrypoint with no secret-scan stage")
+
+        result, report = self.run_audit()
+
+        fixture_check = self.find_check(report, "fixture:premerge-secret-scan")
+        self.assertEqual(fixture_check["status"], "FAIL", fixture_check["detail"])
+        self.assertIn("not attributable", fixture_check["detail"])
+
+
+class PilotRepoOracleTests(unittest.TestCase):
+    """Exercises premerge_secret_scan.run() directly against real pilot-repo .gitleaks.toml
+    configs, inside disposable scratch clones only. See .orca/task-26-proposal.md §1-4a."""
+
+    def _run_against(self, repo_name: str, expected_status: str) -> None:
+        pilot_path = Path.home() / "Projects" / repo_name
+        if not (pilot_path / ".git").is_dir():
+            self.skipTest(f"{pilot_path} not present on this machine")
+        if shutil.which("gitleaks") is None:
+            self.skipTest("gitleaks not installed")
+
+        with tempfile.TemporaryDirectory(prefix="lgp-pilot-oracle-") as tmp_str:
+            tmp = Path(tmp_str)
+            scratch = tmp / "repo"
+            run("git", "clone", "--local", "--quiet", str(pilot_path), str(scratch), cwd=tmp)
+            run("git", "-C", str(scratch), "remote", "remove", "origin", cwd=tmp, check=False)
+            run("git", "-C", str(scratch), "config", "user.email", "pilot-oracle@lifecycle-gate-policy.invalid", cwd=tmp)
+            run("git", "-C", str(scratch), "config", "user.name", "pilot oracle test", cwd=tmp)
+
+            premerge_src = (SKILL_DIR / "assets" / "scripts" / "premerge.sh").read_text(encoding="utf-8")
+            token_gate_src = (SKILL_DIR / "assets" / "scripts" / "token-gate.sh").read_text(encoding="utf-8")
+            (scratch / "scripts").mkdir(parents=True, exist_ok=True)
+            (scratch / "scripts" / "premerge.sh").write_text(premerge_src)
+            (scratch / "scripts" / "premerge.sh").chmod(0o755)
+            (scratch / "scripts" / "token-gate.sh").write_text(token_gate_src)
+            (scratch / "scripts" / "token-gate.sh").chmod(0o755)
+            (scratch / "scripts" / "premerge.conf.sh").write_text('VERIFY_CMD="true"\n')
+            run(
+                "git", "-C", str(scratch), "add", "-f",
+                "scripts/premerge.sh", "scripts/token-gate.sh", "scripts/premerge.conf.sh",
+                cwd=tmp,
+            )
+            run(
+                "git", "-C", str(scratch), "commit", "--no-verify", "-qm",
+                "inject reference premerge implementation for pilot oracle validation",
+                cwd=tmp,
+            )
+
+            manifest = {
+                "policy_version": "2",
+                "bootstrap": {"entrypoint": "true"},
+                "stages": {
+                    "pre-commit": {"entrypoint": "git commit", "categories": ["secret-scan"]},
+                    "pre-push": {"entrypoint": "git push", "categories": ["static-verify"]},
+                    "premerge": {
+                        "entrypoint": "bash scripts/premerge.sh",
+                        "categories": ["full-verify", "protected-escalation", "secret-scan"],
+                    },
+                },
+                "fixtures": {"enabled": ["premerge-secret-scan"]},
+            }
+
+            result = premerge_secret_scan.run(scratch, manifest, {})
+            self.assertEqual(result.status, expected_status, f"{repo_name}: {result.detail}")
+
+    def test_medicount_empty_ruleset_is_caught_as_warn(self) -> None:
+        self._run_against("medicount", "WARN")
+
+    def test_samhaengsi_working_ruleset_passes(self) -> None:
+        self._run_against("toss-samhaengsi", "PASS")
+
+    def test_goldrush_no_config_file_uses_default_ruleset_and_passes(self) -> None:
+        self._run_against("toss-space-goldrush", "PASS")
 
 
 if __name__ == "__main__":
