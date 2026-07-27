@@ -23,9 +23,13 @@ issue tracking과 workflow orchestration은 분리 가능한 축인데 지금은
 - child 간 **명시적 의존 링크는 안 쓴다**(`VP-1148.issuelinks: []`) — 순서는 epic 설명 본문의 표/목록 순서로만
   암묵적으로 정해진다.
 - `getTransitionsForJiraIssue(VP-1148)`가 반환하는 transition 중 `statusCategory.key == "done"`인 것이
-  **3개**다(41=완료, 71=Duplicate, 81=Won't Do) — "done 카테고리 transition 하나를 찾으면 된다"는 순진한 휴리스틱은
-  모호하다. vprop 문서는 41=완료를 "성공적으로 끝남"으로 명시하고 있어 이 경우엔 해소되지만, 이 정보는 API만으로는
-  구조적으로 얻을 수 없다 — repo 문서가 반드시 필요한 지점이다.
+  **3개**다(41=완료, 71=Duplicate, 81=Won't Do) — 즉 Jira의 `statusCategory`는 "정말 끝났다"와 "더 이상 안 하기로
+  했다(사람이 나중에 리뷰하면서 결정)"를 구분하지 않는다. 하지만 vprop의 `docs/agents/issue-tracker.md`가 문서화한
+  "Status transitions" 표에는 애초에 **11/21/31/41/61만 나열**되어 있고 71/81(Duplicate/Won't Do)은 그 표에
+  없다 — repo 문서가 "정식 워크플로 transition"의 범위를 이미 선언해둔 것. Duplicate/Won't Do는 사람이 티켓을
+  나중에 리뷰하며 "이건 더 안 한다"고 판단할 때만 쓰는 것이라 agent의 자동 완료 처리 후보에 애초에 들어가지
+  않는다 — repo 문서에 문서화된 워크플로 표 밖의 transition은 고려 대상이 아니라는 원칙만 있으면 되고, 매번
+  "여럿 중 뭘 고를지" 판단할 필요가 없다.
 - vprop은 이미 `create-ticket → plan-ticket → implement-ticket → ship-pr`이라는 repo-native 스킬 세트로 VP-XX
   lifecycle을 처리하고 있다. `orca-workflow`는 이걸 호출하지 않는다 — 각자 다른 실행 모델(멀티 프로바이더
   fan-out vs 단일 에이전트 순차)이고, 겹치는 부분(티켓 조회·상태전환·PR 연동)만 이번 설계로 정리한다.
@@ -82,17 +86,19 @@ issue tracking과 workflow orchestration은 분리 가능한 축인데 지금은
 | `list_children(epic_id)` | child 목록+상태 | `gh issue list --search "epic:<n> in:body"` | `searchJiraIssuesUsingJql`: `parent = <key>` |
 | `get_child_order(epic_id, children)` | 실행 순서 | 명시 의존 있으면 그것, 없으면 epic body 나열 순서 | 동일 원칙 — Jira issue link 있으면 그것, vprop처럼 없으면 epic description 순서 |
 | `is_open(id)` | 열림/닫힘 확인 | `gh issue view --json state` | `status.statusCategory.key != "done"` |
-| `close_issue(id, note)` | 종료 처리 | `gh issue close --comment` | `getTransitionsForJiraIssue`로 후보 조회 → `statusCategory=="done"` 후보가 1개면 그것, 여러 개면(vprop처럼 Done/Duplicate/Won't Do 등) **3단(repo-doc)이 명시한 이름**으로 선택 → `transitionJiraIssue` + `addCommentToJiraIssue` |
+| `close_issue(id, note)` | 종료 처리 | `gh issue close --comment` | repo 문서가 문서화한 워크플로 표(3단)에서 "완료" transition을 찾아 `transitionJiraIssue` + `addCommentToJiraIssue`. `getTransitionsForJiraIssue`가 API 레벨에서 더 많은 후보(Duplicate/Won't Do 등, `statusCategory`만으론 구분 안 됨)를 반환해도 **문서화된 워크플로 표 밖의 transition은 애초에 고려하지 않는다** — 사람이 나중에 리뷰하며 결정하는 것이지 agent가 완료 처리 중 고를 대상이 아님 |
 | `link_pr_for_close(pr, id)` | PR 머지가 issue를 자동으로 닫아주는지 | Yes → "Closes #id" 키워드 보장 | No → 머지 직후 `close_issue` 명시 호출로 대체 |
 
 **3단 — repo-doc 오버라이드**: API/구조로 알 수 없는, 진짜 repo 고유의 것만 대상 repo 문서에서 읽는다:
 
 - acceptance-criteria 섹션 이름 (GitHub 컨벤션: `## Acceptance criteria`/`## What to build` / vprop:
   "완료 조건"/"요구사항")
-- `close_issue`가 여러 "done" 후보 중 골라야 할 때의 확정 transition 이름 (vprop: "완료")
+- 정식 워크플로 transition 표 자체, 그중 "완료"에 해당하는 이름 (vprop: 11/21/31/41/61 표, 41=완료). Duplicate/
+  Won't Do처럼 이 표에 없는 transition은 API가 후보로 반환하더라도 agent가 고를 대상이 아니다 — 사람이 티켓을
+  나중에 리뷰하며 "더 이상 안 한다"고 판단할 때 쓰는 것이지, 매 완료 처리마다 agent가 판단할 문제가 아니다.
 
-3단이 repo 문서에 없는 값을 요구하면(예: done 후보가 여럿인데 repo 문서가 어느 게 "진짜 완료"인지 명시 안 함)
-adapter는 조용히 아무거나 고르지 않고 사용자에게 확인을 요청한다.
+repo 문서에 정식 워크플로 표/완료 transition이 아예 없으면 adapter는 조용히 아무거나 고르지 않고 사용자에게
+확인을 요청한다.
 
 ## 파일별 변경
 
