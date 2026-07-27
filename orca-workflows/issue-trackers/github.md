@@ -54,3 +54,9 @@ Closes #<id>"
 
 키워드가 확인/보강되면 그걸로 충분하다. 단 base가 default branch가 아니면 키워드가 동작하지 않으므로,
 `close_issue`로 머지 후 상태를 한 번 더 확인하는 것이 안전망이 된다(호출자인 `orca-workflow` §2d 참고).
+
+## acceptance-criteria 섹션명
+
+기본값은 `## Acceptance criteria`(없으면 `## What to build`)다 — GitHub Issues에는 이를 강제하는 템플릿이
+따로 없으므로 이슈 body에 있는 둘 중 하나를 그대로 쓴다. repo가 다른 컨벤션을 쓴다면 그건 그 repo 자체의
+tracker 문서(있다면)가 이 기본값을 오버라이드한다.
