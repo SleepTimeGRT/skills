@@ -111,11 +111,15 @@ timeout_seconds = 60
 | `fixtures.enabled` | array of strings | no | `[]` (no fixtures run) | Names of conformance fixtures to run against this repository. |
 | `fixtures.<name>.*` | fixture-specific | no | `{}` | Data the fixture needs that is repository-specific (a real file path, a timeout), never a description of mechanism. |
 
-`premerge` is not a fixture/probe target: the fixtures shipped with this
-policy exercise `pre-commit` and `pre-push` only, per the issue that
-introduced them. `premerge` receives structural category-declaration
-checking only; a report must mark it `NOT-EXERCISED` rather than `PASS`, so
-"we didn't test this" is never misread as "this passed."
+`premerge` was originally not a fixture/probe target: the three fixtures shipped by the issue that
+introduced this manifest format exercise `pre-commit` and `pre-push` only. One exception exists — the
+`premerge-secret-scan` fixture (added for issue #26) reads `[stages.premerge].entrypoint` from the
+manifest and runs it directly, specifically to observe the `secret-scan` category now required at
+`premerge` (see policy-spec.md). When `premerge-secret-scan` is not declared in `[fixtures].enabled`,
+`premerge` still receives structural category-declaration checking only and
+`stages.premerge.behavioral` reports `NOT-EXERCISED` — "we didn't test this" must never be misread as
+"this passed." When `premerge-secret-scan` *is* declared, its own `fixture:premerge-secret-scan`
+result line carries the real status instead, and no separate `NOT-EXERCISED` line is added.
 
 ## Full example
 
@@ -160,8 +164,11 @@ timeout_seconds = 60
 
 ### What the shipped fixtures actually drive
 
-The three fixtures in this skill drive `git commit` (pre-commit) and `git push`
-(pre-push) directly, and they do so regardless of what a stage declares. A stage
+Four fixtures ship with this skill. Three drive `git commit` (pre-commit) and `git push` (pre-push)
+directly, regardless of what a stage declares. The fourth, `premerge-secret-scan`, is the one
+exception described above: it reads and runs whichever command `[stages.premerge].entrypoint` names,
+so unlike the other three, its liveness check is only as good as that declared entrypoint actually
+being the repo's real premerge command. A stage
 that names a different entrypoint — `make gate`, a wrapper script — has the
 presence of its declaration checked and nothing more: the audit never resolves
 or runs that command. The `premerge` stage is in that position by design and

@@ -30,7 +30,15 @@ manifest.
 |---|---|---|
 | `pre-commit` | `secret-scan` | `format-autofix` |
 | `pre-push` | `static-verify` | — |
-| `premerge` | `full-verify`, `protected-escalation` | `e2e` (see below), `sync-check` |
+| `premerge` | `full-verify`, `protected-escalation`, `secret-scan` | `e2e` (see below), `sync-check` |
+
+`secret-scan` at `premerge` exists for a different reason than at `pre-commit`: `pre-commit` and
+`pre-push` are both git hooks, so a shared dependency — whether `core.hooksPath` is actually wired in
+a given worktree/git client — can silently disable both at once (observed, not hypothetical: see
+issue #26). `premerge` is not a git hook; it is an explicitly-invoked script, so it does not share
+that failure mode, and self-merge policy already names it the one mandatory checkpoint. Requiring
+`secret-scan` there gives secret-scan coverage a second, independently-failing path — not a stronger
+version of the same check.
 
 - A stage missing a required category is a policy **FAIL** — not an
   implementation opinion, an unmet requirement.
