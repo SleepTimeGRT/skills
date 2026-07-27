@@ -11,6 +11,8 @@ description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-ma
 
 - `orca status --json` ready. 실패 시 아래 "폴백".
 - **이슈 트래커 해석** (실행 시작 시 1회, 캐싱 없이 — 매 실행마다 새로 읽는다): `~/.agents/orca-workflows/issue-trackers/selection.md`가 정의하는 절차로 백엔드를 정하고, 그 백엔드의 `~/.agents/orca-workflows/issue-trackers/{github,jira}.md`가 정의하는 `get_issue`/`get_issue_type`/`list_children`/`get_child_order`/`is_open`/`close_issue`/`link_pr_for_close`를 이후 전체 실행에서 쓴다. 구체 값(project key, transition id 등)은 이 스킬에 복제하지 않는다 — 항상 selection.md가 가리키는 대상 repo의 tracker 문서에서 얻는다.
+- **이슈 타입 판별** — `get_issue_type(issue-num)`으로 epic/task를 판별해 아래 "1. Epic 경로"/"2. Task 경로"로 분기한다.
+- **acceptance-criteria 섹션명** — 백엔드가 resolve한 tracker 문서(`~/.agents/orca-workflows/issue-trackers/{github,jira}.md`, 또는 온보딩으로 만들어진 대상 repo 문서)가 명시하는 이름을 쓴다. 이 스킬은 그 값을 복제하지 않는다 — 아래 §1·§2a의 "§0에서 해석한 acceptance-criteria 섹션명"은 이 값을 가리킨다.
 - **온보딩** — selection.md가 "문서 없음 + GitHub 형식이 아닌 이슈 ID"로 판정하면, 곧바로 GitHub로 넘어가지 않고 사용자에게 직접 묻는다: ①어떤 tracker를 쓰는지 + 그 API를 부르는 데 필요한 최소 정보(Jira라면 site·cloudId·project key) ②"완료" transition/상태 이름, acceptance-criteria 섹션 이름. 받은 답으로 `docs/agents/issue-tracker.md` 형식의 초안을 작성해 보여주고, 승인되면 별도의 작은 커밋으로 대상 repo에 반영한 뒤 이번 실행을 이어간다. 이후 실행부터는 문서가 있으므로 다시 트리거되지 않는다.
 - CLI 기반 coordinator(Codex/agy)는 launch 시 approval·sandbox를 명시한다. 기본 posture는 `-a never -s workspace-write`.
 - 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 —
@@ -22,7 +24,7 @@ description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-ma
 **1a. issue-drain** — 별도 subagent(이 세션과 다른, 별도로 뜬 세션)에게 child issue 전체 검증을 맡긴다:
 
 - 각 child issue가 self-contained한지(§0에서 해석한 acceptance-criteria 섹션 + "무엇을 만들지"가 본문에 있는지)
-- 의존 관계(`get_child_order`가 참고하는 것과 같은 그래프)가 실제로 존재하고 방향이 맞는지
+- 의존 관계가 있다면(`get_child_order`가 참고하는 것과 같은 그래프) 그게 실제로 존재하고 방향이 맞는지 — 의존 링크 자체가 없는 건 실패가 아니다
 - 그래프상 빠진 child나 순환 의존이 없는지
 
 ```
@@ -89,21 +91,17 @@ printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","
   # task 브랜치에 열린 PR이 있는지 확인 — 없으면 여기서 만든다(할당 로그의 worktree/branch 사용)
   pr_num="$(gh pr list --head "<task-branch>" --json number -q '.[0].number')"
   if [ -z "$pr_num" ]; then
-    # link_pr_for_close가 "머지가 자동으로 닫아줌"(GitHub)이면 body에 "Closes #<task-issue-num>" 포함.
-    # 아니면(Jira 등 merge-magic 없음) 참고용으로 티켓 키만 적고 자동-닫힘 키워드는 넣지 않는다 —
-    # 그 트래커에선 의미가 없는 텍스트다.
-    gh pr create --head "<task-branch>" --title "<task 제목>" --body "<link_pr_for_close 결과에 따른 본문>"
+    gh pr create --head "<task-branch>" --title "<task 제목>" --body "<task 설명 — 트래커별 텍스트는 아래 link_pr_for_close가 처리하므로 여기선 안 넣는다>"
     pr_num="$(gh pr view "<task-branch>" --json number -q .number)"  # gh pr create는 URL만 출력, --json 미지원
   fi
-  # link_pr_for_close가 자동-닫힘이라고 답할 때만(GitHub) 키워드 존재를 확인·보강한다 — 그 외(Jira 등)는
-  # 이 단계를 건너뛴다. issue 종료는 트래커 무관하게 머지 후 한 경로(아래)로 처리된다.
-  if <link_pr_for_close(pr_num, task-issue-num) == 자동-닫힘>; then
-    gh pr view "$pr_num" --json body -q .body | grep -qiE "(closes|fixes|resolves) #<task-issue-num>" \
-      || gh pr edit "$pr_num" --body "$(gh pr view "$pr_num" --json body -q .body)
+  ```
 
-  Closes #<task-issue-num>"
-  fi
+  PR이 확보되면(신규든 기존이든) **`link_pr_for_close(pr_num, task-issue-num)`를 호출**한다 — 이건 질의가 아니라
+  액션이다: GitHub adapter는 그 안에서 "Closes #N" 키워드 존재를 확인·보강하고, Jira adapter는 아무것도 안
+  한다(no-op, merge-magic 없음). 그 구체 로직(grep 패턴, 키워드 문자열 등)은 각 adapter 파일이 소유하므로
+  `orca-workflow`는 어느 백엔드인지 몰라도 되고 그 로직을 여기 복제하지 않는다.
 
+  ```bash
   # premerge 게이트 — orca-evaluate의 PASS는 "코드가 acceptance criteria를 충족하는가"만 보고,
   # "지금 이 브랜치를 origin/main에 얹어도 안전한가"(stale-main, gate-integrity 자기수정 여부)는
   # 안 본다. 그건 lifecycle-gate-policy의 premerge.sh 몫이라 merge 직전에 따로 불러야 한다.
@@ -121,16 +119,13 @@ printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","
       # 그 외=verify/e2e 실패 통과값. Inspecting 보고에 이 exit code와 마지막 stderr 몇 줄을 그대로 첨부한다.
     else
       gh pr merge "$pr_num" --squash --delete-branch
-      # 코드호스팅(PR 머지)은 GitHub 전용이라 미변경. issue 종료는 트래커 무관하게 이 한 경로로
-      # 처리된다 — GitHub는 보통 위 키워드로 이미 닫혀 있어 아래는 안전망(no-op)이고, Jira 등
-      # merge-magic이 없는 트래커는 이 호출이 유일한 종료 경로다.
-      is_open(<task-issue-num>) && close_issue(<task-issue-num>, "Merged via PR #$pr_num")
     fi
   else
     gh pr merge "$pr_num" --squash --delete-branch
-    is_open(<task-issue-num>) && close_issue(<task-issue-num>, "Merged via PR #$pr_num")
   fi
   ```
+
+  머지 성공 시(둘 중 어느 분기든) **`is_open(task-issue-num)`이 true면 `close_issue(task-issue-num, "Merged via PR #$pr_num")`를 호출**한다 — 코드호스팅(PR 머지)은 GitHub 전용이라 미변경이고, issue 종료는 트래커 무관하게 이 한 경로로 처리된다: GitHub는 위 `link_pr_for_close`가 보통 이미 닫아둬서 여기선 안전망(no-op)이고, Jira 등 merge-magic이 없는 트래커는 이 호출이 유일한 종료 경로다. (`is_open`/`close_issue`/`link_pr_for_close`는 실제 셸 커맨드가 아니라 tracker adapter 오퍼레이션이다 — 문자 그대로 셸에 붙여넣지 말 것.)
 
   task 종료(premerge.sh가 있고 실패한 경우는 예외 — 아래 PREMERGE_FAIL 참고, task 종료가 아니라 inspecting으로 간다).
 - FAIL → 재시도 카운터 확인. **2회 미만이면** feedback과 함께 `orca-task-runner`에 재-dispatch(2b로). **2회 도달하면** inspecting으로.
