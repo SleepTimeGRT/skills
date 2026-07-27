@@ -57,6 +57,8 @@ Closes #<id>"
 
 ## acceptance-criteria 섹션명
 
-기본값은 `## Acceptance criteria`(없으면 `## What to build`)다 — GitHub Issues에는 이를 강제하는 템플릿이
-따로 없으므로 이슈 body에 있는 둘 중 하나를 그대로 쓴다. repo가 다른 컨벤션을 쓴다면 그건 그 repo 자체의
-tracker 문서(있다면)가 이 기본값을 오버라이드한다.
+기본값은 `## Acceptance criteria`뿐이다 — fallback 없음. `## What to build`는 별개의 독립된 섹션이다
+(`orca-workflow` §1a가 둘을 각각 확인하는 것과 일치 — "무엇을 만들지"와 "acceptance criteria"는 서로
+다른 개념이라 하나가 다른 하나를 대신하지 않는다). `## Acceptance criteria`가 issue body에 없으면 이
+섹션은 "없음"으로 취급된다 — `orca-workflow`가 `orca-task-runner`를 dispatch하기 전에 이를 gate로
+확인한다. repo가 다른 컨벤션을 쓴다면 그건 그 repo 자체의 tracker 문서(있다면)가 이 기본값을 오버라이드한다.
