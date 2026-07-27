@@ -1,0 +1,69 @@
+# Issue Tracker Adapter — Jira
+
+Atlassian MCP 툴(`mcp__claude_ai_Atlassian__*`) 사용. **repo의 tracker 문서 없이는 이 adapter가 아예
+동작하지 않는다** — `getJiraIssue`/`searchJiraIssuesUsingJql`/`transitionJiraIssue` 등 모든 호출이
+`cloudId`를 필수 파라미터로 받는데, 그 값은 대상 repo의 tracker 문서에만 있다(예: vprop의
+`docs/agents/issue-tracker.md`). 이 파일에는 project key·transition ID 같은 repo 고유 값을 넣지 않는다 —
+전부 대상 repo의 tracker 문서에서 온다.
+
+## 전제 — repo 문서에서 읽어야 하는 값
+
+- `cloudId` (필수 — 이게 없으면 아래 오퍼레이션을 하나도 호출할 수 없다)
+- 정식 워크플로 transition 표, 그중 "완료"에 해당하는 이름
+- acceptance-criteria가 적히는 섹션 이름
+
+## `get_issue(id)`
+
+```
+getJiraIssue(cloudId, issueIdOrKey=id)
+```
+
+`fields.issuetype`, `fields.summary`, `fields.description`, `fields.status`를 본다.
+
+## `get_issue_type(id)`
+
+```
+fields.issuetype.hierarchyLevel == 1  →  epic
+```
+
+프로젝트 지역화(한국어 "에픽"/영어 "Epic" 등)와 무관하게 구조적으로 판별한다 — 이름 문자열을 매칭하지 않는다.
+
+## `list_children(epic_id)`
+
+```
+searchJiraIssuesUsingJql(cloudId, jql="parent = <epic_id>")
+```
+
+## `get_child_order(epic_id, children)`
+
+명시적 issue link(blocks/is blocked by)가 있으면 그 그래프. 없으면(흔하다 — Jira epic이 의존 링크 없이
+설명 본문에 표/목록만 나열하는 경우가 많다) epic description에 나열된 순서 그대로.
+
+## `is_open(id)`
+
+```
+getJiraIssue(cloudId, issueIdOrKey=id).fields.status.statusCategory.key != "done"
+```
+
+## `close_issue(id, note)`
+
+repo 문서의 워크플로 표에서 "완료" transition 이름을 찾아 그 transition id로 전환한다. 이름→id 변환은 `getTransitionsForJiraIssue`의 결과를 이용한다:
+
+```
+getTransitionsForJiraIssue(cloudId, issueIdOrKey=id)를 호출해 현재 available transition 목록을 받는다.
+목록에서 name이 repo 문서의 "완료" transition 이름과 일치하는 항목을 찾는다.
+그 항목의 id를 사용해 다음을 호출한다:
+transitionJiraIssue(cloudId, issueIdOrKey=id, transition={id: <찾은 transition id>})
+addCommentToJiraIssue(cloudId, issueIdOrKey=id, comment=note)
+```
+
+`getTransitionsForJiraIssue`는 `statusCategory.key == "done"`인 후보를 여러 개 반환할 수 있다(예: 완료/
+Duplicate/Won't Do). **repo 문서의 워크플로 표에 없는 transition은 고려하지 않는다.** Duplicate/Won't Do류는
+사람이 티켓을 나중에 리뷰하며 "더 이상 안 한다"고 판단할 때 쓰는 것이라, agent의 완료 처리 후보가 아니다 —
+매 완료 처리마다 여럿 중 고를 문제가 아니다. repo 문서에 "완료" transition이 명시돼 있지 않으면(워크플로
+표 자체가 없거나 애매하면) 조용히 아무거나 고르지 않고 `orca-workflow`가 사용자에게 확인을 요청한다.
+
+## `link_pr_for_close(pr_number, id)`
+
+**merge-magic 없음** — GitHub PR 머지로 Jira 티켓이 자동으로 닫히지 않는다. PR 머지 직후
+`close_issue(id, note)`를 명시 호출한다(`note` 예: `"Merged via PR #<pr_number>"`).
