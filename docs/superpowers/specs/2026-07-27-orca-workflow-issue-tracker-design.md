@@ -75,6 +75,13 @@ issue tracking과 workflow orchestration은 분리 가능한 축인데 지금은
 `### Issue tracker` → `docs/agents/issue-tracker.md` 링크 패턴)을 찾는다. 있으면 그 문서가 명시하는 백엔드를
 쓴다. 없으면 GitHub Issues 기본값(현재 동작과 동일, 변경 없음).
 
+Jira의 경우 이 문서 읽기는 선택이 아니라 **필수 전제조건**이다 — `getJiraIssue`/`searchJiraIssuesUsingJql`/
+`transitionJiraIssue` 등 Atlassian MCP 툴은 전부 `cloudId`를 필수 파라미터로 받는데, 이 값 자체가 repo 문서
+안에만 있다(vprop: `docs/agents/issue-tracker.md`의 `cloudId: fb59360c-...`). 즉 cloudId 없이는 Jira API를
+아예 호출할 수 없으므로, 2단 adapter가 동작하려면 이 문서를 이미 읽은 상태여야 한다 — 3단에서 말하는
+acceptance-criteria 섹션명·완료 transition 이름도 **그때 이미 열려 있는 같은 파일**에서 같이 얻는 것이지
+별도로 한 번 더 조회하는 게 아니다.
+
 **2단 — 범용 adapter**: 선택된 백엔드에 대해 `orca-workflows/issue-trackers/{github,jira}.md`(신규,
 `model-selection.md` + `models/*.md`와 같은 역할 분담)가 다음 오퍼레이션을 **repo에 무관하게, 각 플랫폼의 구조적
 필드로** 구현한다:
@@ -86,16 +93,17 @@ issue tracking과 workflow orchestration은 분리 가능한 축인데 지금은
 | `list_children(epic_id)` | child 목록+상태 | `gh issue list --search "epic:<n> in:body"` | `searchJiraIssuesUsingJql`: `parent = <key>` |
 | `get_child_order(epic_id, children)` | 실행 순서 | 명시 의존 있으면 그것, 없으면 epic body 나열 순서 | 동일 원칙 — Jira issue link 있으면 그것, vprop처럼 없으면 epic description 순서 |
 | `is_open(id)` | 열림/닫힘 확인 | `gh issue view --json state` | `status.statusCategory.key != "done"` |
-| `close_issue(id, note)` | 종료 처리 | `gh issue close --comment` | repo 문서가 문서화한 워크플로 표(3단)에서 "완료" transition을 찾아 `transitionJiraIssue` + `addCommentToJiraIssue`. `getTransitionsForJiraIssue`가 API 레벨에서 더 많은 후보(Duplicate/Won't Do 등, `statusCategory`만으론 구분 안 됨)를 반환해도 **문서화된 워크플로 표 밖의 transition은 애초에 고려하지 않는다** — 사람이 나중에 리뷰하며 결정하는 것이지 agent가 완료 처리 중 고를 대상이 아님 |
+| `close_issue(id, note)` | 종료 처리 | `gh issue close --comment` | 1단에서 이미 읽은 repo 문서의 워크플로 표에서 "완료" transition을 찾아 `transitionJiraIssue` + `addCommentToJiraIssue` — 추가 조회 아님. `getTransitionsForJiraIssue`가 API 레벨에서 더 많은 후보(Duplicate/Won't Do 등, `statusCategory`만으론 구분 안 됨)를 반환해도 **문서화된 워크플로 표 밖의 transition은 애초에 고려하지 않는다** — 사람이 나중에 리뷰하며 결정하는 것이지 agent가 완료 처리 중 고를 대상이 아님 |
 | `link_pr_for_close(pr, id)` | PR 머지가 issue를 자동으로 닫아주는지 | Yes → "Closes #id" 키워드 보장 | No → 머지 직후 `close_issue` 명시 호출로 대체 |
 
-**3단 — repo-doc 오버라이드**: API/구조로 알 수 없는, 진짜 repo 고유의 것만 대상 repo 문서에서 읽는다:
+**3단 — repo-doc 오버라이드**: API/구조로 알 수 없는, 진짜 repo 고유의 것만 대상 repo 문서에서 읽는다. Jira의
+경우 이건 별도 조회가 아니라 1단에서 cloudId를 얻으려고 이미 읽은 문서에서 **같이** 얻는 값이다:
 
 - acceptance-criteria 섹션 이름 (GitHub 컨벤션: `## Acceptance criteria`/`## What to build` / vprop:
   "완료 조건"/"요구사항")
-- 정식 워크플로 transition 표 자체, 그중 "완료"에 해당하는 이름 (vprop: 11/21/31/41/61 표, 41=완료). Duplicate/
-  Won't Do처럼 이 표에 없는 transition은 API가 후보로 반환하더라도 agent가 고를 대상이 아니다 — 사람이 티켓을
-  나중에 리뷰하며 "더 이상 안 한다"고 판단할 때 쓰는 것이지, 매 완료 처리마다 agent가 판단할 문제가 아니다.
+- 정식 워크플로 표 중 "완료"에 해당하는 transition 이름 (vprop: 11/21/31/41/61 표, 41=완료). Duplicate/Won't
+  Do처럼 이 표에 없는 transition은 API가 후보로 반환하더라도 agent가 고를 대상이 아니다 — 사람이 티켓을 나중에
+  리뷰하며 "더 이상 안 한다"고 판단할 때 쓰는 것이지, 매 완료 처리마다 agent가 판단할 문제가 아니다.
 
 repo 문서에 정식 워크플로 표/완료 transition이 아예 없으면 adapter는 조용히 아무거나 고르지 않고 사용자에게
 확인을 요청한다.
