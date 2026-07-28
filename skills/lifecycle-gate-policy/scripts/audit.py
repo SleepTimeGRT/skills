@@ -56,7 +56,7 @@ CATEGORY_VOCABULARY = {
 REQUIRED_CATEGORIES = {
     "pre-commit": {"secret-scan"},
     "pre-push": {"static-verify"},
-    "premerge": {"full-verify", "protected-escalation"},
+    "premerge": {"full-verify", "protected-escalation", "secret-scan"},
 }
 
 TERMINAL_FAIL_STATUSES = {"FAIL", "MISSING"}
@@ -164,11 +164,6 @@ def check_structure(manifest: dict) -> list[dict]:
                     "WARN",
                     "no 'e2e' category declared — recommended when the repo has an e2e suite, not required",
                 ))
-            results.append(_result(
-                "stages.premerge.behavioral",
-                "NOT-EXERCISED",
-                "premerge is not covered by conformance fixtures — structural check only, not a PASS",
-            ))
 
     for required_stage in REQUIRED_CATEGORIES:
         if required_stage not in stages:
@@ -224,6 +219,26 @@ def run_fixtures(repo: Path, manifest: dict) -> list[dict]:
 
     results.extend(summarize_behavior(results, enabled))
     return results
+
+
+def summarize_premerge_behavioral(manifest: dict) -> list[dict]:
+    """`stages.premerge.behavioral` moved out of check_structure(): whether premerge was actually
+    observed depends on which fixtures are enabled, which check_structure() (running before
+    run_fixtures()) cannot know. `NOT-EXERCISED` only when premerge-secret-scan isn't declared —
+    when it is, its own `fixture:premerge-secret-scan` line already carries the real status, so no
+    redundant line is added here regardless of that fixture's actual outcome (PASS/WARN/FAIL/SKIP)."""
+    stages = manifest.get("stages") or {}
+    if "premerge" not in stages:
+        return []
+    fixtures_cfg = manifest.get("fixtures") or {}
+    enabled = fixtures_cfg.get("enabled") or []
+    if "premerge-secret-scan" in enabled:
+        return []
+    return [_result(
+        "stages.premerge.behavioral",
+        "NOT-EXERCISED",
+        "premerge is not covered by an enabled conformance fixture — structural check only, not a PASS",
+    )]
 
 
 def summarize_behavior(fixture_results: list[dict], enabled: list[str]) -> list[dict]:
@@ -290,8 +305,10 @@ def audit(repo: Path, skip_fixtures: bool) -> dict:
                 "SKIP",
                 "--skip-fixtures: structural checks only — no stage was observed",
             ))
+            results.extend(summarize_premerge_behavioral(manifest))
         else:
             results.extend(run_fixtures(repo, manifest))
+            results.extend(summarize_premerge_behavioral(manifest))
 
     verdict = decide_verdict(results, skip_fixtures)
     return {

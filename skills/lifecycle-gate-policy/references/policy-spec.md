@@ -16,7 +16,7 @@ manifest.
 
 | Category | Definition |
 |---|---|
-| `secret-scan` | Scans staged content for credentials/secrets before they enter a commit. Blocks the commit when a match is found. |
+| `secret-scan` | Scans for credentials/secrets before they reach the default branch and blocks when a match is found. At `pre-commit` this means staged content, blocking the commit; at `premerge` it means the commit range being merged, blocking the merge — the category is the same, only the scope of "before" and what gets blocked changes with the stage. |
 | `format-autofix` | Automatically rewrites staged files to a canonical format/lint style as part of committing, rather than only reporting violations. |
 | `static-verify` | Fast checks that don't execute the runtime or test suite — typechecking, linting, static analysis. No emulators, no network, no test execution. |
 | `full-verify` | The complete non-e2e verification chain — everything in `static-verify` plus unit/integration tests. Runs once, at merge time, not on every push. |
@@ -30,7 +30,15 @@ manifest.
 |---|---|---|
 | `pre-commit` | `secret-scan` | `format-autofix` |
 | `pre-push` | `static-verify` | — |
-| `premerge` | `full-verify`, `protected-escalation` | `e2e` (see below), `sync-check` |
+| `premerge` | `full-verify`, `protected-escalation`, `secret-scan` | `e2e` (see below), `sync-check` |
+
+`secret-scan` at `premerge` exists for a different reason than at `pre-commit`: `pre-commit` and
+`pre-push` are both git hooks, so a shared dependency — whether `core.hooksPath` is actually wired in
+a given worktree/git client — can silently disable both at once (observed, not hypothetical, in
+practice). `premerge` is not a git hook; it is an explicitly-invoked script, so it does not share
+that failure mode, and self-merge policy already names it the one mandatory checkpoint. Requiring
+`secret-scan` there gives secret-scan coverage a second, independently-failing path — not a stronger
+version of the same check.
 
 - A stage missing a required category is a policy **FAIL** — not an
   implementation opinion, an unmet requirement.
@@ -94,7 +102,9 @@ manifest name an observable entrypoint for each required category, and that
 conformance be judged by an entrypoint's observable outcome rather than by the
 mechanism behind it.
 
-What gets exercised is a separate question from what is declared. The fixtures
-shipped here drive `git commit` and `git push`; a stage naming some other
-command has that name recorded but not run, so its declaration stays unverified
-(`manifest-schema.md` states this per stage).
+What gets exercised is a separate question from what is declared. Most fixtures
+shipped here drive `git commit` and `git push` directly regardless of what a
+stage declares; one exception resolves and runs the declared `premerge`
+entrypoint itself. A stage naming a command no fixture drives has that name
+recorded but not run, so its declaration stays unverified (`manifest-schema.md`
+states this per stage, and per fixture).

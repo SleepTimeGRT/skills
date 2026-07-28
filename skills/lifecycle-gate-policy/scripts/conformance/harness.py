@@ -136,8 +136,7 @@ class ScratchRepo:
             run_env.update(extra_env)
         return _run(argv, cwd=self.path, env=run_env, timeout=timeout)
 
-    def temp_remote(self) -> str:
-        name = "conformance"
+    def temp_remote(self, name: str = "conformance") -> str:
         bare_dir = Path(tempfile.mkdtemp(prefix="lgp-remote-", dir=str(self._tmp_root)))
         subprocess.run(
             ["git", "init", "--quiet", "--bare", str(bare_dir)],

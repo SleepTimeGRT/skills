@@ -104,6 +104,9 @@ about the repository's policy.
 
 [fixtures.path-fallback]
 timeout_seconds = 60
+
+[fixtures.premerge-secret-scan]
+timeout_seconds = 60   # how long to wait for the entrypoint's [premerge:secret-scan] line, not its total runtime
 ```
 
 | Field | Type | Required | Default | Meaning |
@@ -111,11 +114,34 @@ timeout_seconds = 60
 | `fixtures.enabled` | array of strings | no | `[]` (no fixtures run) | Names of conformance fixtures to run against this repository. |
 | `fixtures.<name>.*` | fixture-specific | no | `{}` | Data the fixture needs that is repository-specific (a real file path, a timeout), never a description of mechanism. |
 
-`premerge` is not a fixture/probe target: the fixtures shipped with this
-policy exercise `pre-commit` and `pre-push` only, per the issue that
-introduced them. `premerge` receives structural category-declaration
-checking only; a report must mark it `NOT-EXERCISED` rather than `PASS`, so
-"we didn't test this" is never misread as "this passed."
+Most fixtures shipped here drive `git commit` or `git push` directly and exercise `pre-commit` or
+`pre-push` only. One exception exists — the `premerge-secret-scan` fixture reads
+`[stages.premerge].entrypoint` from the manifest and runs it directly, specifically to observe the
+`secret-scan` category required at `premerge` (see policy-spec.md). When `premerge-secret-scan` is
+not declared in `[fixtures].enabled`, `premerge` still receives structural category-declaration
+checking only and `stages.premerge.behavioral` reports `NOT-EXERCISED` — "we didn't test this" must
+never be misread as "this passed." When `premerge-secret-scan` *is* declared, its own
+`fixture:premerge-secret-scan` result line carries the real status instead, and no separate
+`NOT-EXERCISED` line is added.
+
+**How `premerge-secret-scan` observes the entrypoint, and the trade-off that follows.** It runs the
+declared entrypoint exactly once and watches its stdout for the one line the reference
+implementation's `token_gate_capture` helper prints for its `premerge:secret-scan` stage
+(`[premerge:secret-scan] PASS|FAIL ...`) — the moment that line appears, the whole process is
+terminated, so the entrypoint's later stages (verify, e2e, and anything else after secret-scan) are
+never reached and this fixture never exercises a repository's real verify/e2e chain. It separately
+re-runs gitleaks itself over the same commit range to confirm at least one real finding, so a config
+with an empty ruleset cannot pass merely because the stage's own tooling exited cleanly. The
+trade-off: this fixture recognizes only the reference implementation's exact output tag. A
+`[stages.premerge].entrypoint` that scans for secrets through a different, untagged mechanism is
+reported as unobserved even if that mechanism works correctly — narrower than fully mechanism-agnostic,
+accepted because the alternative (re-running the entire declared entrypoint end to end, or matching
+loosely on any mention of "secret-scan"/"gitleaks" in its output) proved to have worse failure modes:
+forcing full completion made this fixture unable to pass on any repository whose verify/e2e needs
+dependencies a scratch clone doesn't have, and loose text matching let an unrelated downstream gate
+that happened to block for its own reasons be mistaken for a working secret scan.
+`[fixtures.premerge-secret-scan].timeout_seconds` (default 60) bounds only how long this fixture
+waits for that one line to appear — not the entrypoint's total runtime.
 
 ## Full example
 
@@ -135,15 +161,18 @@ categories = ["static-verify"]
 
 [stages.premerge]
 entrypoint = "bash scripts/premerge.sh"
-categories = ["full-verify", "e2e", "protected-escalation"]
+categories = ["full-verify", "e2e", "protected-escalation", "secret-scan"]
 
 [fixtures]
-enabled = ["biome-noop", "path-fallback", "delete-only-push"]
+enabled = ["biome-noop", "path-fallback", "delete-only-push", "premerge-secret-scan"]
 
 [fixtures.biome-noop]
 ignored_path = "src/lib/supabase/types.ts"
 
 [fixtures.path-fallback]
+timeout_seconds = 60
+
+[fixtures.premerge-secret-scan]
 timeout_seconds = 60
 ```
 
@@ -160,12 +189,18 @@ timeout_seconds = 60
 
 ### What the shipped fixtures actually drive
 
-The three fixtures in this skill drive `git commit` (pre-commit) and `git push`
-(pre-push) directly, and they do so regardless of what a stage declares. A stage
-that names a different entrypoint — `make gate`, a wrapper script — has the
-presence of its declaration checked and nothing more: the audit never resolves
-or runs that command. The `premerge` stage is in that position by design and
-is reported `NOT-EXERCISED`.
+Four fixtures ship with this skill. Three drive `git commit` (pre-commit) and `git push` (pre-push)
+directly, regardless of what a stage declares. The fourth, `premerge-secret-scan`, is the one
+exception described above: it reads and runs whichever command `[stages.premerge].entrypoint` names,
+so unlike the other three, its liveness check is only as good as that declared entrypoint actually
+being the repo's real premerge command. A `pre-commit` or `pre-push` stage that names a different
+entrypoint — `make gate`, a wrapper script — has the presence of its declaration checked and nothing
+more: the audit never resolves or runs that command, because none of the `pre-commit`/`pre-push`
+fixtures read the manifest's declared entrypoint at all (they always drive `git commit`/`git push`
+directly). `premerge` does not share that limitation once `premerge-secret-scan` is enabled — that
+fixture resolves and runs the declared `[stages.premerge].entrypoint` verbatim. Without
+`premerge-secret-scan` enabled, `premerge` is in the same position as an undriven `pre-commit`/
+`pre-push` entrypoint and is reported `NOT-EXERCISED`.
 
 Two things follow, and the second one surprises people:
 
@@ -216,7 +251,10 @@ not resolve an `UNVERIFIED` that way; resolve it by making the skipped fixture
 able to run.
 
 Capping the verdict per declared stage — every declared stage needing its own
-observation — is a follow-up rather than a tweak: `premerge` cannot be exercised
-at all, so it needs an explicit exemption, and pre-commit observation has to be
-promoted out of `biome-noop` into a standalone probe first, or repositories with
-no eligible `ignored_path` could never reach `COMPLIANT`.
+observation — is a follow-up rather than a tweak: `premerge` is exercised only
+when `premerge-secret-scan` is enabled, and even then only for the `secret-scan`
+category — `full-verify` and `protected-escalation` at `premerge` still have no
+fixture of their own, so `premerge` needs a category-scoped exemption rather than
+an all-or-nothing one, and pre-commit observation has to be promoted out of
+`biome-noop` into a standalone probe first, or repositories with no eligible
+`ignored_path` could never reach `COMPLIANT`.
