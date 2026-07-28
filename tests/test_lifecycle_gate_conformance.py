@@ -864,6 +864,104 @@ class PremergeSecretScanFixtureTests(ManifestRepo):
         self.assertEqual(result.status, "WARN", result.detail)
         self.assertIn("timeout_seconds", result.detail)
 
+    def test_non_finite_and_boolean_timeout_seconds_warn_without_running_n1_regression(self) -> None:
+        """Regression for task-26-review-round4.md Finding N1: `inf` and `nan` are valid TOML
+        floats and both used to slip past the F4 validation (`nan <= 0` is False — NaN bypasses
+        every ordered comparison — and `inf` is positive), reaching threading.Event.wait() and
+        crashing the watchdog thread with OverflowError or firing it instantly. A bool
+        (`timeout_seconds = true`) also used to silently become a 1-second budget since
+        `float(True) == 1.0`. All three must now WARN immediately, without running the
+        entrypoint, exactly like the non-numeric/non-positive cases."""
+        if shutil.which("gitleaks") is None:
+            self.skipTest("gitleaks not installed")
+        manifest = {
+            "policy_version": "2",
+            "bootstrap": {"entrypoint": "true"},
+            "stages": {
+                "premerge": {"entrypoint": "true", "categories": ["secret-scan"]},
+            },
+            "fixtures": {"enabled": ["premerge-secret-scan"]},
+        }
+        for bad in (float("inf"), float("-inf"), float("nan"), "inf", "nan", True):
+            result = premerge_secret_scan.run(self.repo, manifest, {"timeout_seconds": bad})
+            self.assertEqual(result.status, "WARN", f"timeout_seconds={bad!r}: {result.detail}")
+            self.assertIn("timeout_seconds", result.detail)
+
+    @pytest.mark.slow
+    def test_huge_finite_timeout_seconds_is_clamped_not_crashed_n1_regression(self) -> None:
+        """Regression for task-26-review-round4.md Finding N1: a finite `timeout_seconds` at or
+        beyond ~1e15 passes the `isfinite()`/positivity checks yet still overflows
+        threading.Event.wait()'s underlying time_t conversion, crashing the watchdog thread the
+        moment it's used — silently reopening the exact unbounded-hang class F1/F4 were filed to
+        close, and precisely what round 4 asked for a clamp to prevent. timeout_seconds is now
+        capped to a sane ceiling before it reaches the watchdog, so an absurdly large value still
+        behaves like a normal one instead of crashing or hanging for ~3e7 years."""
+        if shutil.which("gitleaks") is None:
+            self.skipTest("gitleaks not installed")
+        self.install_reference_premerge(gitleaks_toml="[extend]\nuseDefault = true\n")
+        self.write_manifest(
+            compliant_manifest(
+                fixtures_enabled=("premerge-secret-scan",),
+                fixtures_extra="\n[fixtures.premerge-secret-scan]\ntimeout_seconds = 1e15\n",
+            )
+        )
+        self.commit("reference premerge with an absurdly large timeout_seconds")
+
+        t0 = time.monotonic()
+        result, report = self.run_audit()
+        elapsed = time.monotonic() - t0
+
+        fixture_check = self.find_check(report, "fixture:premerge-secret-scan")
+        self.assertEqual(fixture_check["status"], "PASS", fixture_check["detail"])
+        self.assertLess(elapsed, 30, f"huge timeout_seconds crashed or hung the watchdog: took {elapsed:.1f}s")
+
+    def test_descendant_with_redirected_stdout_does_not_leak_past_natural_exit_n2_regression(self) -> None:
+        """Regression for task-26-review-round5.md Finding N2: the F7 fix disarms the watchdog in
+        a `finally` but (pre-fix) left process-group cleanup outside that block. A descendant that
+        redirects its own stdout away (so it never holds the pipe open) lets `for line in
+        proc.stdout` reach EOF immediately on a plain natural exit — before this fix,
+        `_kill_process_group` was then never reached at all, so the descendant leaked
+        permanently instead of being bounded by timeout_seconds."""
+        # A duration unique to this test (not shared with the UnicodeDecodeError variant below),
+        # so a pgrep -f substring match can never pick up the other test's descendant.
+        argv = ["bash", "-c", "( exec 1>/dev/null 2>&1; sleep 8.171 ) & echo hi; exit 0"]
+        t0 = time.monotonic()
+        matched_status, kind, _tail = premerge_secret_scan._run_until_stage_line(argv, self.repo, timeout_seconds=3.0)
+        elapsed = time.monotonic() - t0
+        self.assertEqual(kind, "natural-exit")
+        self.assertIsNone(matched_status)
+        self.assertLess(elapsed, 2, f"should have returned promptly on natural exit, took {elapsed:.1f}s")
+
+        deadline = time.monotonic() + 6.0
+        survivor = ""
+        while time.monotonic() < deadline:
+            survivor = subprocess.run(["pgrep", "-fl", "sleep 8.171"], capture_output=True, text=True).stdout
+            if not survivor.strip():
+                break
+            time.sleep(0.2)
+        self.assertEqual(survivor.strip(), "", f"descendant leaked past cleanup: {survivor!r}")
+
+    def test_non_utf8_output_does_not_leak_process_group_n2_regression(self) -> None:
+        """Regression for task-26-review-round5.md Finding N2, second reaching path: non-UTF-8
+        bytes on stdout (a binary hunk, a mis-encoded filename) raise UnicodeDecodeError inside
+        the read loop. Before this fix, that exception propagated past the process-group cleanup
+        entirely (it lived after the `try` block, not inside the `finally`), leaking the
+        descendant. Cleanup must still run even when the loop exits via an exception."""
+        # A duration unique to this test (not shared with the redirected-stdout variant above), so
+        # a pgrep -f substring match can never pick up the other test's descendant.
+        argv = ["bash", "-c", "( sleep 8.172 ) & printf '\\xff\\xfe\\n'; exit 0"]
+        with self.assertRaises(UnicodeDecodeError):
+            premerge_secret_scan._run_until_stage_line(argv, self.repo, timeout_seconds=3.0)
+
+        deadline = time.monotonic() + 6.0
+        survivor = ""
+        while time.monotonic() < deadline:
+            survivor = subprocess.run(["pgrep", "-fl", "sleep 8.172"], capture_output=True, text=True).stdout
+            if not survivor.strip():
+                break
+            time.sleep(0.2)
+        self.assertEqual(survivor.strip(), "", f"descendant leaked past cleanup after an exception: {survivor!r}")
+
 
 class PilotRepoOracleTests(unittest.TestCase):
     """Exercises premerge_secret_scan.run() directly against real pilot-repo .gitleaks.toml

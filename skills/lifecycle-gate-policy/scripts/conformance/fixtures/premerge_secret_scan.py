@@ -36,6 +36,7 @@ Unlike the other fixtures in this package, this one reads and runs whichever com
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -43,6 +44,7 @@ import signal
 import subprocess
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 from ..harness import (
@@ -58,6 +60,13 @@ STAGE = "premerge"
 USES_EXTERNAL_PROBE = False
 
 DEFAULT_TIMEOUT_SECONDS = 60
+# threading.Event.wait() raises OverflowError on a timeout beyond the platform's time_t range
+# (measured: any finite value >= ~1e15 on this platform) — clamping here keeps a manifest
+# author's "basically no timeout" value (e.g. 1e9, or a deliberately huge number) inside a range
+# the watchdog can actually wait on, rather than letting it crash the watchdog thread the moment
+# it's used (review-round5.md N1). 3600s (1 hour) is already far beyond this fixture's own
+# default (60s) and any plausible fetch+scan duration.
+MAX_TIMEOUT_SECONDS = 3600.0
 
 # The reference implementation's premerge script names this stage exactly "premerge:secret-scan"
 # via its `token_gate_capture premerge:secret-scan -- gitleaks detect ...` call, and the shared
@@ -132,6 +141,19 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             pass
+    # Follow-up SIGTERM for a descendant that finishes forking into this group microseconds after
+    # the send above (e.g. a subshell that closes its inherited stdout copy — the event this
+    # cleanup is reacting to — and *then*, as a separate step, forks/execs its own child command):
+    # a process that does not exist yet when a signal is sent is never retroactively delivered
+    # that signal once it starts, so the very first descendant spawned in that narrow window can
+    # otherwise survive untouched. Measured empirically (review-round5.md N2 follow-up): a bare,
+    # single SIGTERM send leaked a redirected-stdout descendant in roughly half of repeated trials
+    # when cleanup ran immediately on natural exit; this retry closed it over 40+ trials.
+    time.sleep(0.05)
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass
 
 
 def _run_until_stage_line(argv: list[str], cwd: Path, timeout_seconds: float):
@@ -183,11 +205,21 @@ def _run_until_stage_line(argv: list[str], cwd: Path, timeout_seconds: float):
         # already reaped and that the OS may have handed to an unrelated process
         # (review-round4.md F7). Idempotent with the done_event.set() above on the matched path.
         done_event.set()
-
-    proc.stdout.close()
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
+        # Process-group cleanup lives in this same finally, not after the try block: a descendant
+        # that redirects its own stdout away (so it never holds our pipe open) survives a plain
+        # natural exit untouched, and an exception from the read loop itself (e.g.
+        # UnicodeDecodeError on non-UTF-8 output) used to skip this cleanup entirely — both leaked
+        # the process group permanently once F7 stopped the watchdog from being the fallback
+        # cleanup path (review-round5.md N2). Safe to call unconditionally, including on the
+        # matched path where the group has already been killed once: proc has not been wait()ed on
+        # by anything outside this function yet, so its pid cannot have been recycled, and a
+        # redundant killpg on an already-dead group is caught by _kill_process_group's own
+        # ProcessLookupError/PermissionError handling.
+        try:
+            if proc.stdout is not None:
+                proc.stdout.close()
+        except Exception:
+            pass
         _kill_process_group(proc)
 
     return matched_status, outcome["kind"], "".join(lines)
@@ -206,13 +238,24 @@ def run(source: Path, manifest: dict, cfg: dict) -> Result:
     # non-numeric argument, which kills the watchdog silently and reopens the exact unbounded-hang
     # class F1 fixed (review-round4.md F4). Fail fast here instead — WARN, not FAIL, since this is
     # a manifest authoring mistake, not an observed policy violation.
+    #
+    # A finite-but-non-numeric-looking check is not enough: `inf`/`nan` and quoted spellings of
+    # them are valid TOML floats, `nan <= 0` is False (NaN bypasses every ordered comparison), and
+    # `inf`/any finite value past ~1e15 still crashes threading.Event.wait() with OverflowError —
+    # each of these reopens the exact hang/crash this validation exists to close
+    # (review-round5.md N1), so isfinite() and a ceiling clamp are both required, not optional.
+    # bool is also rejected: it's a float subclass (float(True) == 1.0), so `timeout_seconds = true`
+    # would otherwise silently become a 1-second budget.
     raw_timeout = cfg.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
+    if isinstance(raw_timeout, bool):
+        return Result(NAME, "WARN", f"[fixtures.premerge-secret-scan].timeout_seconds={raw_timeout!r} must be a number, not a boolean — fix the manifest; the fixture was not run")
     try:
         timeout_seconds = float(raw_timeout)
     except (TypeError, ValueError):
         return Result(NAME, "WARN", f"[fixtures.premerge-secret-scan].timeout_seconds={raw_timeout!r} is not a number — fix the manifest; the fixture was not run")
-    if timeout_seconds <= 0:
-        return Result(NAME, "WARN", f"[fixtures.premerge-secret-scan].timeout_seconds={raw_timeout!r} must be positive — fix the manifest; the fixture was not run")
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        return Result(NAME, "WARN", f"[fixtures.premerge-secret-scan].timeout_seconds={raw_timeout!r} must be a finite positive number — fix the manifest; the fixture was not run")
+    timeout_seconds = min(timeout_seconds, MAX_TIMEOUT_SECONDS)
 
     with scratch_clone(source, manifest) as repo:
         if repo.bootstrap_result is not None and repo.bootstrap_result.status != "PASS":
