@@ -292,22 +292,58 @@ def test_no_hardcoded_acceptance_criteria_heading(name):
     )
 
 
-def test_orca_evaluate_requires_gate_safety_judgment_in_review():
-    text = _read_skill("orca-evaluate")
-    # ⑤ (5) must sit inside the same "reviewer must have these items" enumeration as
-    # ①-④, in enumeration order — not merely somewhere later in the same paragraph (a
-    # weak-toned sentence tacked on after ④ would pass a naive "next \n\n paragraph boundary"
-    # check without actually being part of the mandatory list; round1 found this exact gaming
-    # vector against a text.index("\n\n", ...) anchor).
+def _gate_safety_item_anchors(text: str) -> tuple[int, int, int, int]:
+    """Locates the mandatory reviewer checklist's ⑤ item and its enclosing paragraph, scoped by
+    the enumeration's own paragraph boundary rather than a fixed character window.
+
+    Round1 Finding 1: the original version of this anchor asserted only
+    `checklist_idx < fourth_idx < fifth_idx`. `str.index(sub, start)` is defined to return an
+    index `>= start` on success, so once both `index()` calls succeed that inequality is true by
+    construction — it cannot fail. Concretely: it stays green even if ⑤ is moved into a wholly
+    unrelated paragraph (or a different section entirely), which is exactly the gap the
+    coordinator's "boundary" requirement in the original review was meant to close (that
+    requirement was dropped when this anchor was first written).
+
+    The fix restores a real boundary: `para_end`, the first blank line after the checklist
+    sentence starts. ⑤ must fall strictly before it. `test_gate_safety_anchor_rejects_item_
+    relocated_outside_enumeration` below proves this is no longer a tautology by feeding it
+    round1's own forged counterexample and checking it is rejected.
+    """
     checklist_idx = text.index("리뷰어는 반드시 이 항목들을 갖는다")
     fourth_idx = text.index("④", checklist_idx)
     fifth_idx = text.index("⑤", fourth_idx)
-    assert checklist_idx < fourth_idx < fifth_idx, (
+    para_end = text.index("\n\n", checklist_idx)
+    return checklist_idx, fourth_idx, fifth_idx, para_end
+
+
+def test_gate_safety_anchor_rejects_item_relocated_outside_enumeration():
+    # Round1's own counterexample, verbatim: ④ ends the mandatory enumeration's paragraph, and ⑤
+    # reappears later in a separate, unrelated paragraph. The pre-fix anchor
+    # (checklist_idx < fourth_idx < fifth_idx only) passed this text; this test proves the fixed
+    # anchor no longer does, i.e. that it is not a tautology.
+    forged = (
+        "리뷰어는 반드시 이 항목들을 갖는다: ①a ②b ③c ④d\n\n"
+        "관계없는 다른 절.\n\n"
+        "⑤ ...를 지시한다. 비망라적. Critical/Important. escalation."
+    )
+    checklist_idx, fourth_idx, fifth_idx, para_end = _gate_safety_item_anchors(forged)
+    assert not (checklist_idx < fourth_idx < fifth_idx < para_end), (
+        "the paragraph-boundary anchor must reject ⑤ once it has been relocated outside the "
+        "mandatory checklist's own paragraph — if this assertion fails, the anchor has "
+        "regressed back into round1's tautological ordering-only check"
+    )
+
+
+def test_orca_evaluate_requires_gate_safety_judgment_in_review():
+    text = _read_skill("orca-evaluate")
+    checklist_idx, fourth_idx, fifth_idx, para_end = _gate_safety_item_anchors(text)
+    assert checklist_idx < fourth_idx < fifth_idx < para_end, (
         "orca-evaluate §3 must add the gate-safety judgment instruction as item ⑤ inside the "
-        "reviewer's mandatory checklist, after ④, not as a trailing sentence outside it"
+        "reviewer's mandatory checklist enumeration (before the enumeration's own paragraph "
+        "ends), not as a trailing sentence relocated outside it"
     )
     # The ⑤ segment itself must use imperative language, not a soft recommendation.
-    fifth_segment = text[fifth_idx:fifth_idx + 700]
+    fifth_segment = text[fifth_idx:para_end]
     assert "지시한다" in fifth_segment or "요구한다" in fifth_segment, (
         "orca-evaluate §3's ⑤ item must be phrased as an instruction/requirement, not advice"
     )
@@ -315,8 +351,8 @@ def test_orca_evaluate_requires_gate_safety_judgment_in_review():
 
 def test_orca_evaluate_gate_safety_examples_are_non_exhaustive():
     text = _read_skill("orca-evaluate")
-    fifth_idx = text.index("⑤")
-    assert "비망라적" in text[fifth_idx:fifth_idx + 700], (
+    _, _, fifth_idx, para_end = _gate_safety_item_anchors(text)
+    assert "비망라적" in text[fifth_idx:para_end], (
         "orca-evaluate §3's ⑤ item must mark its example category list as non-exhaustive, so it "
         "cannot calcify into the static path list AC1 forbids"
     )
@@ -324,8 +360,8 @@ def test_orca_evaluate_gate_safety_examples_are_non_exhaustive():
 
 def test_orca_evaluate_gate_safety_mitigates_tier_conflation():
     text = _read_skill("orca-evaluate")
-    fifth_idx = text.index("⑤")
-    segment = text[fifth_idx:fifth_idx + 900]
+    _, _, fifth_idx, para_end = _gate_safety_item_anchors(text)
+    segment = text[fifth_idx:para_end]
     assert "Critical" in segment or "Important" in segment, (
         "orca-evaluate §3's ⑤ item must require an explicit finding/severity when a gate-safety "
         "concern cannot be fully cleared, so a small gate-integrity diff choosing a cheap "
