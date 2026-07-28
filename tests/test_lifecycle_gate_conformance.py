@@ -801,6 +801,69 @@ class PremergeSecretScanFixtureTests(ManifestRepo):
         self.assertLess(elapsed, 10, f"watchdog did not bound wall time: took {elapsed:.1f}s against a 3s timeout and a 15s descendant")
         self.assertNotEqual(report["verdict"], "NON-COMPLIANT", report)
 
+    @pytest.mark.slow
+    def test_quoted_timeout_seconds_still_bounds_wall_time_f4_regression(self) -> None:
+        """Regression for task-26-review-round4.md Finding F4: a TOML `timeout_seconds = "3"`
+        (quoted — the shape a manifest author's typo produces) used to reach
+        threading.Event.wait() uncoerced, raising TypeError inside the watchdog thread and killing
+        it silently at t=0. With no watchdog left alive, a descendant holding stdout open reopened
+        the exact unbounded-hang class F1 fixed, and the eventual natural-exit was misclassified as
+        FAIL. timeout_seconds must be coerced to float before it reaches the watchdog, so a quoted
+        number behaves identically to an unquoted one."""
+        if shutil.which("gitleaks") is None:
+            self.skipTest("gitleaks not installed")
+        self.write("scripts/premerge.sh", DIRECT_CHILD_EXITS_DESCENDANT_HOLDS_STDOUT, executable=True)
+        self.write_manifest(
+            compliant_manifest(
+                fixtures_enabled=("premerge-secret-scan",),
+                fixtures_extra='\n[fixtures.premerge-secret-scan]\ntimeout_seconds = "3"\n',
+            )
+        )
+        self.commit("premerge entrypoint: descendant holds stdout, timeout_seconds quoted in manifest")
+
+        t0 = time.monotonic()
+        result, report = self.run_audit()
+        elapsed = time.monotonic() - t0
+
+        fixture_check = self.find_check(report, "fixture:premerge-secret-scan")
+        self.assertEqual(fixture_check["status"], "WARN", fixture_check["detail"])
+        self.assertIn("exceeded", fixture_check["detail"])
+        self.assertLess(elapsed, 10, f"quoted timeout_seconds did not bound wall time: took {elapsed:.1f}s")
+        self.assertNotEqual(report["verdict"], "NON-COMPLIANT", report)
+
+    def test_non_numeric_timeout_seconds_warns_without_running(self) -> None:
+        """A timeout_seconds that cannot be coerced to a number at all (not even a quoted number)
+        must WARN immediately — a manifest authoring mistake, not a policy violation — rather than
+        reach the watchdog and crash it silently."""
+        if shutil.which("gitleaks") is None:
+            self.skipTest("gitleaks not installed")
+        manifest = {
+            "policy_version": "2",
+            "bootstrap": {"entrypoint": "true"},
+            "stages": {
+                "premerge": {"entrypoint": "true", "categories": ["secret-scan"]},
+            },
+            "fixtures": {"enabled": ["premerge-secret-scan"]},
+        }
+        result = premerge_secret_scan.run(self.repo, manifest, {"timeout_seconds": "not-a-number"})
+        self.assertEqual(result.status, "WARN", result.detail)
+        self.assertIn("timeout_seconds", result.detail)
+
+    def test_non_positive_timeout_seconds_warns_without_running(self) -> None:
+        if shutil.which("gitleaks") is None:
+            self.skipTest("gitleaks not installed")
+        manifest = {
+            "policy_version": "2",
+            "bootstrap": {"entrypoint": "true"},
+            "stages": {
+                "premerge": {"entrypoint": "true", "categories": ["secret-scan"]},
+            },
+            "fixtures": {"enabled": ["premerge-secret-scan"]},
+        }
+        result = premerge_secret_scan.run(self.repo, manifest, {"timeout_seconds": 0})
+        self.assertEqual(result.status, "WARN", result.detail)
+        self.assertIn("timeout_seconds", result.detail)
+
 
 class PilotRepoOracleTests(unittest.TestCase):
     """Exercises premerge_secret_scan.run() directly against real pilot-repo .gitleaks.toml

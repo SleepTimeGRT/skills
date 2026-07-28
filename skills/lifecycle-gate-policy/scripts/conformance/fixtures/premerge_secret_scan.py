@@ -113,9 +113,9 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
     # silently swallowing every kill attempt once the direct child had exited first.
     #
     # Both ProcessLookupError (ESRCH — the group is already gone) and PermissionError (EPERM —
-    # observed in practice: the pid was recycled for an unrelated process by the time the signal
-    # is sent) mean the same thing here: there is nothing left for this fixture to safely kill.
-    # Either is a normal, expected outcome of a best-effort kill, not a fixture-level failure.
+    # the target process group belongs to a different user/session, e.g. a recycled pid picked up
+    # by an unrelated process outside our own) mean this best-effort kill has nothing it can safely
+    # act on. Neither is a fixture-level failure; both are silently swallowed on purpose.
     pgid = proc.pid
     try:
         os.killpg(pgid, signal.SIGTERM)
@@ -144,16 +144,16 @@ def _run_until_stage_line(argv: list[str], cwd: Path, timeout_seconds: float):
     )
 
     outcome = {"kind": "natural-exit"}
-    matched_event = threading.Event()
+    done_event = threading.Event()
 
     def _watchdog() -> None:
-        # Waits up to timeout_seconds for the main thread to signal a match. If that wait
-        # expires, kills the process group unconditionally — deliberately not gated on
-        # proc.poll(): a background descendant (e.g. a subshell gitleaks spawns) can keep
+        # Waits up to timeout_seconds for the main thread to signal it is done (matched or not).
+        # If that wait expires, kills the process group unconditionally — deliberately not gated
+        # on proc.poll(): a background descendant (e.g. a subshell gitleaks spawns) can keep
         # holding the stdout pipe open after the direct `bash` child has already exited, which
         # would make a poll()-gated check never fire and let `for line in proc.stdout` block
         # past timeout_seconds, potentially forever.
-        if matched_event.wait(timeout_seconds):
+        if done_event.wait(timeout_seconds):
             return
         outcome["kind"] = "timed-out"
         _kill_process_group(proc)
@@ -164,17 +164,25 @@ def _run_until_stage_line(argv: list[str], cwd: Path, timeout_seconds: float):
     lines: list[str] = []
     matched_status = None
     assert proc.stdout is not None
-    for line in proc.stdout:
-        lines.append(line)
-        if len(lines) > 400:
-            lines.pop(0)
-        m = STAGE_LINE_RE.match(line)
-        if m:
-            matched_status = m.group(1)
-            outcome["kind"] = "matched"
-            matched_event.set()
-            _kill_process_group(proc)
-            break
+    try:
+        for line in proc.stdout:
+            lines.append(line)
+            if len(lines) > 400:
+                lines.pop(0)
+            m = STAGE_LINE_RE.match(line)
+            if m:
+                matched_status = m.group(1)
+                outcome["kind"] = "matched"
+                done_event.set()
+                _kill_process_group(proc)
+                break
+    finally:
+        # Cancels the watchdog on every exit path, not just the matched one — otherwise a
+        # natural-exit run (stage line never seen) leaves the daemon thread waiting the full
+        # timeout_seconds before it fires a killpg against a pid that, by then, this function has
+        # already reaped and that the OS may have handed to an unrelated process
+        # (review-round4.md F7). Idempotent with the done_event.set() above on the matched path.
+        done_event.set()
 
     proc.stdout.close()
     try:
@@ -193,7 +201,18 @@ def run(source: Path, manifest: dict, cfg: dict) -> Result:
     if not entrypoint:
         return Result(NAME, "SKIP", "manifest has no [stages.premerge].entrypoint")
 
-    timeout_seconds = cfg.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
+    # A malformed timeout_seconds (e.g. a quoted TOML number, `timeout_seconds = "60"`) must
+    # never reach the watchdog thread uncoerced: threading.Event.wait() raises TypeError on a
+    # non-numeric argument, which kills the watchdog silently and reopens the exact unbounded-hang
+    # class F1 fixed (review-round4.md F4). Fail fast here instead — WARN, not FAIL, since this is
+    # a manifest authoring mistake, not an observed policy violation.
+    raw_timeout = cfg.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
+    try:
+        timeout_seconds = float(raw_timeout)
+    except (TypeError, ValueError):
+        return Result(NAME, "WARN", f"[fixtures.premerge-secret-scan].timeout_seconds={raw_timeout!r} is not a number — fix the manifest; the fixture was not run")
+    if timeout_seconds <= 0:
+        return Result(NAME, "WARN", f"[fixtures.premerge-secret-scan].timeout_seconds={raw_timeout!r} must be positive — fix the manifest; the fixture was not run")
 
     with scratch_clone(source, manifest) as repo:
         if repo.bootstrap_result is not None and repo.bootstrap_result.status != "PASS":
