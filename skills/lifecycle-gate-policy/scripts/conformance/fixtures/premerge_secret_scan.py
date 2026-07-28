@@ -43,7 +43,6 @@ import signal
 import subprocess
 import tempfile
 import threading
-import time
 from pathlib import Path
 
 from ..harness import (
@@ -105,20 +104,29 @@ def _oracle_finding_count(repo_path: Path, log_range: str) -> int | None:
 
 
 def _kill_process_group(proc: subprocess.Popen) -> None:
-    try:
-        pgid = os.getpgid(proc.pid)
-    except ProcessLookupError:
-        return
+    # proc was spawned with start_new_session=True, which makes it both the session leader and
+    # the process group leader of a new group — its pgid always equals its own pid, deterministically,
+    # from the moment it was spawned. Querying it via os.getpgid(proc.pid) instead is not just
+    # redundant: on this platform, getpgid() on an already-exited-but-not-yet-reaped (zombie) pid
+    # raises ProcessLookupError even though the process group (and any live descendants still in
+    # it, e.g. a backgrounded subshell holding stdout open) is still very much alive — which was
+    # silently swallowing every kill attempt once the direct child had exited first.
+    #
+    # Both ProcessLookupError (ESRCH — the group is already gone) and PermissionError (EPERM —
+    # observed in practice: the pid was recycled for an unrelated process by the time the signal
+    # is sent) mean the same thing here: there is nothing left for this fixture to safely kill.
+    # Either is a normal, expected outcome of a best-effort kill, not a fixture-level failure.
+    pgid = proc.pid
     try:
         os.killpg(pgid, signal.SIGTERM)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         return
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         try:
             os.killpg(pgid, signal.SIGKILL)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
         try:
             proc.wait(timeout=5)
@@ -136,12 +144,19 @@ def _run_until_stage_line(argv: list[str], cwd: Path, timeout_seconds: float):
     )
 
     outcome = {"kind": "natural-exit"}
+    matched_event = threading.Event()
 
     def _watchdog() -> None:
-        time.sleep(timeout_seconds)
-        if proc.poll() is None:
-            outcome["kind"] = "timed-out"
-            _kill_process_group(proc)
+        # Waits up to timeout_seconds for the main thread to signal a match. If that wait
+        # expires, kills the process group unconditionally — deliberately not gated on
+        # proc.poll(): a background descendant (e.g. a subshell gitleaks spawns) can keep
+        # holding the stdout pipe open after the direct `bash` child has already exited, which
+        # would make a poll()-gated check never fire and let `for line in proc.stdout` block
+        # past timeout_seconds, potentially forever.
+        if matched_event.wait(timeout_seconds):
+            return
+        outcome["kind"] = "timed-out"
+        _kill_process_group(proc)
 
     watchdog = threading.Thread(target=_watchdog, daemon=True)
     watchdog.start()
@@ -157,6 +172,7 @@ def _run_until_stage_line(argv: list[str], cwd: Path, timeout_seconds: float):
         if m:
             matched_status = m.group(1)
             outcome["kind"] = "matched"
+            matched_event.set()
             _kill_process_group(proc)
             break
 
@@ -209,11 +225,17 @@ def run(source: Path, manifest: dict, cfg: dict) -> Result:
         if secret_commit.returncode != 0:
             return Result(NAME, "FAIL", f"could not create secret commit: {(secret_commit.stderr or '').strip()[-300:]}")
 
-        # Harmless commit on top: the secret must not be the tip, so a scan that only looked at
-        # HEAD (instead of the origin..HEAD range) cannot pass by accident.
+        # Harmless commit on top: the secret must not be the tip, AND must no longer be present
+        # in the working tree at all (git rm, not just superseded by a new file) — otherwise a
+        # worktree-only scanner (e.g. `gitleaks dir .` instead of a real `origin..HEAD` range
+        # scan) would still stumble onto it on disk and earn a false PASS, which would certify a
+        # capability (commit-range scanning) the entrypoint doesn't actually have.
+        remove = repo.run(["git", "rm", "--quiet", SYNTHETIC_SECRET_RELPATH])
+        if remove.returncode != 0:
+            return Result(NAME, "FAIL", f"could not remove secret file for harmless commit: {(remove.stderr or '').strip()[-300:]}")
         repo.write("__conformance_harmless.txt", "conformance: harmless commit on top of the secret\n")
         repo.stage("__conformance_harmless.txt")
-        harmless_commit = repo.run(["git", "commit", "--no-verify", "-m", "conformance: harmless commit on top (range-scan probe)"])
+        harmless_commit = repo.run(["git", "commit", "--no-verify", "-m", "conformance: harmless commit on top (range-scan probe; secret removed from worktree)"])
         if harmless_commit.returncode != 0:
             return Result(NAME, "FAIL", f"could not create harmless commit: {(harmless_commit.stderr or '').strip()[-300:]}")
 

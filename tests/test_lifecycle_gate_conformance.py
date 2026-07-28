@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 
@@ -25,6 +26,7 @@ TOKEN_EFFICIENT_GATES_DIR = ROOT / "skills" / "token-efficient-gates"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 import audit  # noqa: E402  (module under test — imported for its constants, not run as __main__)
+from conformance import harness  # noqa: E402  (needs SCRIPTS_DIR on sys.path)
 from conformance.fixtures import premerge_secret_scan  # noqa: E402  (needs SCRIPTS_DIR on sys.path)
 
 
@@ -492,6 +494,63 @@ exit 0
 
 HANGS_FOREVER = "#!/usr/bin/env bash\nsleep 999\n"
 
+DIRECT_CHILD_EXITS_DESCENDANT_HOLDS_STDOUT = r"""
+#!/usr/bin/env bash
+set -euo pipefail
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || true)
+[ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH=main
+git fetch --quiet origin "$DEFAULT_BRANCH"
+if ! git merge-base --is-ancestor "origin/$DEFAULT_BRANCH" HEAD; then
+  echo "[premerge] FAIL — behind origin/$DEFAULT_BRANCH" >&2
+  exit 2
+fi
+CHANGED=$(git diff --name-only "origin/$DEFAULT_BRANCH..HEAD")
+if [ -z "$CHANGED" ]; then
+  echo "[premerge] FAIL — nothing to merge" >&2
+  exit 2
+fi
+# direct child exits immediately (never reports a [premerge:secret-scan] line), but backgrounds a
+# descendant that keeps the stdout pipe open well past any reasonable timeout — the shape
+# task-26-review-round3 Finding F1 exists to catch.
+(sleep 15) &
+exit 0
+"""
+
+def worktree_only_scan_script(secret_relpath: str) -> str:
+    """A stub premerge entrypoint that decides purely from what's checked out on disk right now
+    (`test -f`), never from git history/the commit range — the shape task-26-review-round3
+    Finding F2 exists to catch. Checks file *existence*, not content, so the check itself never
+    needs to embed the secret payload's own text in the script's source (which would make the
+    check self-match on the script file, independent of whatever is actually on disk)."""
+    return textwrap.dedent(
+        f"""\
+        #!/usr/bin/env bash
+        set -euo pipefail
+        REPO_ROOT=$(git rev-parse --show-toplevel)
+        cd "$REPO_ROOT"
+        DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || true)
+        [ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH=main
+        git fetch --quiet origin "$DEFAULT_BRANCH"
+        if ! git merge-base --is-ancestor "origin/$DEFAULT_BRANCH" HEAD; then
+          echo "[premerge] FAIL — behind origin/$DEFAULT_BRANCH" >&2
+          exit 2
+        fi
+        CHANGED=$(git diff --name-only "origin/$DEFAULT_BRANCH..HEAD")
+        if [ -z "$CHANGED" ]; then
+          echo "[premerge] FAIL — nothing to merge" >&2
+          exit 2
+        fi
+        if [ -f "{secret_relpath}" ]; then
+          echo "[premerge:secret-scan] FAIL (exit 1, 0s) — log: worktree-only scan found the secret file on disk" >&2
+          exit 1
+        fi
+        echo "[premerge:secret-scan] PASS (0s)"
+        exit 0
+        """
+    )
+
 
 class PremergeSecretScanFixtureTests(ManifestRepo):
     """Behavioral coverage for the premerge-secret-scan fixture — the one fixture that actually
@@ -594,6 +653,31 @@ class PremergeSecretScanFixtureTests(ManifestRepo):
         self.assertEqual(fixture_check["status"], "WARN", fixture_check["detail"])
 
     @pytest.mark.slow
+    def test_worktree_only_scanner_is_not_falsely_certified_as_range_scan_f2_regression(self) -> None:
+        """Regression for task-26-review-round3.md Finding F2: the fixture's harmless commit must
+        actually `git rm` the synthetic secret file, not merely add a new file on top of it. Before
+        that fix, the secret stayed physically present in the checked-out tree even after the
+        harmless commit, so a worktree-only scanner (this stub: `grep` over files on disk, never
+        the commit range) would still stumble onto it and report FAIL — and the fixture's own
+        oracle re-run (a genuine range scan) would also find it in secret_commit's diff, so the two
+        would agree and the fixture would wrongly return PASS, certifying "range-scanning" a
+        stub that never actually looked at git history. With the secret removed from the worktree
+        by the harmless commit, this same stub now finds nothing on disk and reports PASS (did not
+        block) — while the independent oracle range-scan still finds it in history — so the
+        fixture must return WARN, correctly refusing to certify this stub's capability."""
+        if shutil.which("gitleaks") is None:
+            self.skipTest("gitleaks not installed")
+        self.write("scripts/premerge.sh", worktree_only_scan_script(harness.SYNTHETIC_SECRET_RELPATH), executable=True)
+        self.write_manifest(compliant_manifest(fixtures_enabled=("premerge-secret-scan",)))
+        self.commit("premerge entrypoint: worktree-only scan, never the commit range")
+
+        result, report = self.run_audit()
+
+        fixture_check = self.find_check(report, "fixture:premerge-secret-scan")
+        self.assertEqual(fixture_check["status"], "WARN", fixture_check["detail"])
+        self.assertNotEqual(fixture_check["status"], "PASS", fixture_check["detail"])
+
+    @pytest.mark.slow
     def test_verify_dependency_never_reached_new1_regression(self) -> None:
         """Regression for task-26-review-round2.md NEW-1: the differential design forced a
         secret-free baseline run to complete the entrypoint's *entire* chain, including
@@ -686,13 +770,44 @@ class PremergeSecretScanFixtureTests(ManifestRepo):
         self.assertIn("exceeded", fixture_check["detail"])
         self.assertNotEqual(report["verdict"], "NON-COMPLIANT", report)
 
+    @pytest.mark.slow
+    def test_orphaned_descendant_does_not_defeat_timeout_f1_regression(self) -> None:
+        """Regression for task-26-review-round3.md Finding F1: the direct child process can exit
+        while a background descendant it spawned keeps holding the stdout pipe open. The watchdog
+        must kill the whole process group once timeout_seconds elapses regardless of whether the
+        direct child has already exited — previously it checked proc.poll() first and did nothing
+        in that case, so the read blocked until the descendant died on its own (here, 15s) and the
+        result was then misclassified as FAIL (no evidence treated as a violation) instead of WARN.
+        Asserts both: the wall time is actually bounded near timeout_seconds, and the status is
+        WARN, not FAIL."""
+        if shutil.which("gitleaks") is None:
+            self.skipTest("gitleaks not installed")
+        self.write("scripts/premerge.sh", DIRECT_CHILD_EXITS_DESCENDANT_HOLDS_STDOUT, executable=True)
+        self.write_manifest(
+            compliant_manifest(
+                fixtures_enabled=("premerge-secret-scan",),
+                fixtures_extra="\n[fixtures.premerge-secret-scan]\ntimeout_seconds = 3\n",
+            )
+        )
+        self.commit("premerge entrypoint: direct child exits, descendant holds stdout open")
+
+        t0 = time.monotonic()
+        result, report = self.run_audit()
+        elapsed = time.monotonic() - t0
+
+        fixture_check = self.find_check(report, "fixture:premerge-secret-scan")
+        self.assertEqual(fixture_check["status"], "WARN", fixture_check["detail"])
+        self.assertIn("exceeded", fixture_check["detail"])
+        self.assertLess(elapsed, 10, f"watchdog did not bound wall time: took {elapsed:.1f}s against a 3s timeout and a 15s descendant")
+        self.assertNotEqual(report["verdict"], "NON-COMPLIANT", report)
+
 
 class PilotRepoOracleTests(unittest.TestCase):
     """Exercises premerge_secret_scan.run() directly against real pilot-repo .gitleaks.toml
     configs, inside disposable scratch clones only (the source repo is only ever `git clone
     --local`-read, never written to)."""
 
-    def _run_against(self, repo_name: str, expected_statuses: tuple[str, ...]) -> None:
+    def _run_against(self, repo_name: str, expected_statuses: tuple[str, ...] | None = None):
         pilot_path = Path.home() / "Projects" / repo_name
         if not (pilot_path / ".git").is_dir():
             self.skipTest(f"{pilot_path} not present on this machine")
@@ -747,10 +862,12 @@ class PilotRepoOracleTests(unittest.TestCase):
             }
 
             result = premerge_secret_scan.run(scratch, manifest, {})
-            self.assertIn(
-                result.status, expected_statuses,
-                f"{repo_name}: expected one of {expected_statuses}, got {result.status}: {result.detail}",
-            )
+            if expected_statuses is not None:
+                self.assertIn(
+                    result.status, expected_statuses,
+                    f"{repo_name}: expected one of {expected_statuses}, got {result.status}: {result.detail}",
+                )
+            return result
 
     def test_medicount_ruleset_state_is_caught_correctly(self) -> None:
         """medicount's `.gitleaks.toml` may or may not currently have `[extend] useDefault = true`
@@ -760,8 +877,33 @@ class PilotRepoOracleTests(unittest.TestCase):
         failing — for the right reason (a real fix to medicount) but as an unrelated, confusing test
         break — the moment someone corrects medicount's ruleset. `PASS` (fixed) and `WARN` (still
         broken) are both evidence the oracle is doing its job; only `FAIL`/`SKIP` here would
-        indicate an actual regression in the fixture or the pilot checkout."""
+        indicate an actual regression in the fixture or the pilot checkout.
+
+        Accepting either status here is not, by itself, discriminating (a fixture that always
+        returned PASS would also pass this line) — see
+        test_medicount_status_matches_independently_measured_finding_count below for the check
+        that actually proves the vacuous-ruleset case is caught."""
         self._run_against("medicount", ("PASS", "WARN"))
+
+    def test_medicount_status_matches_independently_measured_finding_count(self) -> None:
+        """review-round3.md AC #6: the assertion above cannot tell a vacuous (0-rule) ruleset
+        apart from a working one, since it accepts both outcomes unconditionally. This test
+        closes that gap by parsing the oracle finding count premerge_secret_scan.run() itself
+        measured (an independent `gitleaks detect` re-run over the same commit range, reported
+        verbatim in the result detail) and asserting the fixture's status is the correct function
+        of that count: >=1 real finding must mean PASS, and 0 findings must mean WARN. A future
+        regression that reported PASS despite 0 findings (i.e. certified a vacuous ruleset as
+        clean) would fail this assertion even though it would have silently passed the lenient
+        tuple check above."""
+        result = self._run_against("medicount")
+        self.assertIn(result.status, ("PASS", "WARN"), result.detail)
+        match = re.search(r"oracle found (\d+) finding", result.detail)
+        self.assertIsNotNone(match, f"could not find an oracle finding count in: {result.detail!r}")
+        finding_count = int(match.group(1))
+        if finding_count >= 1:
+            self.assertEqual(result.status, "PASS", result.detail)
+        else:
+            self.assertEqual(result.status, "WARN", result.detail)
 
     def test_samhaengsi_working_ruleset_passes(self) -> None:
         self._run_against("toss-samhaengsi", ("PASS",))
