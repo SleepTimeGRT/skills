@@ -20,6 +20,18 @@ description: Use when generating the implementation for one task (issue) — pro
 - 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 —
   `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다. §3(launch)과 §5(폴링)에서
   이 확인이 걸리는 지점을 표시한다.
+- **이 issue에 대해 이 세션이 처음이 아닐 수 있다면**(이전 coordinator가 도중에 죽어서 재개하는 경우) 새 wave를 시작하기 전에 orphan부터 정리한다 — §3/§5 wave telemetry는 coordinator가 살아서 markdown 지침을 끝까지 실행해야만 남는 best-effort 기록이라, coordinator가 wave 도중 죽으면(그리고 그게 바로 우리가 잡으려는 CPU 경합의 극단적 형태다) `wave_start`만 남고 `wave_end`가 영영 안 남을 수 있다:
+
+  ```bash
+  jq -s --arg issue "<issue-num>" '
+    [.[] | select(.issue == $issue)] as $rows
+    | ($rows | map(select(.event == "wave_start") | .wave_index)) as $starts
+    | ($rows | map(select(.event == "wave_end") | .wave_index)) as $ends
+    | $starts - $ends
+  ' ~/.local/state/orca-workflows/logs/waves.jsonl 2>/dev/null
+  ```
+
+  결과가 비어있지 않으면(orphan `wave_index` 존재) 이전 세션이 그 wave 도중 죽었다는 뜻이다. `orca orchestration task-list --json`/`orca terminal list --json`으로 그 wave의 subtask가 실제로 끝났는지 확인한 뒤, §5의 `wave_end` 포맷대로 `outcome:"crash_recovered"`로 채워 넣는다(retry_count는 알 수 없으면 `null`). 이 값 — "wave 크기 N에서 coordinator가 죽었다" — 이 바로 best-effort 로그가 놓칠 뻔한 가장 중요한 데이터 포인트이므로, 확인 없이 새 wave로 넘어가지 않는다.
 
 ## 1. Contract 제안 (generator 역할)
 
@@ -71,12 +83,13 @@ orca terminal wait --terminal <impl-handle> --for tui-idle --timeout-ms 60000 --
 install -d -m 700 ~/.local/state/orca-workflows/logs
 jq -cn \
   --arg ts "$(date -u +%FT%TZ)" \
+  --argjson ts_epoch "$(date -u +%s)" \
   --arg event "wave_start" \
   --arg issue "<issue-num>" \
   --argjson wave_index <n> \
   --argjson wave_size <이 wave 터미널 수> \
   --argjson nproc "$(sysctl -n hw.ncpu 2>/dev/null || nproc)" \
-  '{ts: $ts, event: $event, skill: "orca-task-runner", issue: $issue, wave_index: $wave_index, wave_size: $wave_size, nproc: $nproc}' \
+  '{ts: $ts, ts_epoch: $ts_epoch, event: $event, skill: "orca-task-runner", issue: $issue, wave_index: $wave_index, wave_size: $wave_size, nproc: $nproc}' \
   >> ~/.local/state/orca-workflows/logs/waves.jsonl
 chmod 600 ~/.local/state/orca-workflows/logs/waves.jsonl
 ```
@@ -114,18 +127,30 @@ install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","even
 **Wave telemetry(종료)** — 이 wave의 모든 subtask가 완료(worker_done 또는 수동 복구)된 직후 1회, §3 `wave_start`와 같은 `issue`+`wave_index`로 join되도록:
 
 ```bash
+start_epoch="$(jq -r --arg issue "<issue-num>" --argjson wi <n> \
+  'select(.event == "wave_start" and .issue == $issue and .wave_index == $wi) | .ts_epoch' \
+  ~/.local/state/orca-workflows/logs/waves.jsonl | tail -1)"
+if [ -n "$start_epoch" ]; then
+  elapsed_ms=$(( ("$(date -u +%s)" - start_epoch) * 1000 ))
+else
+  elapsed_ms=null   # 매칭되는 wave_start가 없음 — §0 orphan 확인을 건너뛴 경우거나 데이터 유실
+fi
 jq -cn \
   --arg ts "$(date -u +%FT%TZ)" \
   --arg event "wave_end" \
   --arg issue "<issue-num>" \
   --argjson wave_index <n> \
   --argjson wave_size <이 wave 터미널 수> \
-  --argjson retry_count <이 wave에서 발생한 스폰 실패·timeout 재시도 총 횟수> \
-  '{ts: $ts, event: $event, skill: "orca-task-runner", issue: $issue, wave_index: $wave_index, wave_size: $wave_size, retry_count: $retry_count}' \
+  --argjson retry_count <이 wave에서 발생한 스폰 실패·timeout 재시도 총 횟수, 알 수 없으면 null> \
+  --argjson elapsed_ms "$elapsed_ms" \
+  --arg outcome "completed" \
+  '{ts: $ts, event: $event, skill: "orca-task-runner", issue: $issue, wave_index: $wave_index, wave_size: $wave_size, retry_count: $retry_count, elapsed_ms: $elapsed_ms, outcome: $outcome}' \
   >> ~/.local/state/orca-workflows/logs/waves.jsonl
 ```
 
-`retry_count`가 이 wave에서 2 이상이면 스폰 실패·timeout이 우연이 아니라 이 wave 크기에서 반복된다는 뜻이다 — 다음 wave부터 크기를 3 이하로 되돌리고(§3) 사용자에게 보고한다. "응답이 느려 보인다" 같은 주관적 판단이 아니라 이 숫자로 판정한다.
+(§0에서 orphan wave를 복구하는 경우는 `outcome`을 `"crash_recovered"`로, `retry_count`를 모르면 `null`로 채운다 — 그 외 필드는 동일 포맷.)
+
+`retry_count`가 이 wave에서 2 이상이면 스폰 실패·timeout이 우연이 아니라 이 wave 크기에서 반복된다는 뜻이다 — 다음 wave부터 크기를 3 이하로 되돌리고(§3) 사용자에게 보고한다. `elapsed_ms`는 완주한 wave에서도 wave 크기가 커질수록 벽시계 시간이 비선형으로 늘어나는지 보는 용도다. "응답이 느려 보인다" 같은 주관적 판단이 아니라 이 숫자들로 판정한다.
 
 ## 6. Task 레벨 게이트
 
