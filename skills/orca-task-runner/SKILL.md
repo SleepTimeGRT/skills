@@ -123,6 +123,15 @@ install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","even
   셸 에러/no-output이면 스폰 실패 — `~/.agents/orca-workflows/spawn-failures.md` 절차로.
 - decision_gate(워커 ask) → 판단 가능하면 `reply`, 불가하면 `orca-workflow`에 에스컬레이션.
 - worker_done 유실 복구: 커밋/산출물 확인 + `task-update --status completed` 수동 복구, 기록.
+- **완료 확인된 subtask 터미널은 즉시 닫는다** — wave 전체를 기다리지 않고, 그 subtask의 `worker_done` 수신(taskId+dispatchId 일치) 또는 위 유실 복구가 끝나는 즉시:
+
+  ```bash
+  orca terminal read --terminal <impl_handle> --json > ~/.local/state/orca-workflows/logs/term-<impl_handle>.json
+  chmod 600 ~/.local/state/orca-workflows/logs/term-<impl_handle>.json
+  orca terminal close --terminal <impl_handle> --tab --json
+  ```
+
+  `--tab`을 반드시 붙인다 — 실측 결과 `--tab` close는 기저 프로세스를 실제로 종료시키고 메모리를 회수하지만(`diagnostics memory`에서 세션이 사라짐), `--tab` 없는 close는 pane만 닫고 프로세스가 남을 수 있다. close 전에 `terminal read` 스냅샷을 남기는 이유: close하면 스크롤백이 사라져서, §6 task-레벨 게이트가 나중에 실패했을 때 "이 subtask가 뭘 했는지" 재확인할 방법이 없어진다. worker_done/유실 복구 둘 다 확인 전에는(단순히 활동이 멈췄다는 이유만으로는) 닫지 않는다 — 아직 파일 쓰기·커밋이 끝나지 않은 프로세스를 죽일 위험이 있다. 이 close는 §3에서 매 wave 새 터미널을 스폰하는 구조라 재사용 대상이 없다는 전제 위에서만 안전하다 — 이 스킬 밖(범용 `orchestration`, `orca-workflow` 자체 relay 터미널)에는 적용하지 않는다.
 
 **Wave telemetry(종료)** — 이 wave의 모든 subtask가 완료(worker_done 또는 수동 복구)된 직후 1회, §3 `wave_start`와 같은 `issue`+`wave_index`로 join되도록:
 
