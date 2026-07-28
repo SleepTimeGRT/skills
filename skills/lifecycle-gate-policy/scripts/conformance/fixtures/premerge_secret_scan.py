@@ -43,7 +43,6 @@ import shutil
 import signal
 import subprocess
 import tempfile
-import threading
 import time
 from pathlib import Path
 
@@ -60,12 +59,10 @@ STAGE = "premerge"
 USES_EXTERNAL_PROBE = False
 
 DEFAULT_TIMEOUT_SECONDS = 60
-# threading.Event.wait() raises OverflowError on a timeout beyond the platform's time_t range
-# (measured: any finite value >= ~1e15 on this platform) — clamping here keeps a manifest
-# author's "basically no timeout" value (e.g. 1e9, or a deliberately huge number) inside a range
-# the watchdog can actually wait on, rather than letting it crash the watchdog thread the moment
-# it's used (review-round5.md N1). 3600s (1 hour) is already far beyond this fixture's own
-# default (60s) and any plausible fetch+scan duration.
+# Clamping keeps a manifest author's "basically no timeout" value (e.g. 1e9, or a deliberately
+# huge number) inside a sane ceiling rather than letting it become a de-facto unbounded wait.
+# 3600s (1 hour) is already far beyond this fixture's own default (60s) and any plausible
+# fetch+scan duration.
 MAX_TIMEOUT_SECONDS = 3600.0
 
 # The reference implementation's premerge script names this stage exactly "premerge:secret-scan"
@@ -156,36 +153,47 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
         pass
 
 
+class _StageWatchdogTimeout(Exception):
+    """Raised by the SIGALRM handler once timeout_seconds has elapsed with no stage line seen."""
+
+
 def _run_until_stage_line(argv: list[str], cwd: Path, timeout_seconds: float):
     """Runs argv, terminating the whole process group the moment a line matching
-    STAGE_LINE_RE appears on stdout (stderr merged in). Returns (matched_status_or_None,
-    "timed-out"|"natural-exit"|"matched", collected_output_tail)."""
+    STAGE_LINE_RE appears on stdout (stderr merged in), or once timeout_seconds elapses.
+    Returns (matched_status_or_None, "timed-out"|"natural-exit"|"matched",
+    collected_output_tail).
+
+    Bounded with signal.setitimer(SIGALRM), not a hand-rolled thread/Event watchdog: the OS
+    delivers exactly one interrupt at the deadline, which breaks the blocking `for line in
+    proc.stdout` read directly — a signal handler that raises propagates out of the interrupted
+    read instead of the read being silently retried (PEP 475) — regardless of whether the direct
+    child has already exited or a descendant is still holding stdout open, with no separate
+    thread, no shared mutable state between threads, and no polling loop. Every prior defect in
+    this function (review rounds 3-5: a poll()-gated watchdog that never fired once the direct
+    child had exited, a manifest-supplied timeout_seconds reaching the watchdog uncoerced and
+    crashing it, a watchdog left armed on the natural-exit path, process-group cleanup living
+    outside the one block that ran on every exit path) was a different symptom of coordinating a
+    background thread with the main thread's read loop; this design has only one thread, so that
+    whole class of defect has no surface to occur on. The only restriction this trades in: SIGALRM
+    handlers only run on a process's main thread — true here, since this function is always
+    reached synchronously from a fixture's own main-thread call chain, never from a background
+    thread of the caller.
+    """
     proc = subprocess.Popen(
         argv, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, start_new_session=True,
     )
+    assert proc.stdout is not None
 
-    outcome = {"kind": "natural-exit"}
-    done_event = threading.Event()
+    def _raise_timeout(signum, frame):
+        raise _StageWatchdogTimeout()
 
-    def _watchdog() -> None:
-        # Waits up to timeout_seconds for the main thread to signal it is done (matched or not).
-        # If that wait expires, kills the process group unconditionally — deliberately not gated
-        # on proc.poll(): a background descendant (e.g. a subshell gitleaks spawns) can keep
-        # holding the stdout pipe open after the direct `bash` child has already exited, which
-        # would make a poll()-gated check never fire and let `for line in proc.stdout` block
-        # past timeout_seconds, potentially forever.
-        if done_event.wait(timeout_seconds):
-            return
-        outcome["kind"] = "timed-out"
-        _kill_process_group(proc)
-
-    watchdog = threading.Thread(target=_watchdog, daemon=True)
-    watchdog.start()
+    previous_handler = signal.signal(signal.SIGALRM, _raise_timeout)
+    signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
 
     lines: list[str] = []
     matched_status = None
-    assert proc.stdout is not None
+    kind = "natural-exit"
     try:
         for line in proc.stdout:
             lines.append(line)
@@ -194,35 +202,26 @@ def _run_until_stage_line(argv: list[str], cwd: Path, timeout_seconds: float):
             m = STAGE_LINE_RE.match(line)
             if m:
                 matched_status = m.group(1)
-                outcome["kind"] = "matched"
-                done_event.set()
-                _kill_process_group(proc)
+                kind = "matched"
                 break
+    except _StageWatchdogTimeout:
+        kind = "timed-out"
     finally:
-        # Cancels the watchdog on every exit path, not just the matched one — otherwise a
-        # natural-exit run (stage line never seen) leaves the daemon thread waiting the full
-        # timeout_seconds before it fires a killpg against a pid that, by then, this function has
-        # already reaped and that the OS may have handed to an unrelated process
-        # (review-round4.md F7). Idempotent with the done_event.set() above on the matched path.
-        done_event.set()
-        # Process-group cleanup lives in this same finally, not after the try block: a descendant
-        # that redirects its own stdout away (so it never holds our pipe open) survives a plain
-        # natural exit untouched, and an exception from the read loop itself (e.g.
-        # UnicodeDecodeError on non-UTF-8 output) used to skip this cleanup entirely — both leaked
-        # the process group permanently once F7 stopped the watchdog from being the fallback
-        # cleanup path (review-round5.md N2). Safe to call unconditionally, including on the
-        # matched path where the group has already been killed once: proc has not been wait()ed on
-        # by anything outside this function yet, so its pid cannot have been recycled, and a
-        # redundant killpg on an already-dead group is caught by _kill_process_group's own
-        # ProcessLookupError/PermissionError handling.
+        # Disarmed before anything else: once we've stopped caring about the deadline, a stray
+        # already-queued alarm must never fire mid-cleanup below, neither of which is guarded
+        # against _StageWatchdogTimeout.
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        # Process-group cleanup happens exactly once, here, regardless of which of the three ways
+        # the loop above ended (matched, natural exit, or timeout) — one call site, not one per
+        # exit path.
         try:
-            if proc.stdout is not None:
-                proc.stdout.close()
+            proc.stdout.close()
         except Exception:
             pass
         _kill_process_group(proc)
 
-    return matched_status, outcome["kind"], "".join(lines)
+    return matched_status, kind, "".join(lines)
 
 
 def run(source: Path, manifest: dict, cfg: dict) -> Result:
@@ -234,18 +233,19 @@ def run(source: Path, manifest: dict, cfg: dict) -> Result:
         return Result(NAME, "SKIP", "manifest has no [stages.premerge].entrypoint")
 
     # A malformed timeout_seconds (e.g. a quoted TOML number, `timeout_seconds = "60"`) must
-    # never reach the watchdog thread uncoerced: threading.Event.wait() raises TypeError on a
-    # non-numeric argument, which kills the watchdog silently and reopens the exact unbounded-hang
-    # class F1 fixed (review-round4.md F4). Fail fast here instead — WARN, not FAIL, since this is
-    # a manifest authoring mistake, not an observed policy violation.
+    # never reach signal.setitimer() uncoerced: it raises TypeError on a non-numeric argument,
+    # which would abort this fixture with an unhandled exception instead of a policy verdict. Fail
+    # fast here instead — WARN, not FAIL, since this is a manifest authoring mistake, not an
+    # observed policy violation.
     #
     # A finite-but-non-numeric-looking check is not enough: `inf`/`nan` and quoted spellings of
     # them are valid TOML floats, `nan <= 0` is False (NaN bypasses every ordered comparison), and
-    # `inf`/any finite value past ~1e15 still crashes threading.Event.wait() with OverflowError —
-    # each of these reopens the exact hang/crash this validation exists to close
-    # (review-round5.md N1), so isfinite() and a ceiling clamp are both required, not optional.
-    # bool is also rejected: it's a float subclass (float(True) == 1.0), so `timeout_seconds = true`
-    # would otherwise silently become a 1-second budget.
+    # signal.setitimer() raises on each of `inf`/`-inf` (OverflowError), `nan` (ValueError), and
+    # negative values (ItimerError) — none of which is a WARN, so isfinite() and a ceiling clamp
+    # are both required, not optional, to keep a malformed value from surfacing as an unhandled
+    # exception instead of a policy verdict. bool is also rejected: it's a float subclass
+    # (float(True) == 1.0), so `timeout_seconds = true` would otherwise silently become a
+    # 1-second budget.
     raw_timeout = cfg.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
     if isinstance(raw_timeout, bool):
         return Result(NAME, "WARN", f"[fixtures.premerge-secret-scan].timeout_seconds={raw_timeout!r} must be a number, not a boolean — fix the manifest; the fixture was not run")
