@@ -47,3 +47,8 @@ ignored_path = "src/lib/supabase/types.ts"   # a path actually in this repo's fo
 
 [fixtures.path-fallback]
 timeout_seconds = 60   # default is 60; override only if this repo's static-verify entrypoint is slower
+
+[fixtures.premerge-secret-scan]
+timeout_seconds = 60   # bounds only the wait for the entrypoint's own [premerge:secret-scan] line to
+                        # appear (step 1 fetch + the gitleaks scan itself) — not the entrypoint's total
+                        # runtime; verify/e2e are never reached by this fixture regardless of this value

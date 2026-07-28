@@ -104,6 +104,9 @@ about the repository's policy.
 
 [fixtures.path-fallback]
 timeout_seconds = 60
+
+[fixtures.premerge-secret-scan]
+timeout_seconds = 60   # how long to wait for the entrypoint's [premerge:secret-scan] line, not its total runtime
 ```
 
 | Field | Type | Required | Default | Meaning |
@@ -111,15 +114,34 @@ timeout_seconds = 60
 | `fixtures.enabled` | array of strings | no | `[]` (no fixtures run) | Names of conformance fixtures to run against this repository. |
 | `fixtures.<name>.*` | fixture-specific | no | `{}` | Data the fixture needs that is repository-specific (a real file path, a timeout), never a description of mechanism. |
 
-`premerge` was originally not a fixture/probe target: the three fixtures shipped by the issue that
-introduced this manifest format exercise `pre-commit` and `pre-push` only. One exception exists — the
-`premerge-secret-scan` fixture (added for issue #26) reads `[stages.premerge].entrypoint` from the
-manifest and runs it directly, specifically to observe the `secret-scan` category now required at
-`premerge` (see policy-spec.md). When `premerge-secret-scan` is not declared in `[fixtures].enabled`,
-`premerge` still receives structural category-declaration checking only and
-`stages.premerge.behavioral` reports `NOT-EXERCISED` — "we didn't test this" must never be misread as
-"this passed." When `premerge-secret-scan` *is* declared, its own `fixture:premerge-secret-scan`
-result line carries the real status instead, and no separate `NOT-EXERCISED` line is added.
+Most fixtures shipped here drive `git commit` or `git push` directly and exercise `pre-commit` or
+`pre-push` only. One exception exists — the `premerge-secret-scan` fixture reads
+`[stages.premerge].entrypoint` from the manifest and runs it directly, specifically to observe the
+`secret-scan` category required at `premerge` (see policy-spec.md). When `premerge-secret-scan` is
+not declared in `[fixtures].enabled`, `premerge` still receives structural category-declaration
+checking only and `stages.premerge.behavioral` reports `NOT-EXERCISED` — "we didn't test this" must
+never be misread as "this passed." When `premerge-secret-scan` *is* declared, its own
+`fixture:premerge-secret-scan` result line carries the real status instead, and no separate
+`NOT-EXERCISED` line is added.
+
+**How `premerge-secret-scan` observes the entrypoint, and the trade-off that follows.** It runs the
+declared entrypoint exactly once and watches its stdout for the one line the reference
+implementation's `token_gate_capture` helper prints for its `premerge:secret-scan` stage
+(`[premerge:secret-scan] PASS|FAIL ...`) — the moment that line appears, the whole process is
+terminated, so the entrypoint's later stages (verify, e2e, and anything else after secret-scan) are
+never reached and this fixture never exercises a repository's real verify/e2e chain. It separately
+re-runs gitleaks itself over the same commit range to confirm at least one real finding, so a config
+with an empty ruleset cannot pass merely because the stage's own tooling exited cleanly. The
+trade-off: this fixture recognizes only the reference implementation's exact output tag. A
+`[stages.premerge].entrypoint` that scans for secrets through a different, untagged mechanism is
+reported as unobserved even if that mechanism works correctly — narrower than fully mechanism-agnostic,
+accepted because the alternative (re-running the entire declared entrypoint end to end, or matching
+loosely on any mention of "secret-scan"/"gitleaks" in its output) proved to have worse failure modes:
+forcing full completion made this fixture unable to pass on any repository whose verify/e2e needs
+dependencies a scratch clone doesn't have, and loose text matching let an unrelated downstream gate
+that happened to block for its own reasons be mistaken for a working secret scan.
+`[fixtures.premerge-secret-scan].timeout_seconds` (default 60) bounds only how long this fixture
+waits for that one line to appear — not the entrypoint's total runtime.
 
 ## Full example
 
@@ -148,6 +170,9 @@ enabled = ["biome-noop", "path-fallback", "delete-only-push", "premerge-secret-s
 ignored_path = "src/lib/supabase/types.ts"
 
 [fixtures.path-fallback]
+timeout_seconds = 60
+
+[fixtures.premerge-secret-scan]
 timeout_seconds = 60
 ```
 

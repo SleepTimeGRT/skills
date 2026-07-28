@@ -434,22 +434,78 @@ if [ -z "$CHANGED" ]; then
   echo "[premerge] FAIL — nothing to merge" >&2
   exit 2
 fi
-# no secret-scan stage in this version — reproduces the pre-#26 shape
+# no secret-scan stage in this implementation at all
 echo "[premerge] REVIEW required" >&2
 exit 4
 """
 
+WRONG_RANGE_SCAN_WITH_DOWNSTREAM_BLOCK = r"""
+#!/usr/bin/env bash
+set -euo pipefail
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || true)
+[ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH=main
+git fetch --quiet origin "$DEFAULT_BRANCH"
+if ! git merge-base --is-ancestor "origin/$DEFAULT_BRANCH" HEAD; then
+  echo "[premerge] FAIL — behind origin/$DEFAULT_BRANCH" >&2
+  exit 2
+fi
+CHANGED=$(git diff --name-only "origin/$DEFAULT_BRANCH..HEAD")
+if [ -z "$CHANGED" ]; then
+  echo "[premerge] FAIL — nothing to merge" >&2
+  exit 2
+fi
+# wrong range on purpose: only the tip commit, never sees a secret buried underneath
+echo "[premerge:secret-scan] PASS (0s)"
+gitleaks detect --source . --log-opts "HEAD~1..HEAD" --no-banner --redact || true
+# unconditional downstream block, unrelated to secret-scan
+echo "[premerge] REVIEW required" >&2
+exit 4
+"""
+
+NO_SCAN_REWRITES_TRACKED_FILE = r"""
+#!/usr/bin/env bash
+set -euo pipefail
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || true)
+[ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH=main
+git fetch --quiet origin "$DEFAULT_BRANCH"
+if ! git merge-base --is-ancestor "origin/$DEFAULT_BRANCH" HEAD; then
+  echo "[premerge] FAIL — behind origin/$DEFAULT_BRANCH" >&2
+  exit 2
+fi
+CHANGED=$(git diff --name-only "origin/$DEFAULT_BRANCH..HEAD")
+if [ -z "$CHANGED" ]; then
+  echo "[premerge] FAIL — nothing to merge" >&2
+  exit 2
+fi
+# no secret-scan stage at all; instead simulates codegen/formatter/lockfile rewriting a
+# tracked file and committing it, then exiting clean
+mkdir -p src
+echo "generated: rewritten" > src/generated.txt
+git add src/generated.txt
+git commit -q --no-verify -m "codegen"
+exit 0
+"""
+
+HANGS_FOREVER = "#!/usr/bin/env bash\nsleep 999\n"
+
 
 class PremergeSecretScanFixtureTests(ManifestRepo):
-    """Behavioral coverage for the premerge-secret-scan fixture (#26) — the one fixture that
-    actually drives the declared premerge entrypoint. See .orca/task-26-proposal.md §1-4/§1-7."""
+    """Behavioral coverage for the premerge-secret-scan fixture — the one fixture that actually
+    drives the declared premerge entrypoint, by running it once and watching stdout for the
+    reference implementation's own `[premerge:secret-scan] PASS|FAIL` line (see
+    premerge_secret_scan.py's module docstring for why two earlier designs — a loose substring
+    search, then a secret-free/secret-added differential double-run — were rejected)."""
 
-    def install_reference_premerge(self, *, gitleaks_toml: str | None) -> None:
+    def install_reference_premerge(self, *, gitleaks_toml: str | None, verify_cmd: str = "true") -> None:
         premerge_src = (SKILL_DIR / "assets" / "scripts" / "premerge.sh").read_text(encoding="utf-8")
         token_gate_src = (SKILL_DIR / "assets" / "scripts" / "token-gate.sh").read_text(encoding="utf-8")
         self.write("scripts/premerge.sh", premerge_src, executable=True)
         self.write("scripts/token-gate.sh", token_gate_src, executable=True)
-        self.write("scripts/premerge.conf.sh", 'VERIFY_CMD="true"\n')
+        self.write("scripts/premerge.conf.sh", f'VERIFY_CMD="{verify_cmd}"\n')
         if gitleaks_toml is not None:
             self.write(".gitleaks.toml", gitleaks_toml)
 
@@ -469,12 +525,14 @@ class PremergeSecretScanFixtureTests(ManifestRepo):
 
     @pytest.mark.slow
     def test_reference_premerge_with_empty_ruleset_warns_not_fails(self) -> None:
-        """case b) — no [extend] block (medicount's actual current shape, measured 2026-07-27:
-        finding=0 against a synthetic secret). The stage runs and speaks (gitleaks itself exits 0
-        cleanly), so this must be WARN — same class as probe_pre_commit's "stage ran but did not
-        block" — never FAIL, which is reserved for a stage that never ran at all (case c below).
-        A WARN here must also drag the overall verdict to UNVERIFIED/exit 3 — assert both, since
-        that link (audit.INCONCLUSIVE_STATUSES) is exactly what the vacuous-pass AC depends on."""
+        """case b) — no [extend] block (a real pilot repo's actual shape at one point: finding=0
+        against a synthetic secret because gitleaks itself runs cleanly with zero [[rules]]). The
+        stage's own line says PASS, but a live scan that lets a known-detectable synthetic secret
+        through is itself the vacuous-ruleset signal (see premerge_secret_scan.run()'s final
+        branch) — always WARN, never FAIL (FAIL is reserved for the stage never reporting at all,
+        case c below) and never PASS. A WARN here must also drag the overall verdict to
+        UNVERIFIED/exit 3 — assert both, since that link (audit.INCONCLUSIVE_STATUSES) is exactly
+        what the vacuous-pass AC depends on."""
         if shutil.which("gitleaks") is None:
             self.skipTest("gitleaks not installed")
         # A *valid* allowlist (matching the shape actually found in a pilot repo's checked-in
@@ -497,10 +555,9 @@ class PremergeSecretScanFixtureTests(ManifestRepo):
 
     @pytest.mark.slow
     def test_premerge_without_secret_scan_stage_fails(self) -> None:
-        """case c) — declared premerge entrypoint never runs gitleaks; it blocks unconditionally
-        (review requirement) for any non-empty diff, including the fixture's own secret-free
-        baseline commit. The differential design must reject this on the baseline run, before a
-        secret is ever added — it must not misattribute that block to secret-scan."""
+        """case c) — declared premerge entrypoint never runs gitleaks at all and never prints a
+        [premerge:secret-scan] line; it just blocks unconditionally (review requirement). Runs to
+        completion (no timeout involved) without ever reporting — FAIL, the only case that is."""
         if shutil.which("gitleaks") is None:
             self.skipTest("gitleaks not installed")
         self.write("scripts/premerge.sh", NO_SECRET_SCAN_PREMERGE, executable=True)
@@ -511,48 +568,22 @@ class PremergeSecretScanFixtureTests(ManifestRepo):
 
         fixture_check = self.find_check(report, "fixture:premerge-secret-scan")
         self.assertEqual(fixture_check["status"], "FAIL", fixture_check["detail"])
-        self.assertIn("cannot be attributed", fixture_check["detail"])
+        self.assertIn("without ever reporting", fixture_check["detail"])
 
     @pytest.mark.slow
     def test_wrong_range_scan_masked_by_downstream_block_is_not_falsely_passed(self) -> None:
-        """Regression for the Critical finding in .orca/task-26-review.md Finding 1: a premerge
-        entrypoint that (a) scans the wrong range (tip-only, HEAD~1..HEAD — never sees a secret
-        buried under a later commit) and (b) unconditionally blocks every non-empty diff for an
-        unrelated reason (review) used to earn `PASS` from a substring/marker attribution check,
-        because the entrypoint's own output happened to mention "secret-scan"/"gitleaks" while
-        speaking about the (ineffective) scan. The differential design must reject this: the same
-        unconditional block already fires on the secret-free baseline commit, so the fixture must
-        report FAIL there — never PASS, regardless of what the entrypoint's output says."""
+        """Regression for task-26-review.md Finding 1 (Critical, round 1): a premerge entrypoint
+        that (a) scans the wrong range (tip-only, HEAD~1..HEAD — never sees a secret buried under
+        a later commit) and (b) unconditionally blocks every non-empty diff for an unrelated
+        reason (review) used to earn a false `PASS` under the original substring-marker design.
+        Under the current single-run design, the entrypoint's own line says PASS (it truly did not
+        block), which — combined with the independent oracle confirming a real finding in range —
+        is exactly the vacuous-ruleset shape: WARN, never PASS. The process is also killed the
+        instant that line appears, so the "unconditional downstream block" this stub adds after
+        the scan is never even reached; this doubles as evidence for NEW-3-A below."""
         if shutil.which("gitleaks") is None:
             self.skipTest("gitleaks not installed")
-        self.write(
-            "scripts/premerge.sh",
-            r"""
-            #!/usr/bin/env bash
-            set -euo pipefail
-            REPO_ROOT=$(git rev-parse --show-toplevel)
-            cd "$REPO_ROOT"
-            DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || true)
-            [ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH=main
-            git fetch --quiet origin "$DEFAULT_BRANCH"
-            if ! git merge-base --is-ancestor "origin/$DEFAULT_BRANCH" HEAD; then
-              echo "[premerge] FAIL — behind origin/$DEFAULT_BRANCH" >&2
-              exit 2
-            fi
-            CHANGED=$(git diff --name-only "origin/$DEFAULT_BRANCH..HEAD")
-            if [ -z "$CHANGED" ]; then
-              echo "[premerge] FAIL — nothing to merge" >&2
-              exit 2
-            fi
-            # wrong range on purpose: only the tip commit, never sees a secret buried underneath
-            echo "[premerge:secret-scan] PASS (0s)"
-            gitleaks detect --source . --log-opts "HEAD~1..HEAD" --no-banner --redact || true
-            # unconditional downstream block, unrelated to secret-scan
-            echo "[premerge] REVIEW required" >&2
-            exit 4
-            """,
-            executable=True,
-        )
+        self.write("scripts/premerge.sh", WRONG_RANGE_SCAN_WITH_DOWNSTREAM_BLOCK, executable=True)
         self.write_manifest(compliant_manifest(fixtures_enabled=("premerge-secret-scan",)))
         self.commit("premerge entrypoint: wrong-range scan + unconditional downstream block")
 
@@ -560,13 +591,106 @@ class PremergeSecretScanFixtureTests(ManifestRepo):
 
         fixture_check = self.find_check(report, "fixture:premerge-secret-scan")
         self.assertNotEqual(fixture_check["status"], "PASS", fixture_check["detail"])
+        self.assertEqual(fixture_check["status"], "WARN", fixture_check["detail"])
+
+    @pytest.mark.slow
+    def test_verify_dependency_never_reached_new1_regression(self) -> None:
+        """Regression for task-26-review-round2.md NEW-1: the differential design forced a
+        secret-free baseline run to complete the entrypoint's *entire* chain, including
+        `VERIFY_CMD`, which every pilot repo's real config needs installed dependencies for inside
+        a scratch clone that intentionally never installs any (manifest-schema.md's bootstrap
+        constraint: "wiring only, never a dependency install"). Set `VERIFY_CMD` to a command that
+        does not exist at all — if this fixture ever reaches it, the run fails loudly and
+        differently from the assertions below. A working ruleset must still report PASS,
+        proving verify is never invoked."""
+        if shutil.which("gitleaks") is None:
+            self.skipTest("gitleaks not installed")
+        self.install_reference_premerge(
+            gitleaks_toml="[extend]\nuseDefault = true\n",
+            verify_cmd="node_modules/.bin/definitely-does-not-exist-checker",
+        )
+        self.write_manifest(compliant_manifest(fixtures_enabled=("premerge-secret-scan",)))
+        self.commit("reference premerge with a VERIFY_CMD that would fail if ever reached")
+
+        result, report = self.run_audit()
+
+        fixture_check = self.find_check(report, "fixture:premerge-secret-scan")
+        self.assertEqual(fixture_check["status"], "PASS", fixture_check["detail"])
+        self.assertNotIn("127", fixture_check["detail"])
+
+    @pytest.mark.slow
+    def test_review_exemption_never_reached_new3a_regression(self) -> None:
+        """Regression for task-26-review-round2.md NEW-3 (the review-exemption variant): a
+        `REVIEW_EXEMPT_REGEX` narrowed to `docs/` only would make the reference implementation's
+        review gate (step 5) block this fixture's own probe files (all `.txt`, at repo root) if
+        that gate were ever reached. It must not be — the process is killed right after the
+        secret-scan stage's own line, before step 5."""
+        if shutil.which("gitleaks") is None:
+            self.skipTest("gitleaks not installed")
+        premerge_src = (SKILL_DIR / "assets" / "scripts" / "premerge.sh").read_text(encoding="utf-8")
+        token_gate_src = (SKILL_DIR / "assets" / "scripts" / "token-gate.sh").read_text(encoding="utf-8")
+        self.write("scripts/premerge.sh", premerge_src, executable=True)
+        self.write("scripts/token-gate.sh", token_gate_src, executable=True)
+        self.write("scripts/premerge.conf.sh", 'VERIFY_CMD="true"\nREVIEW_EXEMPT_REGEX="(^|/)docs/"\n')
+        self.write(".gitleaks.toml", "[extend]\nuseDefault = true\n")
+        self.write_manifest(compliant_manifest(fixtures_enabled=("premerge-secret-scan",)))
+        self.commit("reference premerge with a review exemption narrow enough to catch this fixture's probe files")
+
+        result, report = self.run_audit()
+
+        fixture_check = self.find_check(report, "fixture:premerge-secret-scan")
+        self.assertEqual(fixture_check["status"], "PASS", fixture_check["detail"])
+
+    @pytest.mark.slow
+    def test_no_scan_but_tracked_rewrite_still_fails_new2_regression(self) -> None:
+        """Regression for task-26-review-round2.md NEW-2: under the differential design, an
+        entrypoint with zero secret-scanning that merely rewrote a tracked file (simulating
+        codegen/formatters/lockfiles) between its two runs could earn a false PASS, because the
+        second run's dirty-tree precondition failure looked identical to "newly blocked by the
+        secret." This design runs the entrypoint exactly once, so there is no second run for a
+        rewrite to corrupt — an entrypoint that never prints the stage's line must FAIL regardless
+        of what else it does to the tree."""
+        if shutil.which("gitleaks") is None:
+            self.skipTest("gitleaks not installed")
+        self.write("scripts/premerge.sh", NO_SCAN_REWRITES_TRACKED_FILE, executable=True)
+        self.write_manifest(compliant_manifest(fixtures_enabled=("premerge-secret-scan",)))
+        self.commit("premerge entrypoint with no scan, rewrites a tracked file, exits 0")
+
+        result, report = self.run_audit()
+
+        fixture_check = self.find_check(report, "fixture:premerge-secret-scan")
+        self.assertNotEqual(fixture_check["status"], "PASS", fixture_check["detail"])
         self.assertEqual(fixture_check["status"], "FAIL", fixture_check["detail"])
-        self.assertIn("cannot be attributed", fixture_check["detail"])
+
+    @pytest.mark.slow
+    def test_timeout_is_warn_not_fail_new3b_regression(self) -> None:
+        """Regression for task-26-review-round2.md NEW-3 (the timeout variant): "no evidence"
+        must never be encoded as FAIL (a status reserved for an observed violation). An entrypoint
+        that never prints anything and never exits must resolve as WARN (→ UNVERIFIED/exit 3) once
+        the fixture's timeout elapses, not FAIL (→ NON-COMPLIANT/exit 1)."""
+        if shutil.which("gitleaks") is None:
+            self.skipTest("gitleaks not installed")
+        self.write("scripts/premerge.sh", HANGS_FOREVER, executable=True)
+        self.write_manifest(
+            compliant_manifest(
+                fixtures_enabled=("premerge-secret-scan",),
+                fixtures_extra="\n[fixtures.premerge-secret-scan]\ntimeout_seconds = 3\n",
+            )
+        )
+        self.commit("premerge entrypoint that hangs forever")
+
+        result, report = self.run_audit()
+
+        fixture_check = self.find_check(report, "fixture:premerge-secret-scan")
+        self.assertEqual(fixture_check["status"], "WARN", fixture_check["detail"])
+        self.assertIn("exceeded", fixture_check["detail"])
+        self.assertNotEqual(report["verdict"], "NON-COMPLIANT", report)
 
 
 class PilotRepoOracleTests(unittest.TestCase):
     """Exercises premerge_secret_scan.run() directly against real pilot-repo .gitleaks.toml
-    configs, inside disposable scratch clones only. See .orca/task-26-proposal.md §1-4a."""
+    configs, inside disposable scratch clones only (the source repo is only ever `git clone
+    --local`-read, never written to)."""
 
     def _run_against(self, repo_name: str, expected_statuses: tuple[str, ...]) -> None:
         pilot_path = Path.home() / "Projects" / repo_name
@@ -590,7 +714,13 @@ class PilotRepoOracleTests(unittest.TestCase):
             (scratch / "scripts" / "premerge.sh").chmod(0o755)
             (scratch / "scripts" / "token-gate.sh").write_text(token_gate_src)
             (scratch / "scripts" / "token-gate.sh").chmod(0o755)
-            (scratch / "scripts" / "premerge.conf.sh").write_text('VERIFY_CMD="true"\n')
+            # Deliberately broken, not stubbed to "true": if this fixture ever reached VERIFY_CMD
+            # (it must not — see NEW-1 in task-26-review-round2.md), this command would fail
+            # loudly and differently from the PASS/WARN assertions below, proving verify really
+            # is never invoked even against real pilot .gitleaks.toml configs.
+            (scratch / "scripts" / "premerge.conf.sh").write_text(
+                'VERIFY_CMD="node_modules/.bin/definitely-does-not-exist-checker"\n'
+            )
             run(
                 "git", "-C", str(scratch), "add", "-f",
                 "scripts/premerge.sh", "scripts/token-gate.sh", "scripts/premerge.conf.sh",
@@ -623,15 +753,14 @@ class PilotRepoOracleTests(unittest.TestCase):
             )
 
     def test_medicount_ruleset_state_is_caught_correctly(self) -> None:
-        """medicount's `.gitleaks.toml` currently lacks `[extend] useDefault = true` (issue #26's
-        named bug), which the synthetic case in PremergeSecretScanFixtureTests already covers as a
-        fixed, controlled repro (`test_reference_premerge_with_empty_ruleset_warns_not_fails`).
-        This pilot test intentionally does NOT hardcode that current state: `.orca/task-26-review.md`
-        Finding 5 flagged an earlier version that hardcoded `WARN` and would have started failing —
-        for the right reason (a real fix) but as an unrelated, confusing test break — the moment
-        someone corrects medicount's ruleset. `PASS` (fixed) and `WARN` (still broken) are both
-        evidence the oracle is doing its job; only `FAIL`/`SKIP` here would indicate an actual
-        regression in the fixture or the pilot checkout."""
+        """medicount's `.gitleaks.toml` may or may not currently have `[extend] useDefault = true`
+        — the synthetic case in PremergeSecretScanFixtureTests already covers the missing-extend
+        shape as a fixed, controlled repro (`test_reference_premerge_with_empty_ruleset_warns_not_fails`).
+        This pilot test intentionally does not hardcode either state: a hardcoded `WARN` would start
+        failing — for the right reason (a real fix to medicount) but as an unrelated, confusing test
+        break — the moment someone corrects medicount's ruleset. `PASS` (fixed) and `WARN` (still
+        broken) are both evidence the oracle is doing its job; only `FAIL`/`SKIP` here would
+        indicate an actual regression in the fixture or the pilot checkout."""
         self._run_against("medicount", ("PASS", "WARN"))
 
     def test_samhaengsi_working_ruleset_passes(self) -> None:
