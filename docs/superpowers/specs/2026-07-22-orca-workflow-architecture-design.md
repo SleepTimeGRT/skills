@@ -73,6 +73,8 @@ evaluator가 이 단계에서 자기 검증 기준을 스스로 만드는 게 �
 - contract에서 generator 역할: 제안서 작성.
 - 합의된 범위로 subtask DAG 구성: 파일 목록 겹치면 순차 의존, 독립이면 같은 wave.
 - wave당 최대 3개 병렬 dispatch (claude/codex/agy 중 택 — CPU 경합 실측 근거로 3 초과 금지).
+  > **2026-07-28 supersede**: 데이터 재수집을 위해 상한 임시 해제.
+  > 현재 정책은 skills/orca-task-runner/SKILL.md §3 참고.
 - subtask 게이트는 **기계적인 것만**: typecheck, unit test, formatter, linter, 무거운 환경 구성 없는 script test. **subtask 단위 agent 리뷰어는 없다.**
 - task 전체 diff를 `orca-evaluate`에 전달.
 

@@ -1,6 +1,6 @@
 ---
 name: orca-task-runner
-description: Use when generating the implementation for one task (issue) — proposes an implementation-and-verification contract to orca-evaluate, then fans out subtasks across Claude Code/Codex/agy terminals in dependency-ordered waves (cap 3). Subtask gates are mechanical only (typecheck/unit test/lint/format) — never an agent reviewer; task-level review belongs to orca-evaluate. Self-relative — works identically whichever provider is the coordinator.
+description: Use when generating the implementation for one task (issue) — proposes an implementation-and-verification contract to orca-evaluate, then fans out subtasks across Claude Code/Codex/agy terminals in dependency-ordered waves. Subtask gates are mechanical only (typecheck/unit test/lint/format) — never an agent reviewer; task-level review belongs to orca-evaluate. Self-relative — works identically whichever provider is the coordinator.
 ---
 
 # Orca Task Runner
@@ -45,7 +45,7 @@ subtask spec 필수 항목: ①구체적 작업 내용(코드 블록 포함 그�
 
 ## 3. Wave 준비
 
-wave 크기(**최대 3** — CPU 경합 실측 교훈)만큼 터미널. provider는 자유 선택(claude/codex/agy 아무거나, 토큰 효율을 위해 섞어도 됨) — 모델·effort는 subtask 성격에 맞게 provider 문서에서 고른다.
+wave 크기 상한 없음(2026-07-28 임시 해제 — 더 큰 wave에서의 데이터를 쌓기 위함, §5 wave telemetry로 기록). 이전 "최대 3"의 근거였던 CPU 경합 실측은 이 repo에 남은 1차 기록이 없어(찾은 유일한 파일럿 인용 `#211`은 병렬 커밋 충돌 건이라 다른 결과) 사실상 구전이 됐다 — 그래서 이번 해제는 실측을 뒤집는 게 아니라 재계측이다. 그렇다고 무제한으로 키우지는 않는다: 머신 리소스 상황을 보며 판단하고, 한 wave에서 스폰 실패·timeout 재시도가 2회 이상 발생하면 그 즉시 wave 크기를 3 이하로 되돌리고 사용자에게 보고한다. provider는 자유 선택(claude/codex/agy 아무거나, 토큰 효율을 위해 섞어도 됨) — 모델·effort는 subtask 성격에 맞게 provider 문서에서 고른다.
 
 ```bash
 # claude
@@ -65,6 +65,24 @@ orca terminal create --worktree active --title task-impl-<n> \
 orca terminal wait --terminal <impl-handle> --for tui-idle --timeout-ms 60000 --json   # agy는 --for exit --timeout-ms 960000
 ```
 
+**Wave telemetry(시작)** — 상한 재검토용 데이터를 쌓는다. 이 wave의 모든 터미널이 뜬 직후 1회:
+
+```bash
+install -d -m 700 ~/.local/state/orca-workflows/logs
+jq -cn \
+  --arg ts "$(date -u +%FT%TZ)" \
+  --arg event "wave_start" \
+  --arg issue "<issue-num>" \
+  --argjson wave_index <n> \
+  --argjson wave_size <이 wave 터미널 수> \
+  --argjson nproc "$(sysctl -n hw.ncpu 2>/dev/null || nproc)" \
+  '{ts: $ts, event: $event, skill: "orca-task-runner", issue: $issue, wave_index: $wave_index, wave_size: $wave_size, nproc: $nproc}' \
+  >> ~/.local/state/orca-workflows/logs/waves.jsonl
+chmod 600 ~/.local/state/orca-workflows/logs/waves.jsonl
+```
+
+`nproc`(가용 코어 수)을 같이 남기는 이유: wave_size와 소요시간만으로는 CPU 경합 여부를 판단할 수 없다 — 같은 wave_size라도 머신 코어 수·provider 구성(§5 `assign` 로그의 `wave_index`와 join)에 따라 경합 여부가 달라지기 때문이다.
+
 `terminal wait`가 timeout이거나 생성 직후 `terminal read`에 셸 에러(예: `zsh: parse error`)가 보이면
 스폰 실패다 — 처음부터 재진단하지 않고 `~/.agents/orca-workflows/spawn-failures.md`에서 known
 signature부터 확인한다.
@@ -79,10 +97,11 @@ subtask가 worker_done을 보내기 전에 스스로 실행: typecheck, unit tes
 
 ```bash
 orca orchestration task-list --ready --brief --json
-orca orchestration dispatch --task <task_id> --to <impl_handle> --inject --json   # 최대 3 병렬
+orca orchestration dispatch --task <task_id> --to <impl_handle> --inject --json   # wave 크기만큼 병렬 — 상한 임시 해제, §3 참고
 # 할당 로그 — dispatch와 같은 블록에서 즉시 실행(누락 방지). orca 상태는 reset으로 소실될 수 있어
 # "어떤 subtask가 어떤 provider/model/effort로 갔는지"의 영속 기록은 이 파일이 유일하다.
-install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","event":"assign","skill":"orca-task-runner","role":"subtask-impl","issue":"<issue-num>","task_id":"<task_id>","subtask_type":"<전사|통합|아키텍처>","provider":"<provider>","model":"<model>","effort":"<effort>","terminal":"<impl_handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
+# wave_index는 §3 wave_start 로그와 join해 "이 provider 조합이 이 wave 크기에서 경합을 냈는지"를 나중에 볼 수 있게 한다.
+install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","event":"assign","skill":"orca-task-runner","role":"subtask-impl","issue":"<issue-num>","task_id":"<task_id>","wave_index":<n>,"subtask_type":"<전사|통합|아키텍처>","provider":"<provider>","model":"<model>","effort":"<effort>","terminal":"<impl_handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
   >> ~/.local/state/orca-workflows/logs/assignments.jsonl && chmod 600 ~/.local/state/orca-workflows/logs/assignments.jsonl
 ```
 
@@ -91,6 +110,22 @@ install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","even
   셸 에러/no-output이면 스폰 실패 — `~/.agents/orca-workflows/spawn-failures.md` 절차로.
 - decision_gate(워커 ask) → 판단 가능하면 `reply`, 불가하면 `orca-workflow`에 에스컬레이션.
 - worker_done 유실 복구: 커밋/산출물 확인 + `task-update --status completed` 수동 복구, 기록.
+
+**Wave telemetry(종료)** — 이 wave의 모든 subtask가 완료(worker_done 또는 수동 복구)된 직후 1회, §3 `wave_start`와 같은 `issue`+`wave_index`로 join되도록:
+
+```bash
+jq -cn \
+  --arg ts "$(date -u +%FT%TZ)" \
+  --arg event "wave_end" \
+  --arg issue "<issue-num>" \
+  --argjson wave_index <n> \
+  --argjson wave_size <이 wave 터미널 수> \
+  --argjson retry_count <이 wave에서 발생한 스폰 실패·timeout 재시도 총 횟수> \
+  '{ts: $ts, event: $event, skill: "orca-task-runner", issue: $issue, wave_index: $wave_index, wave_size: $wave_size, retry_count: $retry_count}' \
+  >> ~/.local/state/orca-workflows/logs/waves.jsonl
+```
+
+`retry_count`가 이 wave에서 2 이상이면 스폰 실패·timeout이 우연이 아니라 이 wave 크기에서 반복된다는 뜻이다 — 다음 wave부터 크기를 3 이하로 되돌리고(§3) 사용자에게 보고한다. "응답이 느려 보인다" 같은 주관적 판단이 아니라 이 숫자로 판정한다.
 
 ## 6. Task 레벨 게이트
 
