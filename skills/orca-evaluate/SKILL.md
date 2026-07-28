@@ -27,11 +27,11 @@ orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --j
 
 **이 세션은 기본적으로 agy(Gemini)로 뜬다** — §2의 agent e2e 실행과 §4의 리포트 합성이 이 세션의 핵심 업무이고, Gemini의 속도·비용·컴퓨터 사용 강점이 정확히 여기에 맞기 때문이다(`~/.agents/orca-workflows/model-selection.md`의 Computer Use / Long-Context 축, `~/.agents/orca-workflows/models/agy.md` 참고). e2e·pgTAP은 이 세션에 들어오지 않는다 — `orca-task-runner`의 task-레벨 게이트(`skills/orca-task-runner/SKILL.md` §6)를 이미 통과한 뒤에만 이 스킬이 호출되기 때문에 전량 신뢰하고 재검증하지 않는다. `gemini-3.6-flash-medium`으로 launch한다 — agy.md가 이 역할(judgment 아닌 실행·리포팅)에 배정한 토큰. 부팅 스모크는 `-high`로 실측됐고(`~/.agents/orca-workflows/models/agy.md` 참고) `-medium` 자체의 스모크 기록은 아직 없다 — 같은 세대의 effort suffix 차이라 리스크는 낮지만, 문제가 보이면 agy.md에 `-medium` 스모크를 추가할 것.
 
-**단, §1(Contract 검토)과 §3(Diff 리뷰)의 실제 판단은 이 세션의 몫이 아니다.** 둘 다 "코드/구현이 기술적으로 타당한가"를 보는 technical judgment이고, `model-selection.md`의 Computer Use/Long-Context 축 Exclusion 조항이 명시하듯 이 축(agent e2e·리포트 합성)을 쓰는 세션이라도 technical judgment call은 이 축에 올리지 않는다 — Default Mapping도 Gemini를 Routine/High Risk 코드 판단에 배정하지 않는다. 그래서 이 세션(evaluator)은 두 판단 모두 **강한 coding 모델 세션을 스폰**해서 맡기고, 자신은 relay + 최종 리포트 합성만 한다.
+**단, §1(Contract 검토)과 §3(Diff 리뷰)의 실제 판단은 이 세션의 몫이 아니다.** 둘 다 "코드/구현이 기술적으로 타당한가"를 보는 technical judgment이고, `model-selection.md`의 Computer Use/Long-Context 축 Exclusion 조항이 명시하듯 이 축(agent e2e·리포트 합성)을 쓰는 세션이라도 technical judgment call은 이 축에 올리지 않는다 — Default Mapping도 Gemini를 Routine/High Risk 코드 판단에 배정하지 않는다. 그래서 이 세션(evaluator)은 두 판단 모두 fresh-context coding-agent 세션에 맡기고, 자신은 relay + 최종 리포트 합성만 한다 — §1(계약 검토)은 고정된 강한 reasoning 모델을 쓰고, §3(diff 리뷰)은 diff 통계로 동적 선택된 모델을 쓴다(§3 참고).
 
 ## 1. Contract 검토 (coding agent 스폰)
 
-`orca-task-runner`가 구현 전 제안서(범위 + 검증 방법)를 보내오면, 이 세션(evaluator)이 직접 판단하지 않고 **coding agent 터미널을 스폰**해서 issue의 원본 acceptance-criteria 섹션(`orca-workflow`가 dispatch spec으로 넘겨준 섹션명)에 대조 검토를 맡긴다 — 제안된 파일 범위·검증 방법이 실제 코드베이스에서 기술적으로 타당한지 보는 일이라 §3 code-reviewer와 같은 이유로 강한 reasoning 모델이 낫다.
+`orca-task-runner`가 구현 전 제안서(범위 + 검증 방법)를 보내오면, 이 세션(evaluator)이 직접 판단하지 않고 **coding agent 터미널을 스폰**해서 issue의 원본 acceptance-criteria 섹션(`orca-workflow`가 dispatch spec으로 넘겨준 섹션명)에 대조 검토를 맡긴다 — 제안된 파일 범위·검증 방법이 실제 코드베이스에서 기술적으로 타당한지 보는, 구현 착수 전의 1회성 판단이라 diff 규모 같은 위험도를 낮출 신호가 아직 존재하지 않는 시점이다. 그래서 여기는 고정된 강한 reasoning 모델(`model-selection.md` High Risk tier)을 쓴다 — §3처럼 사후에 diff 통계로 동적으로 낮추지 않는다.
 
 ```bash
 orca terminal create --worktree active --title eval-contract \
@@ -87,15 +87,34 @@ python3 scripts/migration-lint.py <diff에 포함된 migration 파일 경로...>
 
 (repo에 `scripts/migration-lint.py`가 없으면 이 단계를 건너뛴다 — opt-in 게이트이므로 미구성 repo에서는 아무 일도 하지 않는다.)
 
-fresh-context code-reviewer terminal을 하나 스폰한다(이 evaluator 세션·generator와 별도 세션 — **강한 reasoning 모델 고정**, `model-selection.md` High Risk tier에서 매 launch 시 resolve — 구체 모델명을 여기 복제하지 않는다(`orca-task-runner` §0과 같은 원칙; 복제가 모델 교체 때마다 stale의 원인이 된다). "provider 자유, 가장 싼 provider"가 아니다 — 코드 정오 판단은 이 세션의 Gemini가 약하다고 표시된 지점이라 일부러 다른 모델을 쓰는 것). 리뷰어는 반드시 이 항목들을 갖는다: ①skeptical 지침("동의 표명 불필요, 결함·spec-divergence만 보고, 근거 있는 우려를 안이하게 넘기지 말 것") ②issue의 acceptance criteria 원문 ③**§2 agent e2e 결과 요약** — diff만으로는 안 보이는 런타임 동작(무엇이 실제로 실패했는지)을 code review가 근거로 쓸 수 있게 한다 ④**(schema/migration 변경이 있으면) `.migration-lint.json` 결과 + §1에서 받은 "의도된 destructive 오퍼레이션" 선언** — 린터가 flag한 항목 중 선언에 커버되지 않는 게 있으면 report에 명시하라는 지시와 함께.
+fresh-context code-reviewer terminal을 하나 스폰한다(**이 evaluator 세션(Gemini)과는 다른 모델** — 코드 정오 판단을 자기 세션에 맡기지 않는다는 뜻이지, `orca-task-runner`(generator)와 달라야 한다는 뜻은 아니다: `models/codex.md`가 이미 "Evaluators require fresh context, not a different provider"로 명시하듯, 요구되는 것은 fresh-context(별도 세션)뿐이고 리뷰어가 generator와 다른 모델/provider여야 한다는 하드 요구사항은 없다 — 우연히 같은 모델이 선택돼도 무방하고 provider가 다르면 다양성 이점은 있지만 필수 조건은 아니다). 모델·effort는 diff 통계(변경 파일 수·라인 수)를 `<skill-dir>/scripts/select_reviewer.py`에 넘겨 동적으로 고른다 — 후보 풀은 Codex의 `gpt-5.6-terra`/`gpt-5.6-sol`과 Claude의 `claude-sonnet-5`(+ `--advisor opus`)/`claude-opus-5`이고, `claude-fable-5`는 제외한다(2026-07 벤치마크상 opus-5 대비 유의미한 우위 없음 — `model-selection.md`의 기존 금지 그대로 유지). Codex 가용성은 **이번 세션에서 사용자가 알려준 정보를 1차 근거**로 판단한다(`command -v codex`는 바이너리 존재만 증명하는 보조 신호일 뿐 토큰·쿼터 가용성을 증명하지 못한다) — 이 문서 어디에도 "Codex는 이 환경에서 쓸 수 없다"는 식의 고정 서술을 두지 않는다. Codex 세션 스폰이 실패하면(`~/.agents/orca-workflows/spawn-failures.md` 절차로 스폰 실패임을 먼저 확인) 처음부터 재진단하지 않고 `select_reviewer.py --no-codex-available`로 재호출해 Claude 분기로 다시 스폰한다 — `select_reviewer` 자신은 순수 함수라 스폰 실패를 감지할 수 없으므로 이 재시도는 호출자(이 스폰 지점)의 몫이다. 구체 모델명을 여기 복제하지 않는다(`orca-task-runner` §0과 같은 원칙; 복제가 모델 교체 때마다 stale의 원인이 된다). 리뷰어는 반드시 이 항목들을 갖는다: ①skeptical 지침("동의 표명 불필요, 결함·spec-divergence만 보고, 근거 있는 우려를 안이하게 넘기지 말 것") ②issue의 acceptance criteria 원문 ③**§2 agent e2e 결과 요약** — diff만으로는 안 보이는 런타임 동작(무엇이 실제로 실패했는지)을 code review가 근거로 쓸 수 있게 한다 ④**(schema/migration 변경이 있으면) `.migration-lint.json` 결과 + §1에서 받은 "의도된 destructive 오퍼레이션" 선언** — 린터가 flag한 항목 중 선언에 커버되지 않는 게 있으면 report에 명시하라는 지시와 함께 ⑤**게이트-안전성 판단 지시** — 이 diff가 orca 파이프라인 자신의 머지/게이트 안전성에 영향을 주는지(예시일 뿐 비망라적: 워크플로 스킬 문서, 게이트·훅 스크립트, CI·hook 설정, 이 파이프라인이 의존하는 셸 배선 자체를 수정하는 diff인지 등) 리뷰의 첫 단계로 판단하라고 지시한다. 영향이 있다고 판단되면 그 부분을 diff의 다른 코드보다 더 엄격하게(더 회의적으로, 더 많은 재현·실패 시나리오로) 검토하라고 요구한다. 이 판단은 정적 파일 경로 목록과 절대 대조하지 않는다 — 리뷰어 자신의 판단이다. 게이트-안전성 영향이 있다고 판단했는데 주어진 정보로 완전히 clear하지 못하면 Critical/Important finding 또는 명시적 escalation 사유로 report에 반드시 남기라고 지시한다(diff 규모가 작아 이 리뷰가 낮은 tier로 동적 선택됐더라도, 그 사실만으로 게이트-안전성 우려를 낮잡아 보지 말 것).
 
 ```bash
+diff_shortstat="$(git diff --shortstat "$(git merge-base origin/main HEAD)"...HEAD)"
+# codex_available: 1차 근거는 이번 세션에서 사용자가 알려준 정보. 그 정보가 없을 때만
+# `command -v codex`로 바이너리 존재를 보조 확인한다(토큰/쿼터까지는 증명하지 못한다).
+codex_available=true   # 세션에서 알려진 가용성으로 덮어쓸 것
+reviewer_json="$(python3 <skill-dir>/scripts/select_reviewer.py --shortstat "$diff_shortstat" \
+  $( [ "$codex_available" = true ] && echo --codex-available || echo --no-codex-available ))"
+reviewer_provider="$(printf '%s' "$reviewer_json" | jq -r .provider)"
+reviewer_model="$(printf '%s' "$reviewer_json" | jq -r .model)"
+reviewer_effort="$(printf '%s' "$reviewer_json" | jq -r .effort)"
+reviewer_advisor="$(printf '%s' "$reviewer_json" | jq -r '.advisor // empty')"
+
+case "$reviewer_provider" in
+  codex)  launch_cmd="<Codex launch 문법 — models/codex.md에서 model=$reviewer_model effort=$reviewer_effort로 resolve>" ;;
+  claude) launch_cmd="<Claude Code launch 문법 — models/claude-code.md에서 model=$reviewer_model effort=$reviewer_effort${reviewer_advisor:+, advisor=$reviewer_advisor}로 resolve>" ;;
+esac
+
 orca terminal create --worktree active --title eval-review \
-  --command "<강한 reasoning provider의 launch 문법 — provider 문서에서 resolve>" --json
+  --command "$launch_cmd" --json
 orca terminal wait --terminal <review-handle> --for tui-idle --timeout-ms 60000 --json
+# 스폰이 실패했고 reviewer_provider가 codex였다면(spawn-failures.md 절차로 확인) 여기서 재진단하지
+# 않고 --no-codex-available로 select_reviewer.py를 다시 불러 Claude 분기로 재시도한다.
 orca orchestration task-create --spec "<diff 절대경로 + acceptance criteria 원문 + §2 agent e2e 결과 요약 + (해당 시) migration-lint 결과와 §1 destructive-op 선언 + skeptical 리뷰 지침 + report 경로 + 코드 수정 금지>" --json
 orca orchestration dispatch --task <task_id> --to <review-handle> --inject --json
-printf '{"ts":"%s","event":"assign","skill":"orca-evaluate","role":"code-review","issue":"<issue-num>","task_id":"<task_id>","provider":"<provider>","model":"<model>","effort":"<effort>","terminal":"<review-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
+printf '{"ts":"%s","event":"assign","skill":"orca-evaluate","role":"code-review","issue":"<issue-num>","task_id":"<task_id>","provider":"%s","model":"%s","effort":"%s","advisor":"%s","terminal":"<review-handle>","worktree":"<worktree 경로>"}\n' \
+  "$(date -u +%FT%TZ)" "$reviewer_provider" "$reviewer_model" "$reviewer_effort" "${reviewer_advisor:-}" \
   >> ~/.local/state/orca-workflows/logs/assignments.jsonl   # 할당 로그 — §1 참고
 ```
 
@@ -113,4 +132,4 @@ report는 severity(Critical/Important/Minor) + 도달 조건 + 최악 결과 + f
 
 ## 폴백
 
-- orca 런타임 불가: coding agent(§1 contract 판정, §3 code review 둘 다)를 orca 없이 **Bash로 직접**(headless, 강한 reasoning 모델 그대로) 실행해 판정·report 회수. 할당 로그(§1)는 동일하게 남긴다 — `terminal` 필드만 대체 식별자로. agent e2e(§2)는 로컬에서 Playwright MCP를 붙인 세션으로 직접 실행하고 요약 경로만 기록. 이 evaluator 세션 자체(agy)가 뜨지 않으면 다른 provider로 대체하되, §1·§3의 coding agent는 반드시 이 세션과 다른 provider/모델을 유지한다(같은 세션이 스스로를 판단하지 않도록). 폴백 발동은 사용자에게 보고.
+- orca 런타임 불가: coding agent(§1 contract 판정, §3 code review 둘 다)를 orca 없이 **Bash로 직접**(headless) 실행해 판정·report 회수 — §1은 고정된 강한 reasoning 모델 그대로, §3은 `select_reviewer.py`가 고른 모델·effort 그대로 유지한다(폴백이라는 이유로 §3의 동적 선택을 강한 고정으로 되돌리지 않는다). 할당 로그(§1)는 동일하게 남긴다 — `terminal` 필드만 대체 식별자로. agent e2e(§2)는 로컬에서 Playwright MCP를 붙인 세션으로 직접 실행하고 요약 경로만 기록. 이 evaluator 세션 자체(agy)가 뜨지 않으면 다른 provider로 대체하되, §1·§3의 coding agent는 반드시 이 세션과 다른 provider/모델을 유지한다(같은 세션이 스스로를 판단하지 않도록). 폴백 발동은 사용자에게 보고.

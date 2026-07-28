@@ -290,3 +290,124 @@ def test_no_hardcoded_acceptance_criteria_heading(name):
     assert "## What to build" not in text, (
         f"{name}: 'what to build' heading must not be hardcoded either"
     )
+
+
+def test_orca_evaluate_requires_gate_safety_judgment_in_review():
+    text = _read_skill("orca-evaluate")
+    # ⑤ (5) must sit inside the same "reviewer must have these items" enumeration as
+    # ①-④, in enumeration order — not merely somewhere later in the same paragraph (a
+    # weak-toned sentence tacked on after ④ would pass a naive "next \n\n paragraph boundary"
+    # check without actually being part of the mandatory list; round1 found this exact gaming
+    # vector against a text.index("\n\n", ...) anchor).
+    checklist_idx = text.index("리뷰어는 반드시 이 항목들을 갖는다")
+    fourth_idx = text.index("④", checklist_idx)
+    fifth_idx = text.index("⑤", fourth_idx)
+    assert checklist_idx < fourth_idx < fifth_idx, (
+        "orca-evaluate §3 must add the gate-safety judgment instruction as item ⑤ inside the "
+        "reviewer's mandatory checklist, after ④, not as a trailing sentence outside it"
+    )
+    # The ⑤ segment itself must use imperative language, not a soft recommendation.
+    fifth_segment = text[fifth_idx:fifth_idx + 700]
+    assert "지시한다" in fifth_segment or "요구한다" in fifth_segment, (
+        "orca-evaluate §3's ⑤ item must be phrased as an instruction/requirement, not advice"
+    )
+
+
+def test_orca_evaluate_gate_safety_examples_are_non_exhaustive():
+    text = _read_skill("orca-evaluate")
+    fifth_idx = text.index("⑤")
+    assert "비망라적" in text[fifth_idx:fifth_idx + 700], (
+        "orca-evaluate §3's ⑤ item must mark its example category list as non-exhaustive, so it "
+        "cannot calcify into the static path list AC1 forbids"
+    )
+
+
+def test_orca_evaluate_gate_safety_mitigates_tier_conflation():
+    text = _read_skill("orca-evaluate")
+    fifth_idx = text.index("⑤")
+    segment = text[fifth_idx:fifth_idx + 900]
+    assert "Critical" in segment or "Important" in segment, (
+        "orca-evaluate §3's ⑤ item must require an explicit finding/severity when a gate-safety "
+        "concern cannot be fully cleared, so a small gate-integrity diff choosing a cheap "
+        "reviewer tier doesn't silently waive scrutiny"
+    )
+    assert "escalation" in segment or "에스컬레이션" in segment, (
+        "orca-evaluate §3's ⑤ item must route an unresolved gate-safety concern toward the "
+        "existing FAIL/ESCALATE path"
+    )
+
+
+def _section_3_text(full_text: str) -> str:
+    # §1 (Contract review) deliberately keeps the fixed-strong-model placeholder — only §3's own
+    # copy of it must change. Scoping to §3's own section avoids a false failure against §1.
+    start = full_text.index("## 3. Diff 리뷰")
+    end = full_text.index("## 4.", start)
+    return full_text[start:end]
+
+
+def test_orca_evaluate_review_model_selection_is_dynamic_not_fixed_high_risk():
+    text = _read_skill("orca-evaluate")
+    section_3 = _section_3_text(text)
+    assert "select_reviewer" in section_3, (
+        "orca-evaluate §3 must delegate reviewer selection to select_reviewer.py"
+    )
+    assert "<강한 reasoning provider의 launch 문법 — provider 문서에서 resolve>" not in section_3, (
+        "orca-evaluate §3's spawn point must not stay a fixed strong-model placeholder"
+    )
+    assert "일부러 다른 모델을 쓰는 것" not in section_3, (
+        "orca-evaluate §3 must not keep the stale 'deliberately different model' framing that "
+        "implied a fixed High-Risk model regardless of diff size"
+    )
+    assert "하드 요구사항은 없다" in section_3 or "하드 요구사항이 없다" in section_3, (
+        "orca-evaluate §3 must state that reviewer != generator is not a hard requirement"
+    )
+
+
+def test_orca_evaluate_preserves_evaluator_separation_intent():
+    text = _read_skill("orca-evaluate")
+    # Removing "일부러 다른 모델을 쓰는 것" must not delete the one sentence in §3 saying the
+    # reviewer must differ from this evaluator session (Gemini) itself — a different concern from
+    # reviewer != generator, and the one round1 found at risk of accidental deletion.
+    assert "evaluator 세션(Gemini)" in text, (
+        "orca-evaluate §3 must keep stating the reviewer must be a different model from this "
+        "evaluator session (Gemini) itself, not just 'fresh context' in the abstract"
+    )
+
+
+def test_orca_evaluate_codex_availability_is_runtime_checked_not_a_permanent_ban():
+    text = _read_skill("orca-evaluate")
+    assert "영구적으로 쓸 수 없다" not in text, (
+        "orca-evaluate must not hardcode a permanent Codex ban"
+    )
+    assert "--no-codex-available" in text, (
+        "orca-evaluate §3 must document the runtime retry/fallback mechanism for Codex spawn failure"
+    )
+    assert "사용자가 알려준" in text, (
+        "orca-evaluate §3 must treat this session's user-provided information as the primary "
+        "signal for Codex availability, not just `command -v codex`"
+    )
+
+
+def test_orca_evaluate_contract_review_no_longer_cites_section_3():
+    text = _read_skill("orca-evaluate")
+    # §1's own reasoning for using a fixed strong model must not lean on §3 anymore, since §3's
+    # model choice is now dynamic while §1 stays fixed-strong for an independent reason.
+    assert "§3 code-reviewer와 같은 이유로" not in text, (
+        "orca-evaluate §1 must justify its fixed strong-model choice on its own terms, not by "
+        "pointing at §3 (which no longer uses a fixed strong model)"
+    )
+
+
+def test_orca_workflow_has_no_protected_static_gate():
+    text = _read_skill("orca-workflow")
+    for term in ("PROTECTED_ESCALATE", "protected_paths.py", "lifecycle-gate.toml"):
+        assert term not in text, (
+            f"orca-workflow must not reintroduce the discarded static PROTECTED gate ('{term}') "
+            "— issue #24 was redesigned around reviewer judgment instead"
+        )
+
+
+def test_select_reviewer_script_exists():
+    assert (SKILLS_DIR / "orca-evaluate" / "scripts" / "select_reviewer.py").is_file(), (
+        "orca-evaluate/scripts/select_reviewer.py is missing"
+    )
