@@ -1,8 +1,40 @@
 # agy Model Evidence
 
-> verified_at: 2026-07-29
+> verified_at: 2026-07-30
 
 Load this file only to audit, change, or re-validate `../../models/agy.md`.
+
+## 2026-07-30 REPL retirement (reverses 2026-07-29 promotion)
+
+The 2026-07-29 smoke below promoted REPL to the primary agy launch pattern. Further live testing
+the next day found two failure modes serious enough to retire agy REPL entirely and move
+agy to headless-only (`../../models/agy.md` no longer documents a REPL section for agy):
+
+- **Unfocused-boot hang.** A REPL terminal created via `orca terminal create` with no explicit
+  focus stalled indefinitely before reaching the interactive prompt. `cli.log` for the agy
+  process went silent for 90s+ (no new lines at all, not just a slow render) while the terminal
+  stayed on the pre-auth "not signed in" banner. Calling `orca terminal switch --terminal
+  <handle>` produced an immediate `Full redraw completed` log line and the session finished
+  booting right after.
+- **Concurrent-focus deadlock.** Creating two REPL agy terminals back-to-back, each with
+  `--focus`, in the same worktree: both got stuck on the same partial banner. `ps -o
+  pid,stat,pgid,tpgid` showed both processes as `S+` (normal sleeping, each already the
+  foreground process group of its own pty) — not `T` (stopped), ruling out a SIGTTIN/job-control
+  explanation. A subsequent `orca terminal switch` to one of the two did **not** recover it —
+  `cli.log` stayed silent for 30s+ after the switch. This matches
+  [stablyai/orca#7442](https://github.com/stablyai/orca/issues/7442): a renderer IPC handshake
+  that assumes an active/focused window, evaluated once at boot, unrecoverable by a later focus
+  change.
+- **Headless has none of this.** A single headless (`-p`) launch with no focus at all completed
+  in ~15s. Two headless launches created back-to-back with no focus, run concurrently, both
+  completed independently and correctly (~10-15s each) with no contention.
+- **Consequence for the "agent e2e reporting is a ping-pong role" claim below (2026-07-29
+  entry).** That claim assumed agy needed REPL because a *later* `dispatch --inject` had to
+  reach a live process. The actual fix is narrower: put the complete task in the `-p` argument
+  at launch time and never `dispatch --inject` into agy at all — this removes agy from the
+  REPL requirement without reintroducing the issue #37 failure the 2026-07-29 promotion fixed.
+  `orca-evaluate`'s own top-level session (previously hosted on agy) now runs on a REPL-capable
+  provider other than agy; agy is only spawned headless, for agent e2e specifically.
 
 ## 2026-07-29 REPL smoke
 

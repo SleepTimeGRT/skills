@@ -67,32 +67,25 @@ orca orchestration dispatch --task <task_id> --to <run-handle> --inject --json
 install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"task-runner","issue":"<issue-num>","task_id":"<task_id>","provider":"<provider>","model":"<model>","effort":"<effort>","terminal":"<run-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
   >> ~/.local/state/orca-workflows/logs/assignments.jsonl && chmod 600 ~/.local/state/orca-workflows/logs/assignments.jsonl
 
-# evaluate 호출 — 기본 provider는 agy(Gemini): 롱컨텍스트로 agent e2e 실행·판독과 리포트 합성이
-# 이 스킬의 핵심 업무라서다(`~/.agents/orca-workflows/model-selection.md`의 Computer Use / Long-Context 축,
-# `skills/orca-evaluate/SKILL.md` §0 참고). 이 evaluate 세션이 diff 자체를 판단하지는 않는다 —
-# 그건 evaluate가 내부에서 스폰하는 별도 code-reviewer 세션(강한 reasoning 모델)의 몫이다.
+# evaluate 호출 — 이 세션 자체는 REPL이 가능한 provider로 띄우되 agy는 제외한다: agy REPL은
+# 포커스가 없으면 부팅이 멈추고, 두 세션이 동시에 focus를 다투면 나중에 focus를 다시 줘도 복구되지
+# 않는 영구 데드락으로 이어질 수 있음이 실측됐다(2026-07-30, `~/.agents/orca-workflows/models/agy.md`
+# 참고 — agy는 이 repo 전체에서 headless 전용). agy는 evaluate가 내부에서 §2(agent e2e)용으로
+# headless 스폰할 뿐, 이 evaluate 세션 자체의 provider가 아니다(`skills/orca-evaluate/SKILL.md`
+# §0 참고). 이 evaluate 세션이 diff 자체를 판단하지도 않는다 — 그건 evaluate가 내부에서 스폰하는
+# 별도 code-reviewer 세션(강한 reasoning 모델)의 몫이다.
 # 다회 왕복(핑퐁)이 필요한 역할 — one-shot(`agy -p`/`codex exec`) 금지, 반드시 인터랙티브(REPL)
-# 세션으로 띄운다(provider 이름에 종속되지 않는 공통 원칙). REPL 시퀀스는
-# `~/.agents/orca-workflows/models/agy.md`를 그대로 따른다.
+# 세션으로 띄운다(provider 이름에 종속되지 않는 공통 원칙, agy 제외). 구체 provider는
+# `~/.agents/orca-workflows/model-selection.md` 기준으로 매 launch 시 resolve한다.
 orca terminal create --worktree active --title task-evaluate-<n> \
-  --command "agy --model <token>" --json
+  --command "<REPL이 가능한, agy 제외 provider의 launch 문법 — provider 문서에서 resolve>" --json
 orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json
-# trustedWorkspace 재프롬프트가 보이면(이미 신뢰된 상위 폴더 하위에서도 재현됨 — agy.md 참고).
-# 기본 선택지가 이미 "Yes, I trust this folder"이므로 --enter만으로 확정된다(agy.md 실측 참고).
-orca terminal send --terminal <evaluate-handle> --enter --json
-trust_wait="$(orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json)"
-# fail-closed(agy.md REPL 절과 동일 조건식 — .result.wait.satisfied 실측 스키마 참고) — 성공을
-# 확실히 확인했을 때만 dispatch한다.
-if printf '%s' "$trust_wait" | jq -e '.result.wait.satisfied == true' >/dev/null 2>&1; then
-  orca orchestration task-create --spec "<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문 + issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 요청 모드>" --json
-  orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
-  printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","issue":"<issue-num>","task_id":"<task_id>","provider":"agy","model":"<model>","effort":"","terminal":"<evaluate-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
-    >> ~/.local/state/orca-workflows/logs/assignments.jsonl
-else
-  # 죽은 trust 대화상자에 inject가 떨어지면 이슈 #37이 고친 것과 같은 부류의 실패가 재발한다 —
-  # dispatch하지 않고 spawn-failures.md의 grep-first 절차로 스폰 실패를 진단한다.
-  :
-fi
+# 해당 provider가 최초 launch 시 신뢰/승인류 재프롬프트를 요구하면 그 provider 문서가 정의하는
+# 절차를 따른다(agy 전용 시퀀스를 여기서 가정하지 않는다).
+orca orchestration task-create --spec "<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문 + issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 요청 모드>" --json
+orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
+printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","issue":"<issue-num>","task_id":"<task_id>","provider":"<provider>","model":"<model>","effort":"<effort>","terminal":"<evaluate-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
+  >> ~/.local/state/orca-workflows/logs/assignments.jsonl
 ```
 
 **2b. Generate** — `orca-task-runner` 호출, 결과로 **task 전체 diff 경로** 또는 **`GATE_FAIL`**을 받는다(`orca-task-runner`가 자기 task-레벨 게이트를 재시도 한도(2회) 안에 못 넘긴 경우 — `skills/orca-task-runner/SKILL.md` §6).
