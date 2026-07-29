@@ -77,9 +77,12 @@ install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","even
 orca terminal create --worktree active --title task-evaluate-<n> \
   --command "agy --model <token>" --json
 orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json
-# trustedWorkspace 재프롬프트가 보이면 <orca-cli의 터미널 입력 전송 커맨드 — 정확한 flag는
-# orca-cli 문서에서 resolve>로 신뢰 확인 키를 보내고 다시 tui-idle을 기다린다
+# trustedWorkspace 재프롬프트가 보이면(이미 신뢰된 상위 폴더 하위에서도 재현됨 — agy.md 참고).
+# 기본 선택지가 이미 "Yes, I trust this folder"이므로 --enter만으로 확정된다(agy.md 실측 참고).
+orca terminal send --terminal <evaluate-handle> --enter --json
 orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json
+# 위 wait가 timeout이면 fail-closed — dispatch --inject를 진행하지 않고 스폰 실패로 처리해
+# spawn-failures.md 절차부터 밟는다(agy.md REPL 절과 동일 원칙).
 orca orchestration task-create --spec "<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문 + issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 요청 모드>" --json
 orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
 printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","issue":"<issue-num>","task_id":"<task_id>","provider":"agy","model":"<model>","effort":"","terminal":"<evaluate-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \

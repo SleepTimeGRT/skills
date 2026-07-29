@@ -22,10 +22,12 @@ issue #37 참고). launch-then-inject 시퀀스는 `~/.agents/orca-workflows/mod
 orca terminal create --worktree active --title task-evaluate-<n> \
   --command "agy --model <token>" --json
 orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json
-# trustedWorkspace 재프롬프트가 보이면(이미 신뢰된 상위 폴더 하위에서도 재현됨 — agy.md 참고)
-# <orca-cli의 터미널 입력 전송 커맨드 — 정확한 flag는 orca-cli 문서에서 resolve>로 신뢰 확인
-# 키를 보내고 다시 tui-idle을 기다린다
+# trustedWorkspace 재프롬프트가 보이면(이미 신뢰된 상위 폴더 하위에서도 재현됨 — agy.md 참고).
+# 기본 선택지가 이미 "Yes, I trust this folder"이므로 --enter만으로 확정된다(agy.md 실측 참고).
+orca terminal send --terminal <evaluate-handle> --enter --json
 orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json
+# 위 wait가 timeout이면 fail-closed — dispatch --inject를 진행하지 않고 스폰 실패로 처리해
+# spawn-failures.md 절차부터 밟는다(agy.md REPL 절과 동일 원칙).
 orca orchestration task-create --spec "<이 SKILL.md 지침 + diff 경로 + issue 원문 acceptance criteria + PASS/FAIL/ESCALATE 요청>" --json
 orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
 ```
@@ -69,9 +71,12 @@ gate로 처리한다(`skills/orca-workflow/SKILL.md` §2, outcome `NO_ACCEPTANCE
 orca terminal create --worktree active --title eval-agent-e2e \
   --command "agy --model <token>" --json
 orca terminal wait --terminal <agent-e2e-handle> --for tui-idle --timeout-ms 60000 --json
-# trustedWorkspace 재프롬프트가 보이면 <orca-cli의 터미널 입력 전송 커맨드 — 정확한 flag는
-# orca-cli 문서에서 resolve>로 신뢰 확인 키를 보내고 다시 tui-idle을 기다린다
+# trustedWorkspace 재프롬프트가 보이면(이미 신뢰된 상위 폴더 하위에서도 재현됨 — agy.md 참고).
+# 기본 선택지가 이미 "Yes, I trust this folder"이므로 --enter만으로 확정된다(agy.md 실측 참고).
+orca terminal send --terminal <agent-e2e-handle> --enter --json
 orca terminal wait --terminal <agent-e2e-handle> --for tui-idle --timeout-ms 60000 --json
+# 위 wait가 timeout이면 fail-closed — dispatch --inject를 진행하지 않고 스폰 실패로 처리해
+# spawn-failures.md 절차부터 밟는다(agy.md REPL 절과 동일 원칙).
 orca orchestration task-create --spec "<Playwright MCP 지침 + 테스트 시나리오 + 앱 URL/worktree 경로 + 실패 시 무엇을 관찰했는지 요약해서 worker_done에 실어달라는 지침>" --json
 orca orchestration dispatch --task <task_id> --to <agent-e2e-handle> --inject --json
 printf '{"ts":"%s","event":"assign","skill":"orca-evaluate","role":"agent-e2e","issue":"<issue-num>","task_id":"<task_id>","provider":"agy","model":"<model>","effort":"","terminal":"<agent-e2e-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \

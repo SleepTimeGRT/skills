@@ -14,10 +14,14 @@ repo:
 ```bash
 orca terminal create --worktree active --title <role>-agy --command "agy --model <token>" --json
 orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000 --json
-# trustedWorkspace 재프롬프트가 보이면(이미 신뢰된 상위 폴더 하위에서도 재현됨 — 2026-07-29 실측)
-# <orca-cli의 터미널 입력 전송 커맨드 — 정확한 flag는 orca-cli 문서에서 resolve>로 신뢰 확인
-# 키를 보내고 다시 tui-idle을 기다린다
+# trustedWorkspace 재프롬프트가 보이면(이미 신뢰된 상위 폴더 하위에서도 재현됨 — 2026-07-29 실측).
+# 기본 선택지가 이미 "Yes, I trust this folder"이므로 --enter만으로 확정된다(2026-07-29 스모크 실측:
+# 이 커맨드로 trust 프롬프트를 통과하고 정상 부팅까지 확인함).
+orca terminal send --terminal <handle> --enter --json
 orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000 --json
+# 위 wait가 timeout이면(trust 대화상자가 죽었거나 응답 없음) fail-closed — dispatch --inject를
+# 진행하지 않고 스폰 실패로 처리해 ../spawn-failures.md 절차부터 밟는다. 죽은 trust 대화상자에
+# inject가 떨어지면 이슈 #37이 고친 것과 같은 부류의 실패가 재발한다.
 orca orchestration task-create --spec "<instructions + artifact paths>" --json
 orca orchestration dispatch --task <task_id> --to <handle> --inject --json
 ```
@@ -32,11 +36,15 @@ REPL launch requires all three of the following:
 - **`--model <token>` explicit.** Omitting it boots the default effort, not the intended one.
   2026-07-29 smoke: a bare `agy` invocation (no `--model`) showed `Gemini 3.6 Flash (High)` in the
   startup banner — a silent change to the token/quota budget the caller intended.
-- **trustedWorkspace re-prompt, auto-confirmed.** Reproduces even from a path inside an
-  already-trusted parent directory (e.g. `~/worktrees/...`), not only on a first-time launch
-  directory (2026-07-29 smoke). Automation must send the trust-confirm input right after launch,
-  then re-check `tui-idle` before proceeding — a launch is not ready just because the process
-  started.
+- **trustedWorkspace re-prompt, auto-confirmed, fail-closed.** Reproduces even from a path inside
+  an already-trusted parent directory (e.g. `~/worktrees/...`), not only on a first-time launch
+  directory (2026-07-29 smoke). The default choice is already "Yes, I trust this folder", so
+  `orca terminal send --terminal <handle> --enter --json` confirms it — no separate `--text` needed
+  (2026-07-29 smoke: this command dismissed the prompt and reached a normal boot). Send it right
+  after the first `tui-idle` wait, then re-check `tui-idle` before proceeding — a launch is not
+  ready just because the process started. If that second wait times out, treat it as a spawn
+  failure and do **not** `dispatch --inject` (fail-closed): an inject landing on a dead trust
+  dialog reproduces the exact failure mode issue #37 fixed.
 - **Sign-in latency, absorbed by the wait timeout.** Fast on a cached session (~2s, 2026-07-29
   smoke); a first-time or expired login can be slower. Keep the existing `orca terminal wait --for
   tui-idle --timeout-ms 60000` contract (same value already used for other coding-agent launches in
