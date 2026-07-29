@@ -399,6 +399,25 @@ def test_orca_evaluate_review_model_selection_is_dynamic_not_fixed_high_risk():
     )
 
 
+def test_orca_evaluate_high_risk_signal_wired_to_reviewer_selection():
+    text = _read_skill("orca-evaluate")
+    section_3 = _section_3_text(text)
+    # Both "migration_files_present" and "--high-risk-signal" also appear in this section's prose
+    # (explaining *why* the wiring exists), so a plain substring check on those names would stay
+    # green even if the actual code lines were deleted. Anchor on the code-only substrings instead:
+    # the array-length check that computes the flag, and the `echo --high-risk-signal` that's the
+    # only place it's actually passed to select_reviewer.py.
+    assert "${#migration_files[@]}" in section_3, (
+        "orca-evaluate §3 must keep computing migration_files_present from the migration_files "
+        "array so a small destructive-migration diff isn't silently dropped back to the lowest "
+        "reviewer tier"
+    )
+    assert "echo --high-risk-signal" in section_3, (
+        "orca-evaluate §3's select_reviewer.py call site must actually pass migration_files_present "
+        "through as --high-risk-signal, not just compute it and leave it unwired"
+    )
+
+
 def test_orca_evaluate_preserves_evaluator_separation_intent():
     text = _read_skill("orca-evaluate")
     # Removing "일부러 다른 모델을 쓰는 것" must not delete the one sentence in §3 saying the
