@@ -1,8 +1,24 @@
 # agy Model Evidence
 
-> verified_at: 2026-07-26
+> verified_at: 2026-07-29
 
 Load this file only to audit, change, or re-validate `../../models/agy.md`.
+
+## 2026-07-29 REPL smoke
+
+- The trustedWorkspace re-prompt reproduced even from a path inside an already-trusted parent
+  directory (`~/worktrees/...`), not only on a first-time launch directory. Automation cannot skip
+  the trust-confirm step just because a parent directory was trusted earlier.
+- `orca orchestration task-create` followed by `dispatch --inject` reached a still-running REPL
+  process successfully. This is the direct evidence behind promoting REPL to the primary launch
+  pattern in `../../models/agy.md` and retiring one-shot `-p` launches for any role the coordinator
+  later injects into (see `../../spawn-failures.md`, issue #37).
+- A bare `agy` invocation with no `--model` flag booted into `Gemini 3.6 Flash (High)` per the
+  startup banner — the basis for the `--model` requirement in `../../models/agy.md`.
+- **Limit**: account quota was exhausted mid-session (`Individual quota reached`, 119h reset)
+  before the full round trip through to `worker_done` could be exercised. "REPL launch through
+  `dispatch --inject` succeeds" and "a full evaluator round trip completes" are separately verified
+  claims — only the former is confirmed by this smoke.
 
 ## Runtime behavior
 

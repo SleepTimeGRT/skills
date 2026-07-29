@@ -71,17 +71,28 @@ install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","even
 # 이 스킬의 핵심 업무라서다(`~/.agents/orca-workflows/model-selection.md`의 Computer Use / Long-Context 축,
 # `skills/orca-evaluate/SKILL.md` §0 참고). 이 evaluate 세션이 diff 자체를 판단하지는 않는다 —
 # 그건 evaluate가 내부에서 스폰하는 별도 code-reviewer 세션(강한 reasoning 모델)의 몫이다.
-# 프롬프트는 파일에 먼저 쓰고 command substitution으로 전달(인라인 quoting 파싱 실패 회피 — spawn-failures.md)
-prompt_file="$(mktemp "${TMPDIR:-/tmp}/agy-prompt-XXXXXX.txt")"
-cat > "$prompt_file" <<'PROMPT_EOF'
-<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문>
-PROMPT_EOF
+# 다회 왕복(핑퐁)이 필요한 역할 — one-shot(`agy -p`/`codex exec`) 금지, 반드시 인터랙티브(REPL)
+# 세션으로 띄운다(provider 이름에 종속되지 않는 공통 원칙). REPL 시퀀스는
+# `~/.agents/orca-workflows/models/agy.md`를 그대로 따른다.
 orca terminal create --worktree active --title task-evaluate-<n> \
-  --command "agy -p \"\$(cat '$prompt_file')\" --model <token> --print-timeout 15m --dangerously-skip-permissions" --json
-orca orchestration task-create --spec "<diff 또는 제안서 경로 + issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 요청 모드>" --json
-orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
-printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","issue":"<issue-num>","task_id":"<task_id>","provider":"agy","model":"<model>","effort":"","terminal":"<evaluate-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
-  >> ~/.local/state/orca-workflows/logs/assignments.jsonl
+  --command "agy --model <token>" --json
+orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json
+# trustedWorkspace 재프롬프트가 보이면(이미 신뢰된 상위 폴더 하위에서도 재현됨 — agy.md 참고).
+# 기본 선택지가 이미 "Yes, I trust this folder"이므로 --enter만으로 확정된다(agy.md 실측 참고).
+orca terminal send --terminal <evaluate-handle> --enter --json
+trust_wait="$(orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json)"
+# fail-closed(agy.md REPL 절과 동일 조건식 — .result.wait.satisfied 실측 스키마 참고) — 성공을
+# 확실히 확인했을 때만 dispatch한다.
+if printf '%s' "$trust_wait" | jq -e '.result.wait.satisfied == true' >/dev/null 2>&1; then
+  orca orchestration task-create --spec "<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문 + issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 요청 모드>" --json
+  orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
+  printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","issue":"<issue-num>","task_id":"<task_id>","provider":"agy","model":"<model>","effort":"","terminal":"<evaluate-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
+    >> ~/.local/state/orca-workflows/logs/assignments.jsonl
+else
+  # 죽은 trust 대화상자에 inject가 떨어지면 이슈 #37이 고친 것과 같은 부류의 실패가 재발한다 —
+  # dispatch하지 않고 spawn-failures.md의 grep-first 절차로 스폰 실패를 진단한다.
+  :
+fi
 ```
 
 **2b. Generate** — `orca-task-runner` 호출, 결과로 **task 전체 diff 경로** 또는 **`GATE_FAIL`**을 받는다(`orca-task-runner`가 자기 task-레벨 게이트를 재시도 한도(2회) 안에 못 넘긴 경우 — `skills/orca-task-runner/SKILL.md` §6).

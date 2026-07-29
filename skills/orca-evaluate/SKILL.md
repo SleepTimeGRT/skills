@@ -13,16 +13,29 @@ task(issue) 하나를 **1회** 평가한다(subtask마다 하지 않음). 코드
 
 `orca-workflow`가 이 스킬을 orchestration으로 띄운다 — orca-workflow 자신이 직접 실행하는 게 아니라 별도 터미널을 만들어 넘긴다. 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 — `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다. 이 확인은 여기 §0뿐 아니라 아래 §1·§2·§3의 `terminal create` 호출 전부에 적용된다.
 
+**이 세션은 REPL(bare `agy`)로 띄운다** — one-shot(`agy -p ... --print-timeout`)은 이후 `dispatch
+--inject`가 이미 종료된 프로세스의 셸에 떨어져 도달하지 못한다(`~/.agents/orca-workflows/spawn-failures.md`,
+issue #37 참고). launch-then-inject 시퀀스는 `~/.agents/orca-workflows/models/agy.md`의 REPL 절을 그대로
+따른다:
+
 ```bash
-# 프롬프트는 파일에 먼저 쓰고 command substitution으로 전달(인라인 quoting 파싱 실패 회피 — spawn-failures.md)
-prompt_file="$(mktemp "${TMPDIR:-/tmp}/agy-prompt-XXXXXX.txt")"
-cat > "$prompt_file" <<'PROMPT_EOF'
-<이 SKILL.md 지침 + diff 경로 + issue 원문 acceptance criteria>
-PROMPT_EOF
 orca terminal create --worktree active --title task-evaluate-<n> \
-  --command "agy -p \"\$(cat '$prompt_file')\" --model <token> --print-timeout 15m --dangerously-skip-permissions" --json
-orca orchestration task-create --spec "<diff 경로 + issue 번호 + PASS/FAIL/ESCALATE 요청>" --json
-orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
+  --command "agy --model <token>" --json
+orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json
+# trustedWorkspace 재프롬프트가 보이면(이미 신뢰된 상위 폴더 하위에서도 재현됨 — agy.md 참고).
+# 기본 선택지가 이미 "Yes, I trust this folder"이므로 --enter만으로 확정된다(agy.md 실측 참고).
+orca terminal send --terminal <evaluate-handle> --enter --json
+trust_wait="$(orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json)"
+# fail-closed(agy.md REPL 절과 동일 조건식 — .result.wait.satisfied 실측 스키마 참고) — 성공을
+# 확실히 확인했을 때만 dispatch한다.
+if printf '%s' "$trust_wait" | jq -e '.result.wait.satisfied == true' >/dev/null 2>&1; then
+  orca orchestration task-create --spec "<이 SKILL.md 지침 + diff 경로 + issue 원문 acceptance criteria + PASS/FAIL/ESCALATE 요청>" --json
+  orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
+else
+  # 죽은 trust 대화상자에 inject가 떨어지면 이슈 #37이 고친 것과 같은 부류의 실패가 재발한다 —
+  # dispatch하지 않고 spawn-failures.md의 grep-first 절차로 스폰 실패를 진단한다.
+  :
+fi
 ```
 
 **이 세션은 기본적으로 agy(Gemini)로 뜬다** — §2의 agent e2e 실행과 §4의 리포트 합성이 이 세션의 핵심 업무이고, Gemini의 속도·비용·컴퓨터 사용 강점이 정확히 여기에 맞기 때문이다(`~/.agents/orca-workflows/model-selection.md`의 Computer Use / Long-Context 축, `~/.agents/orca-workflows/models/agy.md` 참고). e2e·pgTAP은 이 세션에 들어오지 않는다 — `orca-task-runner`의 task-레벨 게이트(`skills/orca-task-runner/SKILL.md` §6)를 이미 통과한 뒤에만 이 스킬이 호출되기 때문에 전량 신뢰하고 재검증하지 않는다. `gemini-3.6-flash-medium`으로 launch한다 — agy.md가 이 역할(judgment 아닌 실행·리포팅)에 배정한 토큰. 부팅 스모크는 `-high`로 실측됐고(`~/.agents/orca-workflows/models/agy.md` 참고) `-medium` 자체의 스모크 기록은 아직 없다 — 같은 세대의 effort suffix 차이라 리스크는 낮지만, 문제가 보이면 agy.md에 `-medium` 스모크를 추가할 것.
@@ -34,6 +47,8 @@ orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --j
 `orca-task-runner`가 구현 전 제안서(범위 + 검증 방법)를 보내오면, 이 세션(evaluator)이 직접 판단하지 않고 **coding agent 터미널을 스폰**해서 issue의 원본 acceptance-criteria 섹션(`orca-workflow`가 dispatch spec으로 넘겨준 섹션명)에 대조 검토를 맡긴다 — 제안된 파일 범위·검증 방법이 실제 코드베이스에서 기술적으로 타당한지 보는 일이라 §3 code-reviewer와 같은 이유로 강한 reasoning 모델이 낫다.
 
 ```bash
+# 다회 왕복(핑퐁)이 필요한 역할 — one-shot(`agy -p`/`codex exec`) 금지, 반드시 인터랙티브(REPL)
+# 세션으로 띄운다(provider 이름에 종속되지 않는 공통 원칙)
 orca terminal create --worktree active --title eval-contract \
   --command "<강한 reasoning provider의 launch 문법 — provider 문서에서 resolve>" --json
 orca terminal wait --terminal <contract-handle> --for tui-idle --timeout-ms 60000 --json
@@ -58,17 +73,26 @@ gate로 처리한다(`skills/orca-workflow/SKILL.md` §2, outcome `NO_ACCEPTANCE
 앱을 직접 조작하는 e2e. Playwright MCP(accessibility-tree 기반이라 스크린샷·좌표 클릭보다 UI 변경에 덜 깨진다)를 붙인 agy(Gemini) 세션을 별도 터미널로 스폰한다 — 이 세션 자체가 이미 에이전트이므로, worker_done에 자기가 무엇을 했고 무엇이 실패했는지 자연어 요약을 실어 보낸다. (e2e·pgTAP은 더 이상 여기서 돌지 않는다 — `orca-task-runner`의 task-레벨 게이트로 이관되어 이 스킬에 들어오는 diff는 이미 그 둘을 통과한 상태다. evaluator는 그 사실을 전량 신뢰하고 재검증하지 않는다.)
 
 ```bash
-# 프롬프트는 파일에 먼저 쓰고 command substitution으로 전달(인라인 quoting 파싱 실패 회피 — spawn-failures.md)
-prompt_file="$(mktemp "${TMPDIR:-/tmp}/agy-prompt-XXXXXX.txt")"
-cat > "$prompt_file" <<'PROMPT_EOF'
-<Playwright MCP 지침 + 테스트 시나리오>
-PROMPT_EOF
+# REPL(bare `agy`)로 띄운다 — 왕복이 필요한 역할에 one-shot을 쓰지 않는다(agy.md REPL 절, spawn-failures.md 참고)
 orca terminal create --worktree active --title eval-agent-e2e \
-  --command "agy -p \"\$(cat '$prompt_file')\" --model <token> --print-timeout 15m --dangerously-skip-permissions" --json
-orca orchestration task-create --spec "<앱 URL/worktree 경로 + 테스트 시나리오 + 실패 시 무엇을 관찰했는지 요약해서 worker_done에 실어달라는 지침>" --json
-orca orchestration dispatch --task <task_id> --to <agent-e2e-handle> --inject --json
-printf '{"ts":"%s","event":"assign","skill":"orca-evaluate","role":"agent-e2e","issue":"<issue-num>","task_id":"<task_id>","provider":"agy","model":"<model>","effort":"","terminal":"<agent-e2e-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
-  >> ~/.local/state/orca-workflows/logs/assignments.jsonl   # 할당 로그 — §1 참고
+  --command "agy --model <token>" --json
+orca terminal wait --terminal <agent-e2e-handle> --for tui-idle --timeout-ms 60000 --json
+# trustedWorkspace 재프롬프트가 보이면(이미 신뢰된 상위 폴더 하위에서도 재현됨 — agy.md 참고).
+# 기본 선택지가 이미 "Yes, I trust this folder"이므로 --enter만으로 확정된다(agy.md 실측 참고).
+orca terminal send --terminal <agent-e2e-handle> --enter --json
+trust_wait="$(orca terminal wait --terminal <agent-e2e-handle> --for tui-idle --timeout-ms 60000 --json)"
+# fail-closed(agy.md REPL 절과 동일 조건식 — .result.wait.satisfied 실측 스키마 참고) — 성공을
+# 확실히 확인했을 때만 dispatch한다.
+if printf '%s' "$trust_wait" | jq -e '.result.wait.satisfied == true' >/dev/null 2>&1; then
+  orca orchestration task-create --spec "<Playwright MCP 지침 + 테스트 시나리오 + 앱 URL/worktree 경로 + 실패 시 무엇을 관찰했는지 요약해서 worker_done에 실어달라는 지침>" --json
+  orca orchestration dispatch --task <task_id> --to <agent-e2e-handle> --inject --json
+  printf '{"ts":"%s","event":"assign","skill":"orca-evaluate","role":"agent-e2e","issue":"<issue-num>","task_id":"<task_id>","provider":"agy","model":"<model>","effort":"","terminal":"<agent-e2e-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
+    >> ~/.local/state/orca-workflows/logs/assignments.jsonl   # 할당 로그 — §1 참고
+else
+  # 죽은 trust 대화상자에 inject가 떨어지면 이슈 #37이 고친 것과 같은 부류의 실패가 재발한다 —
+  # dispatch하지 않고 spawn-failures.md의 grep-first 절차로 스폰 실패를 진단한다.
+  :
+fi
 ```
 
 이 세션(evaluator)은 그 자기 요약을 **그대로 믿지 않는다** — 이미 이 세션 자체가 롱컨텍스트 Gemini이므로, 원본 트레이스를 직접(별도 터미널 스폰 없이) 읽어서 "성공했다"는 보고가 실제로 맞는지, 조용히 막히거나 우회한 흔적은 없는지 확인한다.
@@ -90,6 +114,8 @@ python3 scripts/migration-lint.py <diff에 포함된 migration 파일 경로...>
 fresh-context code-reviewer terminal을 하나 스폰한다(이 evaluator 세션·generator와 별도 세션 — **강한 reasoning 모델 고정**, `model-selection.md` High Risk tier에서 매 launch 시 resolve — 구체 모델명을 여기 복제하지 않는다(`orca-task-runner` §0과 같은 원칙; 복제가 모델 교체 때마다 stale의 원인이 된다). "provider 자유, 가장 싼 provider"가 아니다 — 코드 정오 판단은 이 세션의 Gemini가 약하다고 표시된 지점이라 일부러 다른 모델을 쓰는 것). 리뷰어는 반드시 이 항목들을 갖는다: ①skeptical 지침("동의 표명 불필요, 결함·spec-divergence만 보고, 근거 있는 우려를 안이하게 넘기지 말 것") ②issue의 acceptance criteria 원문 ③**§2 agent e2e 결과 요약** — diff만으로는 안 보이는 런타임 동작(무엇이 실제로 실패했는지)을 code review가 근거로 쓸 수 있게 한다 ④**(schema/migration 변경이 있으면) `.migration-lint.json` 결과 + §1에서 받은 "의도된 destructive 오퍼레이션" 선언** — 린터가 flag한 항목 중 선언에 커버되지 않는 게 있으면 report에 명시하라는 지시와 함께.
 
 ```bash
+# 다회 왕복(핑퐁)이 필요한 역할 — one-shot(`agy -p`/`codex exec`) 금지, 반드시 인터랙티브(REPL)
+# 세션으로 띄운다(provider 이름에 종속되지 않는 공통 원칙)
 orca terminal create --worktree active --title eval-review \
   --command "<강한 reasoning provider의 launch 문법 — provider 문서에서 resolve>" --json
 orca terminal wait --terminal <review-handle> --for tui-idle --timeout-ms 60000 --json
