@@ -25,11 +25,16 @@ orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 6000
 # trustedWorkspace 재프롬프트가 보이면(이미 신뢰된 상위 폴더 하위에서도 재현됨 — agy.md 참고).
 # 기본 선택지가 이미 "Yes, I trust this folder"이므로 --enter만으로 확정된다(agy.md 실측 참고).
 orca terminal send --terminal <evaluate-handle> --enter --json
-orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json
-# 위 wait가 timeout이면 fail-closed — dispatch --inject를 진행하지 않고 스폰 실패로 처리해
-# spawn-failures.md 절차부터 밟는다(agy.md REPL 절과 동일 원칙).
-orca orchestration task-create --spec "<이 SKILL.md 지침 + diff 경로 + issue 원문 acceptance criteria + PASS/FAIL/ESCALATE 요청>" --json
-orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
+trust_wait="$(orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json)"
+# fail-closed(agy.md REPL 절과 동일 조건식) — 성공을 확실히 확인했을 때만 dispatch한다.
+if printf '%s' "$trust_wait" | jq -e '(.satisfied == true) or (.status == "tui-idle") or (.status == "satisfied")' >/dev/null 2>&1; then
+  orca orchestration task-create --spec "<이 SKILL.md 지침 + diff 경로 + issue 원문 acceptance criteria + PASS/FAIL/ESCALATE 요청>" --json
+  orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
+else
+  # 죽은 trust 대화상자에 inject가 떨어지면 이슈 #37이 고친 것과 같은 부류의 실패가 재발한다 —
+  # dispatch하지 않고 spawn-failures.md의 grep-first 절차로 스폰 실패를 진단한다.
+  :
+fi
 ```
 
 **이 세션은 기본적으로 agy(Gemini)로 뜬다** — §2의 agent e2e 실행과 §4의 리포트 합성이 이 세션의 핵심 업무이고, Gemini의 속도·비용·컴퓨터 사용 강점이 정확히 여기에 맞기 때문이다(`~/.agents/orca-workflows/model-selection.md`의 Computer Use / Long-Context 축, `~/.agents/orca-workflows/models/agy.md` 참고). e2e·pgTAP은 이 세션에 들어오지 않는다 — `orca-task-runner`의 task-레벨 게이트(`skills/orca-task-runner/SKILL.md` §6)를 이미 통과한 뒤에만 이 스킬이 호출되기 때문에 전량 신뢰하고 재검증하지 않는다. `gemini-3.6-flash-medium`으로 launch한다 — agy.md가 이 역할(judgment 아닌 실행·리포팅)에 배정한 토큰. 부팅 스모크는 `-high`로 실측됐고(`~/.agents/orca-workflows/models/agy.md` 참고) `-medium` 자체의 스모크 기록은 아직 없다 — 같은 세대의 effort suffix 차이라 리스크는 낮지만, 문제가 보이면 agy.md에 `-medium` 스모크를 추가할 것.
@@ -74,13 +79,18 @@ orca terminal wait --terminal <agent-e2e-handle> --for tui-idle --timeout-ms 600
 # trustedWorkspace 재프롬프트가 보이면(이미 신뢰된 상위 폴더 하위에서도 재현됨 — agy.md 참고).
 # 기본 선택지가 이미 "Yes, I trust this folder"이므로 --enter만으로 확정된다(agy.md 실측 참고).
 orca terminal send --terminal <agent-e2e-handle> --enter --json
-orca terminal wait --terminal <agent-e2e-handle> --for tui-idle --timeout-ms 60000 --json
-# 위 wait가 timeout이면 fail-closed — dispatch --inject를 진행하지 않고 스폰 실패로 처리해
-# spawn-failures.md 절차부터 밟는다(agy.md REPL 절과 동일 원칙).
-orca orchestration task-create --spec "<Playwright MCP 지침 + 테스트 시나리오 + 앱 URL/worktree 경로 + 실패 시 무엇을 관찰했는지 요약해서 worker_done에 실어달라는 지침>" --json
-orca orchestration dispatch --task <task_id> --to <agent-e2e-handle> --inject --json
-printf '{"ts":"%s","event":"assign","skill":"orca-evaluate","role":"agent-e2e","issue":"<issue-num>","task_id":"<task_id>","provider":"agy","model":"<model>","effort":"","terminal":"<agent-e2e-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
-  >> ~/.local/state/orca-workflows/logs/assignments.jsonl   # 할당 로그 — §1 참고
+trust_wait="$(orca terminal wait --terminal <agent-e2e-handle> --for tui-idle --timeout-ms 60000 --json)"
+# fail-closed(agy.md REPL 절과 동일 조건식) — 성공을 확실히 확인했을 때만 dispatch한다.
+if printf '%s' "$trust_wait" | jq -e '(.satisfied == true) or (.status == "tui-idle") or (.status == "satisfied")' >/dev/null 2>&1; then
+  orca orchestration task-create --spec "<Playwright MCP 지침 + 테스트 시나리오 + 앱 URL/worktree 경로 + 실패 시 무엇을 관찰했는지 요약해서 worker_done에 실어달라는 지침>" --json
+  orca orchestration dispatch --task <task_id> --to <agent-e2e-handle> --inject --json
+  printf '{"ts":"%s","event":"assign","skill":"orca-evaluate","role":"agent-e2e","issue":"<issue-num>","task_id":"<task_id>","provider":"agy","model":"<model>","effort":"","terminal":"<agent-e2e-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
+    >> ~/.local/state/orca-workflows/logs/assignments.jsonl   # 할당 로그 — §1 참고
+else
+  # 죽은 trust 대화상자에 inject가 떨어지면 이슈 #37이 고친 것과 같은 부류의 실패가 재발한다 —
+  # dispatch하지 않고 spawn-failures.md의 grep-first 절차로 스폰 실패를 진단한다.
+  :
+fi
 ```
 
 이 세션(evaluator)은 그 자기 요약을 **그대로 믿지 않는다** — 이미 이 세션 자체가 롱컨텍스트 Gemini이므로, 원본 트레이스를 직접(별도 터미널 스폰 없이) 읽어서 "성공했다"는 보고가 실제로 맞는지, 조용히 막히거나 우회한 흔적은 없는지 확인한다.

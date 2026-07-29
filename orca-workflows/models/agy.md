@@ -18,12 +18,18 @@ orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000 --json
 # 기본 선택지가 이미 "Yes, I trust this folder"이므로 --enter만으로 확정된다(2026-07-29 스모크 실측:
 # 이 커맨드로 trust 프롬프트를 통과하고 정상 부팅까지 확인함).
 orca terminal send --terminal <handle> --enter --json
-orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000 --json
-# 위 wait가 timeout이면(trust 대화상자가 죽었거나 응답 없음) fail-closed — dispatch --inject를
-# 진행하지 않고 스폰 실패로 처리해 ../spawn-failures.md 절차부터 밟는다. 죽은 trust 대화상자에
-# inject가 떨어지면 이슈 #37이 고친 것과 같은 부류의 실패가 재발한다.
-orca orchestration task-create --spec "<instructions + artifact paths>" --json
-orca orchestration dispatch --task <task_id> --to <handle> --inject --json
+trust_wait="$(orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000 --json)"
+# fail-closed: 위 결과에서 성공을 확인하지 못하면(timeout, 필드명이 실측과 다름, 파싱 실패 등
+# 무엇이든) 실패로 간주한다 — jq -e는 표현식이 false거나 매치 실패면 비영(0 아닌) 종료하므로
+# 스키마를 잘못 짚었더라도 기본값은 "실패"다. 성공을 확실히 확인했을 때만 dispatch한다.
+if printf '%s' "$trust_wait" | jq -e '(.satisfied == true) or (.status == "tui-idle") or (.status == "satisfied")' >/dev/null 2>&1; then
+  orca orchestration task-create --spec "<instructions + artifact paths>" --json
+  orca orchestration dispatch --task <task_id> --to <handle> --inject --json
+else
+  # 죽은 trust 대화상자에 inject가 떨어지면 이슈 #37이 고친 것과 같은 부류의 실패가 재발한다 —
+  # dispatch하지 않고 ../spawn-failures.md의 grep-first 절차로 스폰 실패를 진단한다.
+  :
+fi
 ```
 
 Use this form for any role that needs a back-and-forth (ping-pong) exchange with the coordinator —
