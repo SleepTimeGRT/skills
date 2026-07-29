@@ -19,10 +19,13 @@ orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000 --json
 # 이 커맨드로 trust 프롬프트를 통과하고 정상 부팅까지 확인함).
 orca terminal send --terminal <handle> --enter --json
 trust_wait="$(orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000 --json)"
-# fail-closed: 위 결과에서 성공을 확인하지 못하면(timeout, 필드명이 실측과 다름, 파싱 실패 등
-# 무엇이든) 실패로 간주한다 — jq -e는 표현식이 false거나 매치 실패면 비영(0 아닌) 종료하므로
-# 스키마를 잘못 짚었더라도 기본값은 "실패"다. 성공을 확실히 확인했을 때만 dispatch한다.
-if printf '%s' "$trust_wait" | jq -e '(.satisfied == true) or (.status == "tui-idle") or (.status == "satisfied")' >/dev/null 2>&1; then
+# fail-closed: 위 결과에서 성공을 확인하지 못하면(timeout, 파싱 실패 등 무엇이든) 실패로 간주한다 —
+# jq -e는 표현식이 false거나 매치 실패면 비영(0 아닌) 종료하므로 기본값은 "실패"다. 성공을 확실히
+# 확인했을 때만 dispatch한다. `orca terminal wait --json`의 실제 응답 스키마는
+# {"ok":true,"result":{"wait":{"condition":"tui-idle","satisfied":true,"status":"running",...}}}
+# (2026-07-29 실측, top-level이 아니라 .result.wait 아래에 있다) — 성공 여부는 .result.wait.satisfied
+# 하나로 판단한다("status"는 idle 여부가 아니라 프로세스 상태값이라 성공 조건에 넣지 않는다).
+if printf '%s' "$trust_wait" | jq -e '.result.wait.satisfied == true' >/dev/null 2>&1; then
   orca orchestration task-create --spec "<instructions + artifact paths>" --json
   orca orchestration dispatch --task <task_id> --to <handle> --inject --json
 else

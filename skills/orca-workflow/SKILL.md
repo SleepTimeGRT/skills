@@ -81,8 +81,9 @@ orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 6000
 # 기본 선택지가 이미 "Yes, I trust this folder"이므로 --enter만으로 확정된다(agy.md 실측 참고).
 orca terminal send --terminal <evaluate-handle> --enter --json
 trust_wait="$(orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json)"
-# fail-closed(agy.md REPL 절과 동일 조건식) — 성공을 확실히 확인했을 때만 dispatch한다.
-if printf '%s' "$trust_wait" | jq -e '(.satisfied == true) or (.status == "tui-idle") or (.status == "satisfied")' >/dev/null 2>&1; then
+# fail-closed(agy.md REPL 절과 동일 조건식 — .result.wait.satisfied 실측 스키마 참고) — 성공을
+# 확실히 확인했을 때만 dispatch한다.
+if printf '%s' "$trust_wait" | jq -e '.result.wait.satisfied == true' >/dev/null 2>&1; then
   orca orchestration task-create --spec "<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문 + issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 요청 모드>" --json
   orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
   printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","issue":"<issue-num>","task_id":"<task_id>","provider":"agy","model":"<model>","effort":"","terminal":"<evaluate-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
