@@ -290,3 +290,194 @@ def test_no_hardcoded_acceptance_criteria_heading(name):
     assert "## What to build" not in text, (
         f"{name}: 'what to build' heading must not be hardcoded either"
     )
+
+
+def _gate_safety_item_anchors(text: str) -> tuple[int, int, int, int]:
+    """Locates the mandatory reviewer checklist's ⑤ item and its enclosing paragraph, scoped by
+    the enumeration's own paragraph boundary rather than a fixed character window.
+
+    Round1 Finding 1: the original version of this anchor asserted only
+    `checklist_idx < fourth_idx < fifth_idx`. `str.index(sub, start)` is defined to return an
+    index `>= start` on success, so once both `index()` calls succeed that inequality is true by
+    construction — it cannot fail. Concretely: it stays green even if ⑤ is moved into a wholly
+    unrelated paragraph (or a different section entirely), which is exactly the gap the
+    coordinator's "boundary" requirement in the original review was meant to close (that
+    requirement was dropped when this anchor was first written).
+
+    The fix restores a real boundary: `para_end`, the first blank line after the checklist
+    sentence starts. ⑤ must fall strictly before it. `test_gate_safety_anchor_rejects_item_
+    relocated_outside_enumeration` below proves this is no longer a tautology by feeding it
+    round1's own forged counterexample and checking it is rejected.
+    """
+    checklist_idx = text.index("리뷰어는 반드시 이 항목들을 갖는다")
+    fourth_idx = text.index("④", checklist_idx)
+    fifth_idx = text.index("⑤", fourth_idx)
+    para_end = text.index("\n\n", checklist_idx)
+    return checklist_idx, fourth_idx, fifth_idx, para_end
+
+
+def test_gate_safety_anchor_rejects_item_relocated_outside_enumeration():
+    # Round1's own counterexample, verbatim: ④ ends the mandatory enumeration's paragraph, and ⑤
+    # reappears later in a separate, unrelated paragraph. The pre-fix anchor
+    # (checklist_idx < fourth_idx < fifth_idx only) passed this text; this test proves the fixed
+    # anchor no longer does, i.e. that it is not a tautology.
+    forged = (
+        "리뷰어는 반드시 이 항목들을 갖는다: ①a ②b ③c ④d\n\n"
+        "관계없는 다른 절.\n\n"
+        "⑤ ...를 지시한다. 비망라적. Critical/Important. escalation."
+    )
+    checklist_idx, fourth_idx, fifth_idx, para_end = _gate_safety_item_anchors(forged)
+    assert not (checklist_idx < fourth_idx < fifth_idx < para_end), (
+        "the paragraph-boundary anchor must reject ⑤ once it has been relocated outside the "
+        "mandatory checklist's own paragraph — if this assertion fails, the anchor has "
+        "regressed back into round1's tautological ordering-only check"
+    )
+
+
+def test_orca_evaluate_requires_gate_safety_judgment_in_review():
+    text = _read_skill("orca-evaluate")
+    checklist_idx, fourth_idx, fifth_idx, para_end = _gate_safety_item_anchors(text)
+    assert checklist_idx < fourth_idx < fifth_idx < para_end, (
+        "orca-evaluate §3 must add the gate-safety judgment instruction as item ⑤ inside the "
+        "reviewer's mandatory checklist enumeration (before the enumeration's own paragraph "
+        "ends), not as a trailing sentence relocated outside it"
+    )
+    # The ⑤ segment itself must use imperative language, not a soft recommendation.
+    fifth_segment = text[fifth_idx:para_end]
+    assert "지시한다" in fifth_segment or "요구한다" in fifth_segment, (
+        "orca-evaluate §3's ⑤ item must be phrased as an instruction/requirement, not advice"
+    )
+
+
+def test_orca_evaluate_gate_safety_examples_are_non_exhaustive():
+    text = _read_skill("orca-evaluate")
+    _, _, fifth_idx, para_end = _gate_safety_item_anchors(text)
+    assert "비망라적" in text[fifth_idx:para_end], (
+        "orca-evaluate §3's ⑤ item must mark its example category list as non-exhaustive, so it "
+        "cannot calcify into the static path list AC1 forbids"
+    )
+
+
+def test_orca_evaluate_gate_safety_mitigates_tier_conflation():
+    text = _read_skill("orca-evaluate")
+    _, _, fifth_idx, para_end = _gate_safety_item_anchors(text)
+    segment = text[fifth_idx:para_end]
+    assert "Critical" in segment or "Important" in segment, (
+        "orca-evaluate §3's ⑤ item must require an explicit finding/severity when a gate-safety "
+        "concern cannot be fully cleared, so a small gate-integrity diff choosing a cheap "
+        "reviewer tier doesn't silently waive scrutiny"
+    )
+    assert "escalation" in segment or "에스컬레이션" in segment, (
+        "orca-evaluate §3's ⑤ item must route an unresolved gate-safety concern toward the "
+        "existing FAIL/ESCALATE path"
+    )
+
+
+def _section_3_text(full_text: str) -> str:
+    # §1 (Contract review) deliberately keeps the fixed-strong-model placeholder — only §3's own
+    # copy of it must change. Scoping to §3's own section avoids a false failure against §1.
+    start = full_text.index("## 3. Diff 리뷰")
+    end = full_text.index("## 4.", start)
+    return full_text[start:end]
+
+
+def test_orca_evaluate_review_model_selection_is_dynamic_not_fixed_high_risk():
+    text = _read_skill("orca-evaluate")
+    section_3 = _section_3_text(text)
+    assert "select_reviewer" in section_3, (
+        "orca-evaluate §3 must delegate reviewer selection to select_reviewer.py"
+    )
+    assert "<강한 reasoning provider의 launch 문법 — provider 문서에서 resolve>" not in section_3, (
+        "orca-evaluate §3's spawn point must not stay a fixed strong-model placeholder"
+    )
+    assert "일부러 다른 모델을 쓰는 것" not in section_3, (
+        "orca-evaluate §3 must not keep the stale 'deliberately different model' framing that "
+        "implied a fixed High-Risk model regardless of diff size"
+    )
+    assert "하드 요구사항은 없다" in section_3 or "하드 요구사항이 없다" in section_3, (
+        "orca-evaluate §3 must state that reviewer != generator is not a hard requirement"
+    )
+
+
+def _reviewer_json_call_text(section_3: str) -> str:
+    # Scope to the actual select_reviewer.py invocation, not just "somewhere in §3" — an ordinary
+    # refactor can extract the --high-risk-signal flag into an earlier variable and then simply not
+    # reference it at the call site, leaving the substring present elsewhere in §3 (e.g. in the now
+    # dead extracted variable) while the flag itself is never passed.
+    start = section_3.index('reviewer_json="$(')
+    end = section_3.index("\nreviewer_provider=", start)
+    return section_3[start:end]
+
+
+def test_orca_evaluate_high_risk_signal_wired_to_reviewer_selection():
+    text = _read_skill("orca-evaluate")
+    section_3 = _section_3_text(text)
+    # "migration_files_present" and "--high-risk-signal" both also appear in this section's prose
+    # (explaining *why* the wiring exists), so a plain substring check on those names would stay
+    # green even if the actual code lines were deleted. Anchor on code-only substrings instead.
+    assert "${#migration_files[@]}" in section_3, (
+        "orca-evaluate §3 must keep computing migration_files_present from the migration_files "
+        "array so a small destructive-migration diff isn't silently dropped back to the lowest "
+        "reviewer tier"
+    )
+    assert "migration_files_present=true" in section_3, (
+        "orca-evaluate §3 must keep the migration_files_present=true assignment itself, not just "
+        "the array-length test that feeds it — inlining that test into the surrounding `if` "
+        "condition is an ordinary refactor that can drop this assignment while leaving the "
+        "array-length substring (and this test's other assertion) intact"
+    )
+    assert "echo --high-risk-signal" in _reviewer_json_call_text(section_3), (
+        "orca-evaluate §3's select_reviewer.py invocation must itself reference --high-risk-signal "
+        "wiring — extracting the flag into an earlier variable and forgetting to use it at the call "
+        "site would leave the substring present elsewhere in §3 while the flag is never passed"
+    )
+
+
+def test_orca_evaluate_preserves_evaluator_separation_intent():
+    text = _read_skill("orca-evaluate")
+    # Removing "일부러 다른 모델을 쓰는 것" must not delete the one sentence in §3 saying the
+    # reviewer must differ from this evaluator session (Gemini) itself — a different concern from
+    # reviewer != generator, and the one round1 found at risk of accidental deletion.
+    assert "evaluator 세션(Gemini)" in text, (
+        "orca-evaluate §3 must keep stating the reviewer must be a different model from this "
+        "evaluator session (Gemini) itself, not just 'fresh context' in the abstract"
+    )
+
+
+def test_orca_evaluate_codex_availability_is_runtime_checked_not_a_permanent_ban():
+    text = _read_skill("orca-evaluate")
+    assert "영구적으로 쓸 수 없다" not in text, (
+        "orca-evaluate must not hardcode a permanent Codex ban"
+    )
+    assert "--no-codex-available" in text, (
+        "orca-evaluate §3 must document the runtime retry/fallback mechanism for Codex spawn failure"
+    )
+    assert "사용자가 알려준" in text, (
+        "orca-evaluate §3 must treat this session's user-provided information as the primary "
+        "signal for Codex availability, not just `command -v codex`"
+    )
+
+
+def test_orca_evaluate_contract_review_no_longer_cites_section_3():
+    text = _read_skill("orca-evaluate")
+    # §1's own reasoning for using a fixed strong model must not lean on §3 anymore, since §3's
+    # model choice is now dynamic while §1 stays fixed-strong for an independent reason.
+    assert "§3 code-reviewer와 같은 이유로" not in text, (
+        "orca-evaluate §1 must justify its fixed strong-model choice on its own terms, not by "
+        "pointing at §3 (which no longer uses a fixed strong model)"
+    )
+
+
+def test_orca_workflow_has_no_protected_static_gate():
+    text = _read_skill("orca-workflow")
+    for term in ("PROTECTED_ESCALATE", "protected_paths.py", "lifecycle-gate.toml"):
+        assert term not in text, (
+            f"orca-workflow must not reintroduce the discarded static PROTECTED gate ('{term}') "
+            "— issue #24 was redesigned around reviewer judgment instead"
+        )
+
+
+def test_select_reviewer_script_exists():
+    assert (SKILLS_DIR / "orca-evaluate" / "scripts" / "select_reviewer.py").is_file(), (
+        "orca-evaluate/scripts/select_reviewer.py is missing"
+    )
