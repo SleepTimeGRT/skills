@@ -399,22 +399,37 @@ def test_orca_evaluate_review_model_selection_is_dynamic_not_fixed_high_risk():
     )
 
 
+def _reviewer_json_call_text(section_3: str) -> str:
+    # Scope to the actual select_reviewer.py invocation, not just "somewhere in §3" — an ordinary
+    # refactor can extract the --high-risk-signal flag into an earlier variable and then simply not
+    # reference it at the call site, leaving the substring present elsewhere in §3 (e.g. in the now
+    # dead extracted variable) while the flag itself is never passed.
+    start = section_3.index('reviewer_json="$(')
+    end = section_3.index("\nreviewer_provider=", start)
+    return section_3[start:end]
+
+
 def test_orca_evaluate_high_risk_signal_wired_to_reviewer_selection():
     text = _read_skill("orca-evaluate")
     section_3 = _section_3_text(text)
-    # Both "migration_files_present" and "--high-risk-signal" also appear in this section's prose
+    # "migration_files_present" and "--high-risk-signal" both also appear in this section's prose
     # (explaining *why* the wiring exists), so a plain substring check on those names would stay
-    # green even if the actual code lines were deleted. Anchor on the code-only substrings instead:
-    # the array-length check that computes the flag, and the `echo --high-risk-signal` that's the
-    # only place it's actually passed to select_reviewer.py.
+    # green even if the actual code lines were deleted. Anchor on code-only substrings instead.
     assert "${#migration_files[@]}" in section_3, (
         "orca-evaluate §3 must keep computing migration_files_present from the migration_files "
         "array so a small destructive-migration diff isn't silently dropped back to the lowest "
         "reviewer tier"
     )
-    assert "echo --high-risk-signal" in section_3, (
-        "orca-evaluate §3's select_reviewer.py call site must actually pass migration_files_present "
-        "through as --high-risk-signal, not just compute it and leave it unwired"
+    assert "migration_files_present=true" in section_3, (
+        "orca-evaluate §3 must keep the migration_files_present=true assignment itself, not just "
+        "the array-length test that feeds it — inlining that test into the surrounding `if` "
+        "condition is an ordinary refactor that can drop this assignment while leaving the "
+        "array-length substring (and this test's other assertion) intact"
+    )
+    assert "echo --high-risk-signal" in _reviewer_json_call_text(section_3), (
+        "orca-evaluate §3's select_reviewer.py invocation must itself reference --high-risk-signal "
+        "wiring — extracting the flag into an earlier variable and forgetting to use it at the call "
+        "site would leave the substring present elsewhere in §3 while the flag is never passed"
     )
 
 
