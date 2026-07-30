@@ -60,12 +60,15 @@ acceptance-criteria 섹션명이 issue body에 실제로 있는지 먼저 확인
 # task-runner 호출 (provider는 model-selection.md 기준 선택 — 코드 생성이라 Routine/High-Risk tier)
 orca terminal create --worktree active --title task-run-<n> \
   --command "<provider의 launch 문법 — provider 문서에서 resolve>" --json
-orca orchestration task-create --spec "<issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 제안서/구현 모드>" --json
+spec_text="<issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 제안서/구현 모드>"
+orca orchestration task-create --spec "$spec_text" --json
 orca orchestration dispatch --task <task_id> --to <run-handle> --inject --json
-# 할당 로그 — 스폰하는 쪽이 남긴다. dispatch와 같은 블록에서 즉시 실행(누락 방지);
-# orca 상태는 reset으로 소실될 수 있어 할당의 영속 기록은 이 파일이 유일하다.
-install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"task-runner","issue":"<issue-num>","task_id":"<task_id>","provider":"<provider>","model":"<model>","effort":"<effort>","terminal":"<run-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
-  >> ~/.local/state/orca-workflows/logs/assignments.jsonl && chmod 600 ~/.local/state/orca-workflows/logs/assignments.jsonl
+# 로그 — ~/.agents/orca-workflows/logging.md 절차대로. dispatch와 같은 블록에서 즉시 실행(누락 방지).
+#  §1 assign 이벤트: role="task-runner", issue=<issue-num>, task_id=<task_id>, provider/model/effort=resolved 값,
+#    terminal=<run-handle>, worktree=<worktree 경로>
+#  §2 term 로그: skill="orca-workflow", role="task-runner", terminal=<run-handle>, meta 기록 후
+#    sent.content=$spec_text. recv는 기록하지 않는다 — 이 스킬은 diff/report 본문을 직접 읽지 않는다
+#    (도입부 원칙); task-runner 자신의 왕복 내용은 task-runner의 term-<run-handle>.jsonl에 이미 남는다.
 
 # evaluate 호출 — REPL 필수(one-shot은 이후 dispatch --inject를 못 받음), agy는 제외한다
 # (agy REPL은 포커스 경합 시 영구 hang — `~/.agents/orca-workflows/models/agy.md`,
@@ -77,10 +80,14 @@ orca terminal create --worktree active --title task-evaluate-<n> \
 orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json
 # 해당 provider가 최초 launch 시 신뢰/승인류 재프롬프트를 요구하면 그 provider 문서가 정의하는
 # 절차를 따른다(agy 전용 시퀀스를 여기서 가정하지 않는다).
-orca orchestration task-create --spec "<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문 + issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 요청 모드>" --json
+spec_text="<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문 + issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 요청 모드>"
+orca orchestration task-create --spec "$spec_text" --json
 orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
-printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","issue":"<issue-num>","task_id":"<task_id>","provider":"<provider>","model":"<model>","effort":"<effort>","terminal":"<evaluate-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
-  >> ~/.local/state/orca-workflows/logs/assignments.jsonl
+# 로그 — ~/.agents/orca-workflows/logging.md 절차대로.
+#  §1 assign 이벤트: role="evaluator", issue=<issue-num>, task_id=<task_id>, provider/model/effort=resolved 값,
+#    terminal=<evaluate-handle>, worktree=<worktree 경로>
+#  §2 term 로그: skill="orca-workflow", role="evaluator", terminal=<evaluate-handle>, meta 기록 후
+#    sent.content=$spec_text. recv는 기록하지 않는다 — 위 task-runner 사이트와 같은 이유.
 ```
 
 **2b. Generate** — `orca-task-runner` 호출, 결과로 **task 전체 diff 경로** 또는 **`GATE_FAIL`**을 받는다(`orca-task-runner`가 자기 task-레벨 게이트를 재시도 한도(2회) 안에 못 넘긴 경우 — `skills/orca-task-runner/SKILL.md` §6).
@@ -118,7 +125,7 @@ printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","
     if ! bash scripts/premerge.sh --review-done; then
       premerge_exit=$?
       printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"PREMERGE_FAIL","retry":0,"premerge_exit":%s}\n' \
-        "$(date -u +%FT%TZ)" "$premerge_exit" >> ~/.local/state/orca-workflows/logs/assignments.jsonl
+        "$(date -u +%FT%TZ)" "$premerge_exit" >> "$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
       # 여기서 merge하지 않는다 — gh pr merge를 건너뛰고 바로 아래 "3. Inspecting"으로 분기한다
       # (GATE_FAIL과 같은 원칙: 여기서 추가 재시도 걸지 않음).
       # premerge.sh exit code: 2=precondition(stale-main 등) 3=PROTECTED 4=REVIEW 5=MIGRATION_ESCALATE
@@ -142,7 +149,7 @@ printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"evaluator","
 
 ```bash
 printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|PREMERGE_FAIL|NO_ACCEPTANCE_CRITERIA|NO_DONE_TRANSITION>","retry":<재시도 횟수>}\n' "$(date -u +%FT%TZ)" \
-  >> ~/.local/state/orca-workflows/logs/assignments.jsonl
+  >> "$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
 ```
 
 ## 3. Inspecting
