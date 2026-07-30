@@ -120,8 +120,9 @@ orca orchestration dispatch --task <task_id> --to <impl_handle> --inject --json 
 #    worktree=<worktree 경로>. wave_index는 §3 wave_start 로그와 join한다.
 #  logging.md §2 term 로그: skill="orca-task-runner", role="subtask-impl", terminal=<impl_handle>,
 #    meta 기록 후 sent.content=$spec_text(위 사이드카에서 로드한 값). recv는 아래 close 직전에
-#    기록한다(§5 마지막 블록).
-rm -f "$spec_sidecar"   # sent에 이미 남았으니 사이드카는 즉시 회수 — logs/ 안에 무기한 쌓이지 않게
+#    기록한다(§5 마지막 블록). 사이드카는 여기서 지우지 않는다 — 스폰 실패 재시도나 worker_done
+#    유실 수동 복구가 같은 task_id로 이 블록을 다시 태울 수 있어, 삭제는 터미널이 실제로 닫히는
+#    시점(§5 마지막 블록)으로 미룬다.
 ```
 
 - ⚠️ **`check --wait` 단독 대기 금지**: coordinator가 Orca 터미널 내부 세션이면 worker_done이 check 큐로 안 잡힐 수 있다(task 상태는 정상 갱신됨). 기본 대기 = `task-list --brief --json` 상태 폴링 또는 커밋/파일 존재 감시(20-30s 간격), `check --wait`는 보조.
@@ -137,6 +138,11 @@ rm -f "$spec_sidecar"   # sent에 이미 남았으니 사이드카는 즉시 회
   # term-<impl_handle>.jsonl에 append(이 터미널은 §5에서 sent만 기록했고 이후 한 번도 read하지
   # 않았으므로, 이 read가 곧 유일한 recv). 예전처럼 별도 .json 스냅샷 파일은 만들지 않는다.
   orca terminal close --terminal <impl_handle> --tab --json
+  rm -f "$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"   # 사이드카 회수는 여기서
+  # 한다 — §5 dispatch 블록에서 즉시 지우면, 같은 task_id를 재스폰하는 스폰 실패 재시도나
+  # worker_done 유실 수동 복구가 두 번째로 이 블록을 태울 때 spec_text를 못 읽어 sent.content가
+  # 빈 문자열이 된다. 터미널이 실제로 닫히는 시점까지 사이드카를 살려 두면 재시도도 원문을 그대로
+  # 기록할 수 있다.
   ```
 
   `--tab`을 반드시 붙인다 — 실측 결과 `--tab` close는 기저 프로세스를 실제로 종료시키고 메모리를 회수하지만(`diagnostics memory`에서 세션이 사라짐), `--tab` 없는 close는 pane만 닫고 프로세스가 남을 수 있다. close 전에 `term-<impl_handle>.jsonl`에 마지막 `recv`를 남기는 이유는 close하면 스크롤백이 사라져서, §6 task-레벨 게이트가 나중에 실패했을 때 "이 subtask가 뭘 했는지" 재확인할 방법이 없어지기 때문이다. worker_done/유실 복구 둘 다 확인 전에는(단순히 활동이 멈췄다는 이유만으로는) 닫지 않는다 — 아직 파일 쓰기·커밋이 끝나지 않은 프로세스를 죽일 위험이 있다. 이 close는 §3에서 매 wave 새 터미널을 스폰하는 구조라 재사용 대상이 없다는 전제 위에서만 안전하다 — 이 스킬 밖(범용 `orchestration`, `orca-workflow` 자체 relay 터미널)에는 적용하지 않는다.
