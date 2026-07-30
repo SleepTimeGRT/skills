@@ -609,3 +609,11 @@ def test_orca_terminal_read_counts_per_skill_file():
         assert actual == count, (
             f"{name}: expected {count} 'orca terminal read' occurrence(s), found {actual}"
         )
+
+
+def test_spawn_failures_has_orca_restart_retry_row():
+    text = (WORKFLOWS_DIR / "spawn-failures.md").read_text()
+    assert "Could not connect to the running Orca app" in text
+    assert "Orca is not running. Run 'orca open' first." in text
+    assert "orca_call_with_retry" in text
+    assert "#42" in text
