@@ -23,12 +23,12 @@ description: Use when generating the implementation for one task (issue) — pro
 - **이 issue에 대해 이 세션이 처음이 아닐 수 있다면**(이전 coordinator가 도중에 죽어서 재개하는 경우) 새 wave를 시작하기 전에 orphan부터 정리한다 — §3/§5 wave telemetry는 coordinator가 살아서 markdown 지침을 끝까지 실행해야만 남는 best-effort 기록이라, coordinator가 wave 도중 죽으면(그리고 그게 바로 우리가 잡으려는 CPU 경합의 극단적 형태다) `wave_start`만 남고 `wave_end`가 영영 안 남을 수 있다:
 
   ```bash
-  jq -s --arg issue "<issue-num>" '
+  cat ~/.local/state/orca-workflows/logs/waves-*.jsonl 2>/dev/null | jq -s --arg issue "<issue-num>" '
     [.[] | select(.issue == $issue)] as $rows
     | ($rows | map(select(.event == "wave_start") | .wave_index)) as $starts
     | ($rows | map(select(.event == "wave_end") | .wave_index)) as $ends
     | $starts - $ends
-  ' ~/.local/state/orca-workflows/logs/waves.jsonl 2>/dev/null
+  '
   ```
 
   결과가 비어있지 않으면(orphan `wave_index` 존재) 이전 세션이 그 wave 도중 죽었다는 뜻이다. `orca orchestration task-list --json`/`orca terminal list --json`으로 그 wave의 subtask가 실제로 끝났는지 확인한 뒤, §5의 `wave_end` 포맷대로 `outcome:"crash_recovered"`로 채워 넣는다(retry_count는 알 수 없으면 `null`). 이 값 — "wave 크기 N에서 coordinator가 죽었다" — 이 바로 best-effort 로그가 놓칠 뻔한 가장 중요한 데이터 포인트이므로, 확인 없이 새 wave로 넘어가지 않는다.
@@ -80,18 +80,9 @@ orca terminal wait --terminal <impl-handle> --for tui-idle --timeout-ms 60000 --
 **Wave telemetry(시작)** — 상한 재검토용 데이터를 쌓는다. 이 wave의 모든 터미널이 뜬 직후 1회:
 
 ```bash
-install -d -m 700 ~/.local/state/orca-workflows/logs
-jq -cn \
-  --arg ts "$(date -u +%FT%TZ)" \
-  --argjson ts_epoch "$(date -u +%s)" \
-  --arg event "wave_start" \
-  --arg issue "<issue-num>" \
-  --argjson wave_index <n> \
-  --argjson wave_size <이 wave 터미널 수> \
-  --argjson nproc "$(sysctl -n hw.ncpu 2>/dev/null || nproc)" \
-  '{ts: $ts, ts_epoch: $ts_epoch, event: $event, skill: "orca-task-runner", issue: $issue, wave_index: $wave_index, wave_size: $wave_size, nproc: $nproc}' \
-  >> ~/.local/state/orca-workflows/logs/waves.jsonl
-chmod 600 ~/.local/state/orca-workflows/logs/waves.jsonl
+# wave_start 로그 — ~/.agents/orca-workflows/logging.md §1 절차대로 waves-<오늘 UTC 날짜>.jsonl에 기록.
+# event="wave_start", issue=<issue-num>, wave_index=<n>, wave_size=<이 wave 터미널 수>,
+# nproc=$(sysctl -n hw.ncpu 2>/dev/null || nproc), ts_epoch=$(date -u +%s) — 필드는 기존과 동일, 경로만 변경.
 ```
 
 `nproc`(가용 코어 수)을 같이 남기는 이유: wave_size와 소요시간만으로는 CPU 경합 여부를 판단할 수 없다 — 같은 wave_size라도 머신 코어 수·provider 구성(§5 `assign` 로그의 `wave_index`와 join)에 따라 경합 여부가 달라지기 때문이다.
@@ -110,12 +101,14 @@ subtask가 worker_done을 보내기 전에 스스로 실행: typecheck, unit tes
 
 ```bash
 orca orchestration task-list --ready --brief --json
+spec_text="<이 task_id로 §2에서 task-create --spec에 쓴 텍스트와 동일한 subtask 본문>"
 orca orchestration dispatch --task <task_id> --to <impl_handle> --inject --json   # wave 크기만큼 병렬 — 상한 임시 해제, §3 참고
-# 할당 로그 — dispatch와 같은 블록에서 즉시 실행(누락 방지). orca 상태는 reset으로 소실될 수 있어
-# "어떤 subtask가 어떤 provider/model/effort로 갔는지"의 영속 기록은 이 파일이 유일하다.
-# wave_index는 §3 wave_start 로그와 join해 "이 provider 조합이 이 wave 크기에서 경합을 냈는지"를 나중에 볼 수 있게 한다.
-install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","event":"assign","skill":"orca-task-runner","role":"subtask-impl","issue":"<issue-num>","task_id":"<task_id>","wave_index":<n>,"subtask_type":"<전사|통합|아키텍처>","provider":"<provider>","model":"<model>","effort":"<effort>","terminal":"<impl_handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
-  >> ~/.local/state/orca-workflows/logs/assignments.jsonl && chmod 600 ~/.local/state/orca-workflows/logs/assignments.jsonl
+# 로그 — ~/.agents/orca-workflows/logging.md 절차대로. dispatch와 같은 블록에서 즉시 실행(누락 방지).
+#  §1 assign 이벤트: role="subtask-impl", issue=<issue-num>, task_id=<task_id>, wave_index=<n>,
+#    subtask_type=<전사|통합|아키텍처>, provider/model/effort=resolved 값, terminal=<impl_handle>,
+#    worktree=<worktree 경로>. wave_index는 §3 wave_start 로그와 join한다.
+#  §2 term 로그: skill="orca-task-runner", role="subtask-impl", terminal=<impl_handle>,
+#    meta 기록 후 sent.content=$spec_text. recv는 아래 close 직전에 기록한다(§5 마지막 블록).
 ```
 
 - ⚠️ **`check --wait` 단독 대기 금지**: coordinator가 Orca 터미널 내부 세션이면 worker_done이 check 큐로 안 잡힐 수 있다(task 상태는 정상 갱신됨). 기본 대기 = `task-list --brief --json` 상태 폴링 또는 커밋/파일 존재 감시(20-30s 간격), `check --wait`는 보조.
@@ -126,35 +119,29 @@ install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","even
 - **완료 확인된 subtask 터미널은 즉시 닫는다** — wave 전체를 기다리지 않고, 그 subtask의 `worker_done` 수신(taskId+dispatchId 일치) 또는 위 유실 복구가 끝나는 즉시:
 
   ```bash
-  orca terminal read --terminal <impl_handle> --json > ~/.local/state/orca-workflows/logs/term-<impl_handle>.json
-  chmod 600 ~/.local/state/orca-workflows/logs/term-<impl_handle>.json
+  # recv 이벤트 — ~/.agents/orca-workflows/logging.md §2 "첫 read" 레시피(이 터미널은 §5에서 sent만
+  # 기록했고 이후 한 번도 read하지 않았으므로, 여기서의 read가 곧 유일한 recv). term-<impl_handle>.jsonl에
+  # append하고, 예전처럼 별도 .json 스냅샷 파일은 만들지 않는다.
   orca terminal close --terminal <impl_handle> --tab --json
   ```
 
-  `--tab`을 반드시 붙인다 — 실측 결과 `--tab` close는 기저 프로세스를 실제로 종료시키고 메모리를 회수하지만(`diagnostics memory`에서 세션이 사라짐), `--tab` 없는 close는 pane만 닫고 프로세스가 남을 수 있다. close 전에 `terminal read` 스냅샷을 남기는 이유: close하면 스크롤백이 사라져서, §6 task-레벨 게이트가 나중에 실패했을 때 "이 subtask가 뭘 했는지" 재확인할 방법이 없어진다. worker_done/유실 복구 둘 다 확인 전에는(단순히 활동이 멈췄다는 이유만으로는) 닫지 않는다 — 아직 파일 쓰기·커밋이 끝나지 않은 프로세스를 죽일 위험이 있다. 이 close는 §3에서 매 wave 새 터미널을 스폰하는 구조라 재사용 대상이 없다는 전제 위에서만 안전하다 — 이 스킬 밖(범용 `orchestration`, `orca-workflow` 자체 relay 터미널)에는 적용하지 않는다.
+  `--tab`을 반드시 붙인다 — 실측 결과 `--tab` close는 기저 프로세스를 실제로 종료시키고 메모리를 회수하지만(`diagnostics memory`에서 세션이 사라짐), `--tab` 없는 close는 pane만 닫고 프로세스가 남을 수 있다. close 전에 `term-<impl_handle>.jsonl`에 마지막 `recv`를 남기는 이유는 close하면 스크롤백이 사라져서, §6 task-레벨 게이트가 나중에 실패했을 때 "이 subtask가 뭘 했는지" 재확인할 방법이 없어지기 때문이다. worker_done/유실 복구 둘 다 확인 전에는(단순히 활동이 멈췄다는 이유만으로는) 닫지 않는다 — 아직 파일 쓰기·커밋이 끝나지 않은 프로세스를 죽일 위험이 있다. 이 close는 §3에서 매 wave 새 터미널을 스폰하는 구조라 재사용 대상이 없다는 전제 위에서만 안전하다 — 이 스킬 밖(범용 `orchestration`, `orca-workflow` 자체 relay 터미널)에는 적용하지 않는다.
 
 **Wave telemetry(종료)** — 이 wave의 모든 subtask가 완료(worker_done 또는 수동 복구)된 직후 1회, §3 `wave_start`와 같은 `issue`+`wave_index`로 join되도록:
 
 ```bash
-start_epoch="$(jq -r --arg issue "<issue-num>" --argjson wi <n> \
+start_epoch="$(cat ~/.local/state/orca-workflows/logs/waves-*.jsonl 2>/dev/null | jq -r --arg issue "<issue-num>" --argjson wi <n> \
   'select(.event == "wave_start" and .issue == $issue and .wave_index == $wi) | .ts_epoch' \
-  ~/.local/state/orca-workflows/logs/waves.jsonl | tail -1)"
+  | tail -1)"
 if [ -n "$start_epoch" ]; then
   elapsed_ms=$(( ("$(date -u +%s)" - start_epoch) * 1000 ))
 else
   elapsed_ms=null   # 매칭되는 wave_start가 없음 — §0 orphan 확인을 건너뛴 경우거나 데이터 유실
 fi
-jq -cn \
-  --arg ts "$(date -u +%FT%TZ)" \
-  --arg event "wave_end" \
-  --arg issue "<issue-num>" \
-  --argjson wave_index <n> \
-  --argjson wave_size <이 wave 터미널 수> \
-  --argjson retry_count <이 wave에서 발생한 스폰 실패·timeout 재시도 총 횟수, 알 수 없으면 null> \
-  --argjson elapsed_ms "$elapsed_ms" \
-  --arg outcome "completed" \
-  '{ts: $ts, event: $event, skill: "orca-task-runner", issue: $issue, wave_index: $wave_index, wave_size: $wave_size, retry_count: $retry_count, elapsed_ms: $elapsed_ms, outcome: $outcome}' \
-  >> ~/.local/state/orca-workflows/logs/waves.jsonl
+# wave_end 로그 — ~/.agents/orca-workflows/logging.md §1 절차대로 waves-<오늘 UTC 날짜>.jsonl에 기록.
+# event="wave_end", issue=<issue-num>, wave_index=<n>, wave_size=<이 wave 터미널 수>,
+# retry_count=<이 wave에서 발생한 스폰 실패·timeout 재시도 총 횟수, 알 수 없으면 null>,
+# elapsed_ms=$elapsed_ms, outcome="completed" — 필드는 기존과 동일, 경로만 변경.
 ```
 
 (§0에서 orphan wave를 복구하는 경우는 `outcome`을 `"crash_recovered"`로, `retry_count`를 모르면 `null`로 채운다 — 그 외 필드는 동일 포맷.)
