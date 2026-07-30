@@ -333,13 +333,39 @@ def test_default_backoff_parameters_match_issue_42_spec():
     assert "ORCA_RETRY_MAX_CYCLES:-2" in text
     assert "ORCA_RETRY_POLL_INTERVAL:-5" in text
     assert "ORCA_RETRY_POLL_MAX:-6" in text
+
+
+def test_poll_timeout_path_keeps_stdout_and_stderr_separate(tmp_path):
+    stubs = {
+        "orca": """
+            #!/usr/bin/env bash
+            [ "$1" = "status" ] && echo '{"state":"pending"}' && exit 0
+            exit 1
+        """,
+        "real-cmd": """
+            #!/usr/bin/env bash
+            echo "PARTIAL-STDOUT-DATA"
+            echo "Could not connect to the running Orca app. Restart Orca and try again." >&2
+            exit 1
+        """,
+    }
+    result, _ = _run(
+        tmp_path,
+        stubs,
+        'orca_call_with_retry "test-skill" "test-role" -- real-cmd',
+        extra_env={"ORCA_RETRY_POLL_INTERVAL": "0", "ORCA_RETRY_POLL_MAX": "1", "ORCA_RETRY_MAX_CYCLES": "2"},
+    )
+    assert result.returncode == 1
+    assert "PARTIAL-STDOUT-DATA" in result.stdout
+    assert "PARTIAL-STDOUT-DATA" not in result.stderr
+    assert "Could not connect" in result.stderr
 ```
 
 - [ ] **Step 2: Run tests to verify the new ones fail**
 
 Run: `cd /Users/minchul/worktrees/sleeptimegrt-skills/issue-42-orca-workflow-task && python3 -m pytest tests/test_orca_call_with_retry.py -v`
 
-Expected: the 3 Task-1 tests still PASS; the 5 new tests FAIL (no retry/logging behavior exists yet — `real-cmd`'s exit 1 with the connection-failure text just passes straight through today, so e.g. `test_retry_recovers_after_orca_becomes_ready` sees `returncode == 1` instead of `0`).
+Expected: the 3 Task-1 tests still PASS; the 6 new tests FAIL (no retry/logging behavior exists yet — `real-cmd`'s exit 1 with the connection-failure text just passes straight through today, so e.g. `test_retry_recovers_after_orca_becomes_ready` sees `returncode == 1` instead of `0`; `test_poll_timeout_path_keeps_stdout_and_stderr_separate` fails because nothing distinguishes stdout from stderr yet).
 
 - [ ] **Step 3: Implement the retry-with-backoff logic**
 
@@ -396,7 +422,6 @@ orca_call_with_retry() {
       rm -f "$out" "$err"
       return "$code"
     fi
-    rm -f "$out" "$err"
 
     local n=0 ready=0
     while [ "$n" -lt "$poll_max" ]; do
@@ -409,9 +434,12 @@ orca_call_with_retry() {
     done
 
     if [ "$ready" -eq 0 ]; then
-      printf '%s' "$combined" >&2
+      cat "$out"
+      cat "$err" >&2
+      rm -f "$out" "$err"
       return "$code"
     fi
+    rm -f "$out" "$err"
     # ready — loop back and retry the identical original command
   done
 }
@@ -446,7 +474,7 @@ _orca_retry_log_occurrence() {
 
 Run: `cd /Users/minchul/worktrees/sleeptimegrt-skills/issue-42-orca-workflow-task && python3 -m pytest tests/test_orca_call_with_retry.py -v`
 
-Expected: all 8 tests PASS.
+Expected: all 9 tests PASS.
 
 - [ ] **Step 5: Commit**
 
