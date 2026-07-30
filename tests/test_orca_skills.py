@@ -655,14 +655,22 @@ def test_dispatch_sites_are_followed_by_dispatch_verify_pointer(name):
 
 
 def test_spawn_failures_has_dispatch_inject_unsent_row():
-    """issue #43's failure mode has no literal terminal-output substring to grep — it's an
-    absence of change, not a string. This pins that the new row exists, points at
-    dispatch-verify.md for the fix, and is explicitly flagged as a log-based exception to the
-    table's normal literal-substring convention (so a future reader isn't confused about why
-    this row doesn't look like the others)."""
+    """issue #43's failure mode has no literal terminal-output substring to grep, and no reliable
+    retrospective log-based one either (a `sent` with no following `recv` is by-design normal at
+    most dispatch sites) — detection only happens live, via dispatch-verify.md. This pins that the
+    new row exists, points at dispatch-verify.md as the actual detection mechanism, and is
+    explicitly flagged as a signature-less exception to the table's normal literal-substring
+    convention (so a future reader isn't confused about why this row doesn't look like the
+    others)."""
     text = _read_workflows_file("spawn-failures.md")
     assert "#43" in text, "must link the new row to issue #43"
     assert "dispatch-verify.md" in text, "the row's fix column must point at the new procedure"
-    assert "log-based" in text, (
-        "must explicitly flag this row as an exception to the literal-grep-substring convention"
+    assert "no-signature" in text, (
+        "must explicitly flag this row as a signature-less exception to the "
+        "literal-grep-substring convention"
+    )
+    header_count = text.count("| `failure_signature` (grep substring) |")
+    assert header_count == 1, (
+        f"expected exactly one 'Known signatures' table (one header line), found {header_count} "
+        "— a regression could reintroduce #43 as a second, separate table instead of a row in the existing one"
     )
