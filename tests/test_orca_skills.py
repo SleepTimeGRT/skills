@@ -652,3 +652,17 @@ def test_dispatch_sites_are_followed_by_dispatch_verify_pointer(name):
             f"{name}: `dispatch --inject` site at char offset {pos} has no dispatch-verify.md "
             "pointer comment within the following ~15 lines (or before the block's closing fence)"
         )
+
+
+def test_spawn_failures_has_dispatch_inject_unsent_row():
+    """issue #43's failure mode has no literal terminal-output substring to grep — it's an
+    absence of change, not a string. This pins that the new row exists, points at
+    dispatch-verify.md for the fix, and is explicitly flagged as a log-based exception to the
+    table's normal literal-substring convention (so a future reader isn't confused about why
+    this row doesn't look like the others)."""
+    text = _read_workflows_file("spawn-failures.md")
+    assert "#43" in text, "must link the new row to issue #43"
+    assert "dispatch-verify.md" in text, "the row's fix column must point at the new procedure"
+    assert "log-based" in text, (
+        "must explicitly flag this row as an exception to the literal-grep-substring convention"
+    )

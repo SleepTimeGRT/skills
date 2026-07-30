@@ -71,3 +71,12 @@ the run looked like it succeeded — see that row's fix column.
 Keep `failure_signature` a short, literal substring that would actually appear in `terminal read` output —
 not a paraphrase, or grep won't find it next time. Link the GitHub issue number rather than re-explaining
 the cause here; this table maps symptom → issue, it doesn't replace the issue body.
+
+**Exception (log-based signatures):** issue #43's row below has no literal terminal-output substring — its
+failure is an *absence* of change, not a string. Its signature is instead checked with `jq` against a
+terminal's own `term-<handle>.jsonl` (see `logging.md` §2). Use a log-based signature only when a failure
+genuinely has no literal substring; default to the literal-substring form whenever one exists.
+
+| `failure_signature` (grep substring) | root cause | fix | known_issue |
+|---|---|---|---|
+| *(log-based, not literal terminal text)* — in a terminal's `term-<handle>.jsonl`, two consecutive `recv` events with identical `content`, or a `sent` event with no `recv` after it for an unusually long span | `dispatch --inject`'s text-injection and Enter-confirmation are not atomic from the caller's side — one can complete while the other silently does not, and a single `terminal read` cannot distinguish the resulting stuck state from normal post-completion idle | `~/.agents/orca-workflows/dispatch-verify.md` procedure — bounded tail-diff immediately after dispatch, single Enter-only retry, escalate here only if still static | #43 |
