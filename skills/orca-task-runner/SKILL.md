@@ -62,7 +62,7 @@ wave 크기 상한은 임시로 없다(§5 wave telemetry로 데이터를 쌓아
 ```bash
 # claude
 orca terminal create --worktree active --title task-impl-<n> \
-  --command "claude --model <model> --effort <effort> --permission-mode bypassPermissions" --json
+  --command "claude --model <model> --effort <effort> --dangerously-skip-permissions" --json
 # codex
 orca terminal create --worktree active --title task-impl-<n> \
   --command "codex --model <model> -c model_reasoning_effort=<effort> -s workspace-write -a never" --json

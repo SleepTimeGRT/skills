@@ -11,7 +11,8 @@ Launch:
 claude --model <id> --effort <low|medium|high|xhigh|max>
 ```
 
-SDD implementation workers use `--permission-mode bypassPermissions` only inside an isolated worktree.
+SDD implementation workers use `--dangerously-skip-permissions` (equivalent to `--permission-mode bypassPermissions`)
+only inside an isolated worktree.
 `claude-opus-5` requires Claude Code 2.1.219 or newer.
 
 ## Mapping
