@@ -23,9 +23,10 @@ sleep 15
 tail_1="$(orca terminal read --terminal <handle> --json | jq -r '.result.terminal.tail | join("\n")')"
 if [ "$tail_0" = "$tail_1" ]; then
   # Unsent — resend Enter only, never resend the original text (avoids a duplicate prompt if the
-  # first attempt actually landed a moment after tail_0 was captured). Confirm the CLI's exact
-  # "Enter only" affordance against `orca skills get orca-cli` — do not assume a flag name.
-  orca orchestration dispatch --task <task_id> --to <handle> --inject --enter --json
+  # first attempt actually landed a moment after tail_0 was captured). `orca terminal send` with
+  # `--enter` and no `--text` sends Enter alone and does not touch the terminal's existing input —
+  # confirmed against a live scratch terminal.
+  orca terminal send --terminal <handle> --enter --json
   sleep 15
   tail_2="$(orca terminal read --terminal <handle> --json | jq -r '.result.terminal.tail | join("\n")')"
   if [ "$tail_1" = "$tail_2" ]; then
@@ -40,6 +41,17 @@ fi
 needs more headroom. A false positive (retry fires on a merely slow turn) costs one harmless extra Enter (a
 no-op on an already-submitted prompt) plus one more 15s wait, not a corrupted session.
 
+When dispatching a parallel wave (multiple handles at once — e.g. `orca-task-runner`'s wave loop), the wait
+is shared, not per-handle: capture `tail_0` for every handle first, `sleep 15` once, then re-read all
+handles for `tail_1`. Waiting 15s per handle serially is unnecessary. The same sharing applies to the retry
+round: send the Enter-only retry to every handle that came back static, then `sleep 15` once and re-read
+all of them for `tail_2` — not a per-handle serial retry wait.
+
+These reads never pass `--limit`, so `tail_0` and `tail_1` both use the same (unspecified) default retained
+tail window — this doesn't affect the equality comparison's correctness, since both reads share that
+default, but a very long streaming response could in principle scroll the differing region out of the
+window between reads; worth revisiting if that's ever observed.
+
 This check compares tail content for equality only — it never parses or acts on what the content says.
 Skills whose stated principle is not reading a terminal's output directly for judgment (e.g.
 `orca-workflow`, "diff/report 본문을 직접 읽지 않는다") are not violating that principle by running this
@@ -48,7 +60,10 @@ check — opaque equality comparison is not content interpretation.
 ## Escalation
 
 A second static comparison means: apply the `spawn-failures.md` procedure (grep known signatures, diagnose
-if no match) rather than retrying `--enter` a second time.
+if no match) rather than blindly retrying `orca terminal send --enter` a second time in a loop. This is not
+a prohibition on ever sending Enter again — `spawn-failures.md`'s `#43` row may itself direct one further
+Enter, but only after manually confirming via `orca terminal read` that the terminal is still holding
+unsubmitted input, not as an unconditional retry.
 
 ## Edge cases
 

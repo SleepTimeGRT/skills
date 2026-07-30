@@ -49,8 +49,9 @@ orca orchestration dispatch --task <task_id> --to <contract-handle> --inject --j
 #  logging.md §1 assign 이벤트: role="contract-review", issue=<issue-num>, task_id=<task_id>,
 #    provider/model/effort=resolved 값, terminal=<contract-handle>, worktree=<worktree 경로>
 #  logging.md §2 term 로그: skill="orca-evaluate", role="contract-review", terminal=<contract-handle>,
-#    meta 기록 후 sent.content=$spec_text. 이 사이트는 dispatch 이후 이 터미널을 다시 read하지
-#    않으므로 recv는 기록하지 않는다(판정 결과는 relay로 받는다 — 위 §1 본문 참고).
+#    meta 기록 후 sent.content=$spec_text. 이 터미널에 대한 유일한 read는 위 dispatch-verify.md의
+#    liveness probe(불투명 tail 동치 비교)뿐이며, 이는 의도적으로 recv로 기록하지 않는다(판정 결과는
+#    relay로 받는다 — 위 §1 본문 참고).
 ```
 
 판단 기준은 "제안이 그럴듯한가"가 아니라 "acceptance criteria를 실제로 커버하는가"다. 이 evaluator 세션은 그 판정 결과(승인/반려+사유)를 받아 `orca-task-runner`로 relay한다(파일 내용을 새로 읽거나 재해석하지 않고 판정 결과만 전달). 최대 2라운드까지 왕복하고, 그 안에 합의 안 되면 generator가 결정권을 가진다 — 이견은 기록만 하고 진행을 막지 않는다.
@@ -148,8 +149,9 @@ orca orchestration dispatch --task <task_id> --to <review-handle> --inject --jso
 #    model=$reviewer_model, effort=$reviewer_effort, advisor=${reviewer_advisor:-}, terminal=<review-handle>,
 #    worktree=<worktree 경로>
 #  logging.md §2 term 로그: skill="orca-evaluate", role="code-review", terminal=<review-handle>, meta 기록 후
-#    sent.content=$spec_text. recv는 기록하지 않는다(§1 contract-review와 같은 이유 — report는 이
-#    세션이 별도로 직접 읽는다, §3 본문 마지막 문단 참고).
+#    sent.content=$spec_text. 이 터미널에 대한 유일한 read는 위 dispatch-verify.md의 liveness probe
+#    (불투명 tail 동치 비교)뿐이며, 이는 의도적으로 recv로 기록하지 않는다(§1 contract-review와 같은
+#    이유 — report는 이 세션이 별도로 직접 읽는다, §3 본문 마지막 문단 참고).
 ```
 
 report는 severity(Critical/Important/Minor) + 도달 조건 + 최악 결과 + fail-closed 여부를 포함해야 한다. 이 report는 작아서(요약된 finding 목록) 이 evaluator 세션이 직접 읽는다.
