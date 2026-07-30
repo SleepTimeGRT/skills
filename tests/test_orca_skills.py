@@ -481,3 +481,131 @@ def test_select_reviewer_script_exists():
     assert (SKILLS_DIR / "orca-evaluate" / "scripts" / "select_reviewer.py").is_file(), (
         "orca-evaluate/scripts/select_reviewer.py is missing"
     )
+
+
+# ---------------------------------------------------------------------------
+# Log restructure invariants (date-partitioned assignments/waves logs, the
+# shared logging.md doc, and the per-terminal term-<handle>.jsonl transcript).
+# ---------------------------------------------------------------------------
+
+LOG_RESTRUCTURE_FILES = NEW_SKILLS + ["logging.md"]
+BARE_UNDATED_LOG_PATHS = ["logs/assignments.jsonl", "logs/waves.jsonl"]
+
+
+def _read_log_restructure_file(name: str) -> str:
+    if name == "logging.md":
+        return (WORKFLOWS_DIR / "logging.md").read_text()
+    return _read_skill(name)
+
+
+@pytest.mark.parametrize("name", LOG_RESTRUCTURE_FILES)
+def test_no_bare_undated_assignments_or_waves_path(name):
+    # Bare "waves.jsonl"/"assignments.jsonl" (no "logs/" prefix) still appears legitimately in
+    # logging.md's own explanatory prose (e.g. "instead of the fixed `waves.jsonl`") — this
+    # assertion is scoped to the exact "logs/..." path a copy-pasted command would use, which must
+    # always carry a date suffix now.
+    text = _read_log_restructure_file(name)
+    for term in BARE_UNDATED_LOG_PATHS:
+        assert term not in text, (
+            f"{name}: found un-dated log path '{term}' — assignments/waves logs must be "
+            "date-suffixed (assignments-<date>.jsonl / waves-<date>.jsonl), never the old fixed name"
+        )
+
+
+_DISPATCH_INJECT_RE = re.compile(r"orca orchestration dispatch --task .*? --inject --json")
+
+
+def _dispatch_positions(text: str) -> list[int]:
+    return [m.start() for m in _DISPATCH_INJECT_RE.finditer(text)]
+
+
+def _forward_window(text: str, pos: int, max_lines: int = 15) -> str:
+    """Bounded forward window from a dispatch site: up to max_lines lines, truncated early at the
+    next closing fence (```) so the window can't accidentally swallow unrelated later blocks."""
+    tail = text[pos:]
+    lines = tail.splitlines()
+    window = "\n".join(lines[: max_lines + 1])
+    fence_idx = window.find("\n```")
+    if fence_idx != -1:
+        window = window[:fence_idx]
+    return window
+
+
+def _evaluate_section0_span(text: str) -> tuple[int, int]:
+    start = text.index("## 0.")
+    end = text.index("## 1.")
+    return start, end
+
+
+def test_dispatch_site_count_and_section0_exception_shape():
+    """Structural guard on the exception itself: orca-evaluate's §0 launch block dispatches to a
+    coding-agent terminal but duplicates orca-workflow's owning dispatch site and has no
+    log-writing code of its own, so it's the one documented case allowed to skip the logging.md
+    pointer. This pins both the total dispatch-site count and that the exception matches exactly
+    one site — so a future regression at evaluate's §2/§3 dispatch sites (which must have a
+    pointer) can't hide by being silently absorbed into a looser "allow any one miss" check."""
+    total = 0
+    excluded = 0
+    for name in NEW_SKILLS:
+        text = _read_skill(name)
+        positions = _dispatch_positions(text)
+        total += len(positions)
+        if name == "orca-evaluate":
+            start, end = _evaluate_section0_span(text)
+            excluded += sum(1 for pos in positions if start <= pos < end)
+    assert total == 6, (
+        f"expected 6 `dispatch --task ... --inject` sites across the three SKILL.md files "
+        f"combined, found {total}"
+    )
+    assert excluded == 1, (
+        f"expected exactly 1 dispatch site inside orca-evaluate's §0 (the documented exception "
+        f"— it duplicates orca-workflow's dispatch, no log-writing code of its own), found {excluded}"
+    )
+
+
+@pytest.mark.parametrize("name", NEW_SKILLS)
+def test_dispatch_sites_are_followed_by_logging_pointer(name):
+    text = _read_skill(name)
+    positions = _dispatch_positions(text)
+    if name == "orca-evaluate":
+        section0_start, section0_end = _evaluate_section0_span(text)
+    for pos in positions:
+        if name == "orca-evaluate" and section0_start <= pos < section0_end:
+            continue  # documented exception — see test_dispatch_site_count_and_section0_exception_shape
+        window = _forward_window(text, pos)
+        assert "logging.md" in window, (
+            f"{name}: `dispatch --inject` site at char offset {pos} has no logging.md pointer "
+            "comment within the following ~15 lines (or before the block's closing fence)"
+        )
+
+
+def test_orca_task_runner_every_close_preceded_by_read_in_same_block():
+    """This is the exact invariant C1 violated: a fenced block that closes a subtask terminal
+    without ever reading it first destroys the scrollback (and the only chance to log `recv`)
+    permanently. Scoped to fenced bash blocks so an unrelated close elsewhere in prose can't
+    trigger a false positive."""
+    text = _read_skill("orca-task-runner")
+    checked_any = False
+    for m in re.finditer(r"```bash\n(.*?)\n```", text, re.S):
+        block = m.group(1)
+        if "orca terminal close" in block:
+            checked_any = True
+            assert "orca terminal read" in block, (
+                "orca-task-runner: a fenced block calls `orca terminal close` without a "
+                "preceding `orca terminal read` in the same block"
+            )
+    assert checked_any, "expected at least one `orca terminal close` block in orca-task-runner"
+
+
+def test_orca_terminal_read_counts_per_skill_file():
+    """Per-file counts, not a combined total — a combined "exactly one across all three files"
+    would already be satisfied by orca-evaluate's pre-existing §2 agent-e2e completion read alone,
+    so it wouldn't actually catch C1 (task-runner's read being silently dropped). Counting per
+    file, and requiring task-runner's count to be exactly 1, is what would have caught it."""
+    expected = {"orca-task-runner": 1, "orca-evaluate": 1, "orca-workflow": 0}
+    for name, count in expected.items():
+        text = _read_skill(name)
+        actual = len(re.findall(r"orca terminal read\b", text))
+        assert actual == count, (
+            f"{name}: expected {count} 'orca terminal read' occurrence(s), found {actual}"
+        )
