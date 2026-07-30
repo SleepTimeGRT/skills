@@ -42,6 +42,8 @@ orca terminal wait --terminal <contract-handle> --for tui-idle --timeout-ms 6000
 spec_text="<제안서 경로 + acceptance criteria 원문 + 승인/반려 판정 요청 + 반려 시 어느 criteria가 안 커버되는지 명시>"
 orca orchestration task-create --spec "$spec_text" --json
 orca orchestration dispatch --task <task_id> --to <contract-handle> --inject --json
+# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43): 15초 뒤 재-read해서
+# tail이 그대로면 Enter만 재전송, 그래도 그대로면 spawn-failures.md로. §3 스폰도 동일하게 적용한다.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. §3 스폰도 동일한 형태(§2 agent-e2e는
 # assign만 — term 로그 대상 아님).
 #  logging.md §1 assign 이벤트: role="contract-review", issue=<issue-num>, task_id=<task_id>,
@@ -139,6 +141,8 @@ orca terminal wait --terminal <review-handle> --for tui-idle --timeout-ms 60000 
 spec_text="<diff 절대경로 + acceptance criteria 원문 + §2 agent e2e 결과 요약 + (해당 시) migration-lint 결과와 §1 destructive-op 선언 + skeptical 리뷰 지침 + report 경로 + 코드 수정 금지>"
 orca orchestration task-create --spec "$spec_text" --json
 orca orchestration dispatch --task <task_id> --to <review-handle> --inject --json
+# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43): 15초 뒤 재-read해서
+# tail이 그대로면 Enter만 재전송, 그래도 그대로면 spawn-failures.md로.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로.
 #  logging.md §1 assign 이벤트: role="code-review", issue=<issue-num>, task_id=<task_id>, provider=$reviewer_provider,
 #    model=$reviewer_model, effort=$reviewer_effort, advisor=${reviewer_advisor:-}, terminal=<review-handle>,
