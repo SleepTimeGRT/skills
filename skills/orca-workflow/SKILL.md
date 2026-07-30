@@ -67,16 +67,11 @@ orca orchestration dispatch --task <task_id> --to <run-handle> --inject --json
 install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","event":"assign","skill":"orca-workflow","role":"task-runner","issue":"<issue-num>","task_id":"<task_id>","provider":"<provider>","model":"<model>","effort":"<effort>","terminal":"<run-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
   >> ~/.local/state/orca-workflows/logs/assignments.jsonl && chmod 600 ~/.local/state/orca-workflows/logs/assignments.jsonl
 
-# evaluate 호출 — 이 세션 자체는 REPL이 가능한 provider로 띄우되 agy는 제외한다: agy REPL은
-# 포커스가 없으면 부팅이 멈추고, 두 세션이 동시에 focus를 다투면 나중에 focus를 다시 줘도 복구되지
-# 않는 영구 데드락으로 이어질 수 있음이 실측됐다(2026-07-30, `~/.agents/orca-workflows/models/agy.md`
-# 참고 — agy는 이 repo 전체에서 headless 전용). agy는 evaluate가 내부에서 §2(agent e2e)용으로
-# headless 스폰할 뿐, 이 evaluate 세션 자체의 provider가 아니다(`skills/orca-evaluate/SKILL.md`
-# §0 참고). 이 evaluate 세션이 diff 자체를 판단하지도 않는다 — 그건 evaluate가 내부에서 스폰하는
-# 별도 code-reviewer 세션(강한 reasoning 모델)의 몫이다.
-# 다회 왕복(핑퐁)이 필요한 역할 — one-shot(`agy -p`/`codex exec`) 금지, 반드시 인터랙티브(REPL)
-# 세션으로 띄운다(provider 이름에 종속되지 않는 공통 원칙, agy 제외). 구체 provider는
-# `~/.agents/orca-workflows/model-selection.md` 기준으로 매 launch 시 resolve한다.
+# evaluate 호출 — REPL 필수(one-shot은 이후 dispatch --inject를 못 받음), agy는 제외한다
+# (agy REPL은 포커스 경합 시 영구 hang — `~/.agents/orca-workflows/models/agy.md`,
+# `skills/orca-evaluate/SKILL.md` §0 참고). agy는 evaluate 내부 §2(agent e2e)의 headless
+# sub-spawn일 뿐, 이 세션의 provider가 아니다. 구체 provider는 model-selection.md 기준 매
+# launch 시 resolve.
 orca terminal create --worktree active --title task-evaluate-<n> \
   --command "<REPL이 가능한, agy 제외 provider의 launch 문법 — provider 문서에서 resolve>" --json
 orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json

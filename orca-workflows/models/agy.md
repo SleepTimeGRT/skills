@@ -14,18 +14,13 @@ review, agent-e2e reporting. Do not launch agy as a REPL (bare `agy` with a late
 
 - **Unfocused-boot hang.** A REPL launch created via `orca terminal create` with no explicit
   focus can stall indefinitely before reaching the interactive prompt — the process itself
-  stops producing log output, not just the rendered screen (2026-07-30 smoke: `cli.log` silent
-  for 90s+ on an unfocused terminal; calling `orca terminal switch` to focus it produced an
-  immediate `Full redraw completed` and a normal boot right after).
-- **Concurrent-focus deadlock.** Launching two REPL agy sessions back-to-back, each requesting
-  focus (`terminal create --focus`), can wedge **both** permanently — neither backend process
-  produces further log output, and a later `orca terminal switch` / `terminal send --enter`
-  does not recover either one (2026-07-30 smoke). This matches the failure class in
-  [stablyai/orca#7442](https://github.com/stablyai/orca/issues/7442): the renderer IPC
-  handshake assumes an active/focused window and is a one-shot negotiation evaluated only at
-  boot — later focusing cannot recover it. Process state was confirmed `S+` via `ps`
-  (normal sleeping, correct foreground pgrp for its own pty), ruling out a SIGTTIN/job-control
-  explanation — this is Orca's renderer-side handshake, not a shell job-control issue.
+  stops, not just the render. Symptom + fix: `../spawn-failures.md`. Full evidence:
+  `../references/models/agy.md`.
+- **Concurrent-focus deadlock.** Two REPL agy sessions launched back-to-back, each requesting
+  focus, can wedge **both** permanently with no recovery — matches the failure class in
+  [stablyai/orca#7442](https://github.com/stablyai/orca/issues/7442) (renderer IPC handshake
+  assumes an active/focused window and is a one-shot negotiation at boot). Full evidence:
+  `../references/models/agy.md`.
 - **The original reason for routing agent-e2e to REPL no longer holds.** It used to be routed
   there because a one-shot launch was paired with a *later* `dispatch --inject`, and an
   already-exited one-shot process can't receive that (`../spawn-failures.md`, issue #37). The
@@ -54,8 +49,8 @@ agy -p '<complete instructions + artifact paths, fully resolved at launch time>'
   dynamically-created identifier), resolve it and interpolate it into the `-p` string before
   launching. Don't try to defer any part of it.
 - **No focus needed, and no focus-related contention.** Two headless launches created
-  back-to-back with no focus at all completed independently and correctly (2026-07-30 smoke,
-  ~10-15s each, run concurrently, no interference between them).
+  back-to-back with no focus at all completed independently and correctly, run concurrently
+  with no interference (full evidence: `../references/models/agy.md`).
 - **Completion detection.** The shell hosting the one-shot process does **not** exit when agy
   exits (the shell just returns to its own prompt) — `orca terminal wait --for exit` will time
   out against it. Use `orca terminal wait --for tui-idle --timeout-ms <print-timeout + buffer>`
