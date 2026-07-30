@@ -678,3 +678,22 @@ def test_orca_workflow_section0_notes_retry_wrapping():
     section0_end = text.index("## 1.")
     section0 = text[section0_start:section0_end]
     assert "orca_call_with_retry" in section0 and "#42" in section0
+
+
+def test_orca_task_runner_subtask_spec_required_items_includes_retry_wrapping():
+    text = _read_skill("orca-task-runner")
+    checklist_idx = text.index("subtask spec 필수 항목")
+    sixth_idx = text.index("⑥", checklist_idx)
+    seventh_idx = text.index("⑦", sixth_idx)
+    assert checklist_idx < sixth_idx < seventh_idx
+    para_end = text.index("\n\n", checklist_idx)
+    seventh_segment = text[seventh_idx:para_end]
+    assert "orca_call_with_retry" in seventh_segment
+
+
+def test_orca_task_runner_section0_notes_retry_wrapping():
+    text = _read_skill("orca-task-runner")
+    section0_start = text.index("## 0.")
+    section0_end = text.index("## 1.")
+    section0 = text[section0_start:section0_end]
+    assert "orca_call_with_retry" in section0 and "#42" in section0
