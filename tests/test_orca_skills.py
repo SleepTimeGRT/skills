@@ -609,3 +609,46 @@ def test_orca_terminal_read_counts_per_skill_file():
         assert actual == count, (
             f"{name}: expected {count} 'orca terminal read' occurrence(s), found {actual}"
         )
+
+
+DISPATCH_VERIFY_FILE = "dispatch-verify.md"
+
+
+def _read_workflows_file(name: str) -> str:
+    path = WORKFLOWS_DIR / name
+    assert path.is_file(), f"orca-workflows/{name} missing"
+    return path.read_text()
+
+
+def test_dispatch_verify_file_documents_bounded_tail_diff_and_escalation():
+    """issue #43: dispatch --inject can land text without Enter registering, and a single
+    `terminal read` can't tell that apart from normal post-completion idle. This pins the new
+    shared reference file's key content so a future edit can't silently drop the bounded-wait
+    check or the escalation path back to spawn-failures.md."""
+    text = _read_workflows_file(DISPATCH_VERIFY_FILE)
+    assert "tail" in text, "must describe comparing terminal tail output"
+    assert "sleep 15" in text, "bounded wait window must be a concrete value, not a placeholder"
+    assert "spawn-failures.md" in text, "must document escalation to the existing spawn-failure procedure"
+    assert "❯" not in text and "⏺" not in text, (
+        "must stay provider-agnostic — no Claude-Code-specific UI markers"
+    )
+
+
+@pytest.mark.parametrize("name", NEW_SKILLS)
+def test_dispatch_sites_are_followed_by_dispatch_verify_pointer(name):
+    """Same shape as test_dispatch_sites_are_followed_by_logging_pointer — the verify pointer
+    must appear at every dispatch --inject site except orca-evaluate's documented §0 duplicate.
+    Written before any SKILL.md is touched, so this starts red for all three names; Tasks 2-4
+    turn it green one skill at a time (verify with `-k` scoped to that skill's name)."""
+    text = _read_skill(name)
+    positions = _dispatch_positions(text)
+    if name == "orca-evaluate":
+        section0_start, section0_end = _evaluate_section0_span(text)
+    for pos in positions:
+        if name == "orca-evaluate" and section0_start <= pos < section0_end:
+            continue  # documented exception — see test_dispatch_site_count_and_section0_exception_shape
+        window = _forward_window(text, pos)
+        assert "dispatch-verify.md" in window, (
+            f"{name}: `dispatch --inject` site at char offset {pos} has no dispatch-verify.md "
+            "pointer comment within the following ~15 lines (or before the block's closing fence)"
+        )
