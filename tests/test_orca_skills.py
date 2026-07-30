@@ -617,3 +617,61 @@ def test_spawn_failures_has_orca_restart_retry_row():
     assert "Orca is not running. Run 'orca open' first." in text
     assert "orca_call_with_retry" in text
     assert "#42" in text
+
+
+def _bare_wrapped_call_line_numbers(text: str) -> list[int]:
+    """Line numbers (1-indexed) where an orca terminal-create/task-create/dispatch call appears
+    without 'orca_call_with_retry' on the same or immediately preceding line."""
+    patterns = (
+        "orca terminal create",
+        "orca orchestration task-create --spec",
+        "orca orchestration task-list",
+        "orca orchestration dispatch --task",
+    )
+    lines = text.splitlines()
+    bare = []
+    for i, line in enumerate(lines):
+        if any(pat in line for pat in patterns):
+            window = "\n".join(lines[max(0, i - 1) : i + 1])
+            if "orca_call_with_retry" not in window:
+                bare.append(i + 1)
+    return bare
+
+
+@pytest.mark.parametrize("name", NEW_SKILLS)
+def test_no_bare_wrapped_call_sites(name):
+    text = _read_skill(name)
+    bare = _bare_wrapped_call_line_numbers(text)
+    assert bare == [], (
+        f"{name}: orca terminal create/task-create/dispatch call(s) not wrapped by "
+        f"orca_call_with_retry at line(s) {bare}"
+    )
+
+
+EXPECTED_RETRY_WRAP_COUNTS = {
+    "orca-workflow": 6,
+    "orca-task-runner": 6,
+    "orca-evaluate": 10,
+}
+
+
+@pytest.mark.parametrize(("name", "expected"), EXPECTED_RETRY_WRAP_COUNTS.items())
+def test_orca_call_with_retry_count_per_skill(name, expected):
+    actual = _read_skill(name).count("orca_call_with_retry ")
+    assert actual == expected, f"{name}: expected {expected} orca_call_with_retry invocations, found {actual}"
+
+
+@pytest.mark.parametrize("name", NEW_SKILLS)
+def test_sources_retry_wrapper_script(name):
+    text = _read_skill(name)
+    assert "source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh" in text, (
+        f"{name}: must source orca_call_with_retry.sh before using the wrapper function"
+    )
+
+
+def test_orca_workflow_section0_notes_retry_wrapping():
+    text = _read_skill("orca-workflow")
+    section0_start = text.index("## 0.")
+    section0_end = text.index("## 1.")
+    section0 = text[section0_start:section0_end]
+    assert "orca_call_with_retry" in section0 and "#42" in section0

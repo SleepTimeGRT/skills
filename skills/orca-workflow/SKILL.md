@@ -18,6 +18,10 @@ description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-ma
 - 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 —
   `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다. §2a의 두 `terminal create` 호출
   모두에 적용된다.
+- 자동 업데이트로 Orca 앱이 세션 도중 재시작해 orchestration 호출이 일시적으로 끊기면(known signature:
+  `~/.agents/orca-workflows/spawn-failures.md`, issue #42), §2a의 `orca orchestration`/
+  `orca terminal create` 호출은 전부 `source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh`
+  후 `orca_call_with_retry <skill> <role> -- <원명령>`으로 감싼다.
 
 ## 1. Epic 경로
 
@@ -57,12 +61,16 @@ acceptance-criteria 섹션명이 issue body에 실제로 있는지 먼저 확인
 **"호출"의 실체**: `orca-task-runner`/`orca-evaluate`는 이 스킬(orca-workflow)과 같은 세션에서 도는 게 아니라, 각각 orchestration으로 별도 터미널을 띄워서 넘기는 것이다 — 그래야 이 스킬이 "diff나 report 본문을 직접 읽지 않는다"는 원칙이 실제로 지켜진다.
 
 ```bash
+source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 # task-runner 호출 (provider는 model-selection.md 기준 선택 — 코드 생성이라 Routine/High-Risk tier)
-orca terminal create --worktree active --title task-run-<n> \
+orca_call_with_retry "orca-workflow" "task-runner" -- \
+  orca terminal create --worktree active --title task-run-<n> \
   --command "<provider의 launch 문법 — provider 문서에서 resolve>" --json
 spec_text="<issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 제안서/구현 모드>"
-orca orchestration task-create --spec "$spec_text" --json
-orca orchestration dispatch --task <task_id> --to <run-handle> --inject --json
+orca_call_with_retry "orca-workflow" "task-runner" -- \
+  orca orchestration task-create --spec "$spec_text" --json
+orca_call_with_retry "orca-workflow" "task-runner" -- \
+  orca orchestration dispatch --task <task_id> --to <run-handle> --inject --json
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. dispatch와 같은 블록에서 즉시 실행(누락 방지).
 #  logging.md §1 assign 이벤트: role="task-runner", issue=<issue-num>, task_id=<task_id>, provider/model/effort=resolved 값,
 #    terminal=<run-handle>, worktree=<worktree 경로>
@@ -77,14 +85,17 @@ orca orchestration dispatch --task <task_id> --to <run-handle> --inject --json
 # `skills/orca-evaluate/SKILL.md` §0 참고). agy는 evaluate 내부 §2(agent e2e)의 headless
 # sub-spawn일 뿐, 이 세션의 provider가 아니다. 구체 provider는 model-selection.md 기준 매
 # launch 시 resolve.
-orca terminal create --worktree active --title task-evaluate-<n> \
+orca_call_with_retry "orca-workflow" "evaluator" -- \
+  orca terminal create --worktree active --title task-evaluate-<n> \
   --command "<REPL이 가능한, agy 제외 provider의 launch 문법 — provider 문서에서 resolve>" --json
 orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json
 # 해당 provider가 최초 launch 시 신뢰/승인류 재프롬프트를 요구하면 그 provider 문서가 정의하는
 # 절차를 따른다(agy 전용 시퀀스를 여기서 가정하지 않는다).
 spec_text="<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문 + issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 요청 모드>"
-orca orchestration task-create --spec "$spec_text" --json
-orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
+orca_call_with_retry "orca-workflow" "evaluator" -- \
+  orca orchestration task-create --spec "$spec_text" --json
+orca_call_with_retry "orca-workflow" "evaluator" -- \
+  orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로.
 #  logging.md §1 assign 이벤트: role="evaluator", issue=<issue-num>, task_id=<task_id>, provider/model/effort=resolved 값,
 #    terminal=<evaluate-handle>, worktree=<worktree 경로>
