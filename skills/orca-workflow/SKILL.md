@@ -63,14 +63,19 @@ orca terminal create --worktree active --title task-run-<n> \
 spec_text="<issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 제안서/구현 모드>"
 orca orchestration task-create --spec "$spec_text" --json
 orca orchestration dispatch --task <task_id> --to <run-handle> --inject --json
+# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43): 15초 뒤 재-read해서
+# tail이 그대로면 Enter만 재전송, 그래도 그대로면 spawn-failures.md로. tail 비교는 내용을 해석하지
+# 않는 불투명 비교라 위 "diff/report 본문을 직접 읽지 않는다" 원칙과 충돌하지 않는다.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. dispatch와 같은 블록에서 즉시 실행(누락 방지).
 #  logging.md §1 assign 이벤트: role="task-runner", issue=<issue-num>, task_id=<task_id>, provider/model/effort=resolved 값,
 #    terminal=<run-handle>, worktree=<worktree 경로>
 #  logging.md §2 term 로그: skill="orca-workflow", role="task-runner", terminal=<run-handle>, meta 기록 후
-#    sent.content=$spec_text. recv는 기록하지 않는다 — 이 스킬은 diff/report 본문을 직접 읽지 않는다
-#    (도입부 원칙); term-<run-handle>.jsonl은 orca-workflow 자신이 소유하는 파일이라 task-runner는
-#    거기 쓰지 않는다 — task-runner 자신의 왕복 내용은 그쪽이 스폰한 term-<impl_handle>.jsonl들
-#    (subtask worker마다 하나씩)에 이미 남는다.
+#    sent.content=$spec_text. 이 터미널에 대한 유일한 read는 위 dispatch-verify.md의 liveness probe
+#    (불투명 tail 동치 비교)뿐이며, 이는 의도적으로 recv로 기록하지 않는다 — 실제 결과(diff/report
+#    본문)는 이 스킬이 직접 읽지 않고 다른 채널(relay 또는 report 파일 직접 읽기)로 도착하기 때문이다.
+#    term-<run-handle>.jsonl은 orca-workflow 자신이 소유하는 파일이라 task-runner는 거기 쓰지 않는다
+#    — task-runner 자신의 왕복 내용은 그쪽이 스폰한 term-<impl_handle>.jsonl들(subtask worker마다
+#    하나씩)에 이미 남는다.
 
 # evaluate 호출 — REPL 필수(one-shot은 이후 dispatch --inject를 못 받음), agy는 제외한다
 # (agy REPL은 포커스 경합 시 영구 hang — `~/.agents/orca-workflows/models/agy.md`,
@@ -85,11 +90,16 @@ orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 6000
 spec_text="<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문 + issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 요청 모드>"
 orca orchestration task-create --spec "$spec_text" --json
 orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
+# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43): 15초 뒤 재-read해서
+# tail이 그대로면 Enter만 재전송, 그래도 그대로면 spawn-failures.md로. (이 이슈의 실제 발생 사례가
+# 바로 이 dispatch 대상 터미널 — task-evaluate-411 — 이었다.)
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로.
 #  logging.md §1 assign 이벤트: role="evaluator", issue=<issue-num>, task_id=<task_id>, provider/model/effort=resolved 값,
 #    terminal=<evaluate-handle>, worktree=<worktree 경로>
 #  logging.md §2 term 로그: skill="orca-workflow", role="evaluator", terminal=<evaluate-handle>, meta 기록 후
-#    sent.content=$spec_text. recv는 기록하지 않는다 — 위 task-runner 사이트와 같은 이유.
+#    sent.content=$spec_text. 이 터미널에 대한 유일한 read는 위 dispatch-verify.md의 liveness probe
+#    (불투명 tail 동치 비교)뿐이며, 이는 의도적으로 recv로 기록하지 않는다 — 위 task-runner 사이트와
+#    같은 이유(실제 결과는 relay 또는 report 파일 직접 읽기로 도착).
 ```
 
 **2b. Generate** — `orca-task-runner` 호출, 결과로 **task 전체 diff 경로** 또는 **`GATE_FAIL`**을 받는다(`orca-task-runner`가 자기 task-레벨 게이트를 재시도 한도(2회) 안에 못 넘긴 경우 — `skills/orca-task-runner/SKILL.md` §6).
