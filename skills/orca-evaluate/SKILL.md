@@ -39,12 +39,15 @@ orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --j
 orca terminal create --worktree active --title eval-contract \
   --command "<강한 reasoning provider의 launch 문법 — provider 문서에서 resolve>" --json
 orca terminal wait --terminal <contract-handle> --for tui-idle --timeout-ms 60000 --json
-orca orchestration task-create --spec "<제안서 경로 + acceptance criteria 원문 + 승인/반려 판정 요청 + 반려 시 어느 criteria가 안 커버되는지 명시>" --json
+spec_text="<제안서 경로 + acceptance criteria 원문 + 승인/반려 판정 요청 + 반려 시 어느 criteria가 안 커버되는지 명시>"
+orca orchestration task-create --spec "$spec_text" --json
 orca orchestration dispatch --task <task_id> --to <contract-handle> --inject --json
-# 할당 로그 — 스폰하는 쪽이 남긴다. dispatch와 같은 블록에서 즉시 실행(누락 방지);
-# orca 상태는 reset으로 소실될 수 있어 할당의 영속 기록은 이 파일이 유일하다. §2·§3 스폰도 동일.
-install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","event":"assign","skill":"orca-evaluate","role":"contract-review","issue":"<issue-num>","task_id":"<task_id>","provider":"<provider>","model":"<model>","effort":"<effort>","terminal":"<contract-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
-  >> ~/.local/state/orca-workflows/logs/assignments.jsonl && chmod 600 ~/.local/state/orca-workflows/logs/assignments.jsonl
+# 로그 — ~/.agents/orca-workflows/logging.md 절차대로. §2·§3 스폰도 동일한 형태.
+#  §1 assign 이벤트: role="contract-review", issue=<issue-num>, task_id=<task_id>,
+#    provider/model/effort=resolved 값, terminal=<contract-handle>, worktree=<worktree 경로>
+#  §2 term 로그: skill="orca-evaluate", role="contract-review", terminal=<contract-handle>,
+#    meta 기록 후 sent.content=$spec_text. 이 사이트는 dispatch 이후 이 터미널을 다시 read하지
+#    않으므로 recv는 기록하지 않는다(판정 결과는 relay로 받는다 — 위 §1 본문 참고).
 ```
 
 판단 기준은 "제안이 그럴듯한가"가 아니라 "acceptance criteria를 실제로 커버하는가"다. 이 evaluator 세션은 그 판정 결과(승인/반려+사유)를 받아 `orca-task-runner`로 relay한다(파일 내용을 새로 읽거나 재해석하지 않고 판정 결과만 전달). 최대 2라운드까지 왕복하고, 그 안에 합의 안 되면 generator가 결정권을 가진다 — 이견은 기록만 하고 진행을 막지 않는다.
@@ -68,8 +71,9 @@ orca terminal wait --terminal <agent-e2e-handle> --for tui-idle --timeout-ms 900
 # 대상이 아니고(agy.md 참고), 이 터미널의 셸 자체는 agy 프로세스가 끝나도 죽지 않으므로
 # `--for exit`은 쓰지 않는다(agy.md 실측 참고).
 orca terminal read --terminal <agent-e2e-handle> --json
-install -d -m 700 ~/.local/state/orca-workflows/logs && printf '{"ts":"%s","event":"assign","skill":"orca-evaluate","role":"agent-e2e","issue":"<issue-num>","provider":"agy","model":"<model>","effort":"","terminal":"<agent-e2e-handle>","worktree":"<worktree 경로>"}\n' "$(date -u +%FT%TZ)" \
-  >> ~/.local/state/orca-workflows/logs/assignments.jsonl && chmod 600 ~/.local/state/orca-workflows/logs/assignments.jsonl   # 할당 로그 — §1 참고, task_id/dispatch_id 없음(orchestration 태스크가 아니므로)
+# 할당 로그 — ~/.agents/orca-workflows/logging.md §1 절차대로. role="agent-e2e", issue=<issue-num>,
+# provider="agy", model=<model>, effort="", terminal=<agent-e2e-handle>, worktree=<worktree 경로>,
+# task_id/dispatch_id 없음(orchestration 태스크가 아니므로).
 ```
 
 이 세션(evaluator)은 agy의 자기 요약을 **그대로 믿지 않는다** — 이미 이 세션 자체가 롱컨텍스트 REPL 세션이므로, `$report_path`와 원본 트레이스를 직접(별도 터미널 스폰 없이) 읽어서 "성공했다"는 보고가 실제로 맞는지, 조용히 막히거나 우회한 흔적은 없는지 확인한다.
@@ -131,11 +135,16 @@ orca terminal create --worktree active --title eval-review \
 orca terminal wait --terminal <review-handle> --for tui-idle --timeout-ms 60000 --json
 # 스폰이 실패했고 reviewer_provider가 codex였다면(spawn-failures.md 절차로 확인) 여기서 재진단하지
 # 않고 --no-codex-available로 select_reviewer.py를 다시 불러 Claude 분기로 재시도한다.
-orca orchestration task-create --spec "<diff 절대경로 + acceptance criteria 원문 + §2 agent e2e 결과 요약 + (해당 시) migration-lint 결과와 §1 destructive-op 선언 + skeptical 리뷰 지침 + report 경로 + 코드 수정 금지>" --json
+spec_text="<diff 절대경로 + acceptance criteria 원문 + §2 agent e2e 결과 요약 + (해당 시) migration-lint 결과와 §1 destructive-op 선언 + skeptical 리뷰 지침 + report 경로 + 코드 수정 금지>"
+orca orchestration task-create --spec "$spec_text" --json
 orca orchestration dispatch --task <task_id> --to <review-handle> --inject --json
-printf '{"ts":"%s","event":"assign","skill":"orca-evaluate","role":"code-review","issue":"<issue-num>","task_id":"<task_id>","provider":"%s","model":"%s","effort":"%s","advisor":"%s","terminal":"<review-handle>","worktree":"<worktree 경로>"}\n' \
-  "$(date -u +%FT%TZ)" "$reviewer_provider" "$reviewer_model" "$reviewer_effort" "${reviewer_advisor:-}" \
-  >> ~/.local/state/orca-workflows/logs/assignments.jsonl   # 할당 로그 — §1 참고
+# 로그 — ~/.agents/orca-workflows/logging.md 절차대로.
+#  §1 assign 이벤트: role="code-review", issue=<issue-num>, task_id=<task_id>, provider=$reviewer_provider,
+#    model=$reviewer_model, effort=$reviewer_effort, advisor=${reviewer_advisor:-}, terminal=<review-handle>,
+#    worktree=<worktree 경로>
+#  §2 term 로그: skill="orca-evaluate", role="code-review", terminal=<review-handle>, meta 기록 후
+#    sent.content=$spec_text. recv는 기록하지 않는다(§1 contract-review와 같은 이유 — report는 이
+#    세션이 별도로 직접 읽는다, §3 본문 마지막 문단 참고).
 ```
 
 report는 severity(Critical/Important/Minor) + 도달 조건 + 최악 결과 + fail-closed 여부를 포함해야 한다. 이 report는 작아서(요약된 finding 목록) 이 evaluator 세션이 직접 읽는다.
