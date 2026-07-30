@@ -655,9 +655,12 @@ EXPECTED_RETRY_WRAP_COUNTS = {
 }
 
 
+_RETRY_INVOCATION_LINE_RE = re.compile(r'^orca_call_with_retry "', re.M)
+
+
 @pytest.mark.parametrize(("name", "expected"), EXPECTED_RETRY_WRAP_COUNTS.items())
 def test_orca_call_with_retry_count_per_skill(name, expected):
-    actual = _read_skill(name).count("orca_call_with_retry ")
+    actual = len(_RETRY_INVOCATION_LINE_RE.findall(_read_skill(name)))
     assert actual == expected, f"{name}: expected {expected} orca_call_with_retry invocations, found {actual}"
 
 
