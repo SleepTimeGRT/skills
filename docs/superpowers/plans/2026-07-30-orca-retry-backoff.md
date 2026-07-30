@@ -587,9 +587,15 @@ EXPECTED_RETRY_WRAP_COUNTS = {
 }
 
 
+_RETRY_INVOCATION_LINE_RE = re.compile(r'^orca_call_with_retry "', re.M)
+
+
 @pytest.mark.parametrize(("name", "expected"), EXPECTED_RETRY_WRAP_COUNTS.items())
 def test_orca_call_with_retry_count_per_skill(name, expected):
-    actual = _read_skill(name).count("orca_call_with_retry ")
+    # Counts only actual invocation lines (flush-left `orca_call_with_retry "<skill>" "<role>" --`),
+    # not any prose sentence that happens to mention the function name with a trailing space (e.g.
+    # a §0 note explaining the convention) — a naive substring count is fooled by such a mention.
+    actual = len(_RETRY_INVOCATION_LINE_RE.findall(_read_skill(name)))
     assert actual == expected, f"{name}: expected {expected} orca_call_with_retry invocations, found {actual}"
 
 
