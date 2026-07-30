@@ -220,3 +220,29 @@ def test_default_backoff_parameters_match_issue_42_spec():
     assert "ORCA_RETRY_MAX_CYCLES:-2" in text
     assert "ORCA_RETRY_POLL_INTERVAL:-5" in text
     assert "ORCA_RETRY_POLL_MAX:-6" in text
+
+
+def test_poll_timeout_path_keeps_stdout_and_stderr_separate(tmp_path):
+    stubs = {
+        "orca": """
+            #!/usr/bin/env bash
+            [ "$1" = "status" ] && echo '{"state":"pending"}' && exit 0
+            exit 1
+        """,
+        "real-cmd": """
+            #!/usr/bin/env bash
+            echo "PARTIAL-STDOUT-DATA"
+            echo "Could not connect to the running Orca app. Restart Orca and try again." >&2
+            exit 1
+        """,
+    }
+    result, _ = _run(
+        tmp_path,
+        stubs,
+        'orca_call_with_retry "test-skill" "test-role" -- real-cmd',
+        extra_env={"ORCA_RETRY_POLL_INTERVAL": "0", "ORCA_RETRY_POLL_MAX": "1", "ORCA_RETRY_MAX_CYCLES": "2"},
+    )
+    assert result.returncode == 1
+    assert "PARTIAL-STDOUT-DATA" in result.stdout
+    assert "PARTIAL-STDOUT-DATA" not in result.stderr
+    assert "Could not connect" in result.stderr

@@ -48,7 +48,6 @@ orca_call_with_retry() {
       rm -f "$out" "$err"
       return "$code"
     fi
-    rm -f "$out" "$err"
 
     local n=0 ready=0
     while [ "$n" -lt "$poll_max" ]; do
@@ -61,9 +60,12 @@ orca_call_with_retry() {
     done
 
     if [ "$ready" -eq 0 ]; then
-      printf '%s' "$combined" >&2
+      cat "$out"
+      cat "$err" >&2
+      rm -f "$out" "$err"
       return "$code"
     fi
+    rm -f "$out" "$err"
     # ready — loop back and retry the identical original command
   done
 }
