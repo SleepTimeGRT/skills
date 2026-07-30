@@ -63,6 +63,9 @@ orca terminal create --worktree active --title task-run-<n> \
 spec_text="<issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 제안서/구현 모드>"
 orca orchestration task-create --spec "$spec_text" --json
 orca orchestration dispatch --task <task_id> --to <run-handle> --inject --json
+# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43): 15초 뒤 재-read해서
+# tail이 그대로면 Enter만 재전송, 그래도 그대로면 spawn-failures.md로. tail 비교는 내용을 해석하지
+# 않는 불투명 비교라 위 "diff/report 본문을 직접 읽지 않는다" 원칙과 충돌하지 않는다.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. dispatch와 같은 블록에서 즉시 실행(누락 방지).
 #  logging.md §1 assign 이벤트: role="task-runner", issue=<issue-num>, task_id=<task_id>, provider/model/effort=resolved 값,
 #    terminal=<run-handle>, worktree=<worktree 경로>
@@ -85,6 +88,9 @@ orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 6000
 spec_text="<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문 + issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 요청 모드>"
 orca orchestration task-create --spec "$spec_text" --json
 orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
+# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43): 15초 뒤 재-read해서
+# tail이 그대로면 Enter만 재전송, 그래도 그대로면 spawn-failures.md로. (이 이슈의 실제 발생 사례가
+# 바로 이 dispatch 대상 터미널 — task-evaluate-411 — 이었다.)
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로.
 #  logging.md §1 assign 이벤트: role="evaluator", issue=<issue-num>, task_id=<task_id>, provider/model/effort=resolved 값,
 #    terminal=<evaluate-handle>, worktree=<worktree 경로>
