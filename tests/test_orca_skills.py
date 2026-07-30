@@ -619,22 +619,30 @@ def test_spawn_failures_has_orca_restart_retry_row():
     assert "#42" in text
 
 
+_BASH_FENCE_RE = re.compile(r"^[ \t]*```bash\n(.*?)^[ \t]*```", re.M | re.S)
+
+
 def _bare_wrapped_call_line_numbers(text: str) -> list[int]:
     """Line numbers (1-indexed) where an orca terminal-create/task-create/dispatch call appears
-    without 'orca_call_with_retry' on the same or immediately preceding line."""
+    inside a ```bash fenced block without 'orca_call_with_retry' on the same or immediately
+    preceding line. Scoped to fenced code on purpose — a prose sentence that merely mentions one of
+    these commands (e.g. describing a manual orphan-recovery diagnostic step) is not a call site
+    this plan wraps, and scanning the whole file would false-positive on such mentions."""
     patterns = (
         "orca terminal create",
         "orca orchestration task-create --spec",
         "orca orchestration task-list",
         "orca orchestration dispatch --task",
     )
-    lines = text.splitlines()
     bare = []
-    for i, line in enumerate(lines):
-        if any(pat in line for pat in patterns):
-            window = "\n".join(lines[max(0, i - 1) : i + 1])
-            if "orca_call_with_retry" not in window:
-                bare.append(i + 1)
+    for m in _BASH_FENCE_RE.finditer(text):
+        block_start_line = text[: m.start()].count("\n") + 2
+        block_lines = m.group(1).splitlines()
+        for j, line in enumerate(block_lines):
+            if any(pat in line for pat in patterns):
+                window = "\n".join(block_lines[max(0, j - 1) : j + 1])
+                if "orca_call_with_retry" not in window:
+                    bare.append(block_start_line + j)
     return bare
 
 
