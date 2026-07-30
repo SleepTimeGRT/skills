@@ -705,3 +705,23 @@ def test_orca_task_runner_section0_notes_retry_wrapping():
     section0_end = text.index("## 1.")
     section0 = text[section0_start:section0_end]
     assert "orca_call_with_retry" in section0 and "#42" in section0
+
+
+def test_orca_evaluate_worker_specs_instruct_retry_wrapping():
+    text = _read_skill("orca-evaluate")
+    for marker in ("제안서 경로", "diff 절대경로"):
+        idx = text.index(marker)
+        end = text.index('>"', idx)
+        segment = text[idx:end]
+        assert "orca_call_with_retry" in segment, (
+            f"orca-evaluate: spec_text placeholder starting near {marker!r} must instruct the "
+            "spawned worker to wrap its own orchestration replies in orca_call_with_retry"
+        )
+
+
+def test_orca_evaluate_section0_notes_retry_wrapping():
+    text = _read_skill("orca-evaluate")
+    section0_start = text.index("## 0.")
+    section0_end = text.index("## 1.")
+    section0 = text[section0_start:section0_end]
+    assert "orca_call_with_retry" in section0 and "#42" in section0
