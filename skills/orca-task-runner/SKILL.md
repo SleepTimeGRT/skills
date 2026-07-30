@@ -23,7 +23,7 @@ description: Use when generating the implementation for one task (issue) — pro
 - **이 issue에 대해 이 세션이 처음이 아닐 수 있다면**(이전 coordinator가 도중에 죽어서 재개하는 경우) 새 wave를 시작하기 전에 orphan부터 정리한다 — §3/§5 wave telemetry는 coordinator가 살아서 markdown 지침을 끝까지 실행해야만 남는 best-effort 기록이라, coordinator가 wave 도중 죽으면(그리고 그게 바로 우리가 잡으려는 CPU 경합의 극단적 형태다) `wave_start`만 남고 `wave_end`가 영영 안 남을 수 있다:
 
   ```bash
-  cat ~/.local/state/orca-workflows/logs/waves-*.jsonl 2>/dev/null | jq -s --arg issue "<issue-num>" '
+  find ~/.local/state/orca-workflows/logs -name 'waves-*.jsonl' 2>/dev/null | sort | xargs cat 2>/dev/null | jq -s --arg issue "<issue-num>" '
     [.[] | select(.issue == $issue)] as $rows
     | ($rows | map(select(.event == "wave_start") | .wave_index)) as $starts
     | ($rows | map(select(.event == "wave_end") | .wave_index)) as $ends
@@ -50,7 +50,17 @@ description: Use when generating the implementation for one task (issue) — pro
 합의된 범위로 subtask를 쪼갠다. 각 subtask가 만들/수정할 파일 목록을 비교: **겹치면 `--deps` 순차 의존, 독립이면 같은 wave.** 판정이 애매하면 보수적으로 의존 처리.
 
 ```bash
-orca orchestration task-create --spec "<subtask 본문 + 아래 필수 항목>" --deps '["task_xxx"]' --json
+spec_text="<subtask 본문 + 아래 필수 항목>"
+orca orchestration task-create --spec "$spec_text" --deps '["task_xxx"]' --json
+# spec_text 사이드카(로그 아님 — 일회성 핸드오프 파일) — logging.md §2의 sent 레시피는 "task-create
+# --spec에 쓴 텍스트와 동일한 문자열"을 요구하는데, 그 원문을 코디네이터가 실제로 들고 있는 시점은
+# 지금뿐이다(§5 dispatch는 몇 wave, 잠재적으로 긴 시간 뒤). 이 시점엔 아직 dispatch 대상 handle을
+# 몰라 term-<handle>.jsonl에 바로 쓸 수 없으므로, task_id로 키를 잡은 사이드카에 남겨 §5가 handle을
+# 알게 된 시점에 그대로 읽어 쓰게 한다 — §5가 읽은 직후 지운다(logs/ 아래 다른 파일과 달리 보존
+# 대상이 아니다).
+install -d -m 700 ~/.local/state/orca-workflows/logs
+printf '%s' "$spec_text" > "$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"
+chmod 600 "$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"
 ```
 
 subtask spec 필수 항목: ①구체적 작업 내용(코드 블록 포함 그대로) ②커밋 대상 브랜치·worktree 명시 ③resolved provider/model/effort 기록 ④"막히면 ask로 blocking 질문" ⑤"완료 시 preamble 지시대로 worker_done(payload에 filesModified)" ⑥**병렬 커밋 안전 규칙**(같은 worktree를 공유하는 병렬 워커가 서로의 미완성 변경을 덮어쓰지 않도록): `git add` 명시 경로만·`git commit -m "<msg>" -- <files>` pathspec 필수·index.lock 재시도.
@@ -101,14 +111,17 @@ subtask가 worker_done을 보내기 전에 스스로 실행: typecheck, unit tes
 
 ```bash
 orca orchestration task-list --ready --brief --json
-spec_text="<이 task_id로 §2에서 task-create --spec에 쓴 텍스트와 동일한 subtask 본문>"
+spec_sidecar="$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"   # §2에서 남긴 사이드카
+spec_text="$(cat "$spec_sidecar")"   # 지금 재구성하지 않는다 — §2에서 남긴 원문 그대로
 orca orchestration dispatch --task <task_id> --to <impl_handle> --inject --json   # wave 크기만큼 병렬 — 상한 임시 해제, §3 참고
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. dispatch와 같은 블록에서 즉시 실행(누락 방지).
-#  §1 assign 이벤트: role="subtask-impl", issue=<issue-num>, task_id=<task_id>, wave_index=<n>,
+#  logging.md §1 assign 이벤트: role="subtask-impl", issue=<issue-num>, task_id=<task_id>, wave_index=<n>,
 #    subtask_type=<전사|통합|아키텍처>, provider/model/effort=resolved 값, terminal=<impl_handle>,
 #    worktree=<worktree 경로>. wave_index는 §3 wave_start 로그와 join한다.
-#  §2 term 로그: skill="orca-task-runner", role="subtask-impl", terminal=<impl_handle>,
-#    meta 기록 후 sent.content=$spec_text. recv는 아래 close 직전에 기록한다(§5 마지막 블록).
+#  logging.md §2 term 로그: skill="orca-task-runner", role="subtask-impl", terminal=<impl_handle>,
+#    meta 기록 후 sent.content=$spec_text(위 사이드카에서 로드한 값). recv는 아래 close 직전에
+#    기록한다(§5 마지막 블록).
+rm -f "$spec_sidecar"   # sent에 이미 남았으니 사이드카는 즉시 회수 — logs/ 안에 무기한 쌓이지 않게
 ```
 
 - ⚠️ **`check --wait` 단독 대기 금지**: coordinator가 Orca 터미널 내부 세션이면 worker_done이 check 큐로 안 잡힐 수 있다(task 상태는 정상 갱신됨). 기본 대기 = `task-list --brief --json` 상태 폴링 또는 커밋/파일 존재 감시(20-30s 간격), `check --wait`는 보조.
@@ -119,9 +132,10 @@ orca orchestration dispatch --task <task_id> --to <impl_handle> --inject --json 
 - **완료 확인된 subtask 터미널은 즉시 닫는다** — wave 전체를 기다리지 않고, 그 subtask의 `worker_done` 수신(taskId+dispatchId 일치) 또는 위 유실 복구가 끝나는 즉시:
 
   ```bash
-  # recv 이벤트 — ~/.agents/orca-workflows/logging.md §2 "첫 read" 레시피(이 터미널은 §5에서 sent만
-  # 기록했고 이후 한 번도 read하지 않았으므로, 여기서의 read가 곧 유일한 recv). term-<impl_handle>.jsonl에
-  # append하고, 예전처럼 별도 .json 스냅샷 파일은 만들지 않는다.
+  read_json="$(orca terminal read --terminal <impl_handle> --json)"
+  # recv 이벤트 — logging.md §2 "첫 read" 레시피대로 $read_json에서 tail/nextCursor를 뽑아
+  # term-<impl_handle>.jsonl에 append(이 터미널은 §5에서 sent만 기록했고 이후 한 번도 read하지
+  # 않았으므로, 이 read가 곧 유일한 recv). 예전처럼 별도 .json 스냅샷 파일은 만들지 않는다.
   orca terminal close --terminal <impl_handle> --tab --json
   ```
 
@@ -130,7 +144,7 @@ orca orchestration dispatch --task <task_id> --to <impl_handle> --inject --json 
 **Wave telemetry(종료)** — 이 wave의 모든 subtask가 완료(worker_done 또는 수동 복구)된 직후 1회, §3 `wave_start`와 같은 `issue`+`wave_index`로 join되도록:
 
 ```bash
-start_epoch="$(cat ~/.local/state/orca-workflows/logs/waves-*.jsonl 2>/dev/null | jq -r --arg issue "<issue-num>" --argjson wi <n> \
+start_epoch="$(find ~/.local/state/orca-workflows/logs -name 'waves-*.jsonl' 2>/dev/null | sort | xargs cat 2>/dev/null | jq -r --arg issue "<issue-num>" --argjson wi <n> \
   'select(.event == "wave_start" and .issue == $issue and .wave_index == $wi) | .ts_epoch' \
   | tail -1)"
 if [ -n "$start_epoch" ]; then

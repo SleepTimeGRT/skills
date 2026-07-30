@@ -42,10 +42,11 @@ orca terminal wait --terminal <contract-handle> --for tui-idle --timeout-ms 6000
 spec_text="<제안서 경로 + acceptance criteria 원문 + 승인/반려 판정 요청 + 반려 시 어느 criteria가 안 커버되는지 명시>"
 orca orchestration task-create --spec "$spec_text" --json
 orca orchestration dispatch --task <task_id> --to <contract-handle> --inject --json
-# 로그 — ~/.agents/orca-workflows/logging.md 절차대로. §2·§3 스폰도 동일한 형태.
-#  §1 assign 이벤트: role="contract-review", issue=<issue-num>, task_id=<task_id>,
+# 로그 — ~/.agents/orca-workflows/logging.md 절차대로. §3 스폰도 동일한 형태(§2 agent-e2e는
+# assign만 — term 로그 대상 아님).
+#  logging.md §1 assign 이벤트: role="contract-review", issue=<issue-num>, task_id=<task_id>,
 #    provider/model/effort=resolved 값, terminal=<contract-handle>, worktree=<worktree 경로>
-#  §2 term 로그: skill="orca-evaluate", role="contract-review", terminal=<contract-handle>,
+#  logging.md §2 term 로그: skill="orca-evaluate", role="contract-review", terminal=<contract-handle>,
 #    meta 기록 후 sent.content=$spec_text. 이 사이트는 dispatch 이후 이 터미널을 다시 read하지
 #    않으므로 recv는 기록하지 않는다(판정 결과는 relay로 받는다 — 위 §1 본문 참고).
 ```
@@ -139,10 +140,10 @@ spec_text="<diff 절대경로 + acceptance criteria 원문 + §2 agent e2e 결�
 orca orchestration task-create --spec "$spec_text" --json
 orca orchestration dispatch --task <task_id> --to <review-handle> --inject --json
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로.
-#  §1 assign 이벤트: role="code-review", issue=<issue-num>, task_id=<task_id>, provider=$reviewer_provider,
+#  logging.md §1 assign 이벤트: role="code-review", issue=<issue-num>, task_id=<task_id>, provider=$reviewer_provider,
 #    model=$reviewer_model, effort=$reviewer_effort, advisor=${reviewer_advisor:-}, terminal=<review-handle>,
 #    worktree=<worktree 경로>
-#  §2 term 로그: skill="orca-evaluate", role="code-review", terminal=<review-handle>, meta 기록 후
+#  logging.md §2 term 로그: skill="orca-evaluate", role="code-review", terminal=<review-handle>, meta 기록 후
 #    sent.content=$spec_text. recv는 기록하지 않는다(§1 contract-review와 같은 이유 — report는 이
 #    세션이 별도로 직접 읽는다, §3 본문 마지막 문단 참고).
 ```

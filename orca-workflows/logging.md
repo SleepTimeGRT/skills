@@ -6,7 +6,11 @@ Shared logging procedure for `orca-task-runner`/`orca-evaluate`/`orca-workflow`,
 `SKILL.md` files point here instead of each carrying its own copy of the same jq/printf (same precedent as
 `spawn-failures.md`). Every path below lives under `~/.local/state/orca-workflows/logs/` — git-untracked
 (the `orca-logs-not-git-tracked` convention: this directory is *not* under the `~/.agents/orca-workflows`
-symlink target; only this file, `spawn-failures.md`, `model-selection.md`, and `models/*.md` are).
+symlink target, unlike this file itself).
+
+orca's own task/message state can be lost on a runtime reset (coordinator crash, orchestration restart,
+etc.) — these log files are the only durable record of what was assigned, dispatched, and sent/received,
+independent of whatever orca's live state currently shows.
 
 ## §1. Date-partitioned `assignments`/`waves` logs
 
@@ -28,8 +32,11 @@ Append exactly the same jq/printf record shape used today, to `"$target"`, then 
 **`assign`** (who got dispatched what):
 
 ```bash
+install -d -m 700 ~/.local/state/orca-workflows/logs
+target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
 printf '{"ts":"%s","event":"assign","skill":"<skill>","role":"<role>","issue":"<issue-num>","task_id":"<task_id-or-omit>","provider":"<provider>","model":"<model>","effort":"<effort>","terminal":"<handle>","worktree":"<worktree 경로>"}\n' \
-  "$(date -u +%FT%TZ)" >> "$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
+  "$(date -u +%FT%TZ)" >> "$target"
+chmod 600 "$target"
 ```
 
 Extra fields (`wave_index`, `subtask_type`, `advisor`, ...) are added per call site exactly as each
@@ -38,8 +45,11 @@ Extra fields (`wave_index`, `subtask_type`, `advisor`, ...) are added per call s
 **`outcome`** (`orca-workflow` only — routing result for a task):
 
 ```bash
+install -d -m 700 ~/.local/state/orca-workflows/logs
+target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
 printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|PREMERGE_FAIL|NO_ACCEPTANCE_CRITERIA|NO_DONE_TRANSITION>","retry":<n>}\n' \
-  "$(date -u +%FT%TZ)" >> "$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
+  "$(date -u +%FT%TZ)" >> "$target"
+chmod 600 "$target"
 ```
 
 **`wave_start`/`wave_end`** (`orca-task-runner` only): same jq schema as today, written to
@@ -52,8 +62,13 @@ orphan-wave check, and its §5 `wave_end` lookup of the matching `wave_start` (a
 midnight) — must glob every dated file, not just today's:
 
 ```bash
-cat "$HOME"/.local/state/orca-workflows/logs/waves-*.jsonl 2>/dev/null | jq -s '...'
+find "$HOME/.local/state/orca-workflows/logs" -name 'waves-*.jsonl' 2>/dev/null | sort | xargs cat 2>/dev/null | jq -s '...'
 ```
+
+(`cat waves-*.jsonl` breaks under zsh when no dated file exists yet — the glob's `nomatch` fires during
+expansion, before `2>/dev/null` can suppress it. `find | sort | xargs cat` is portable across bash/zsh and
+the `sort` keeps dated files in chronological order, which matters wherever the caller does `tail -1` to
+find the most recent matching record.)
 
 Retention: unbounded. No automatic deletion of old dated files.
 
@@ -63,6 +78,9 @@ One file per Orca terminal handle, created the first time that terminal is dispa
 `orca orchestration dispatch --task <id> --to <handle> --inject`, appended to until the terminal closes.
 Line 1 is always the `meta` record; every line after that is one `sent` or `recv` event. This file fully
 replaces `orca-task-runner`'s old close-time `term-<handle>.json` single-snapshot file — do not write both.
+
+**Ownership**: the skill that spawns a terminal owns and is the sole writer of that terminal's
+`term-<handle>.jsonl` — a skill running *inside* a spawned terminal never writes its own handle's file.
 
 ```bash
 term_log="$HOME/.local/state/orca-workflows/logs/term-<handle>.jsonl"
@@ -98,8 +116,8 @@ channel — e.g. a relayed judgment, or a report file read directly), it logs `s
 call site states explicitly which case it is.
 
 For a terminal's **first** read (no prior cursor for this handle), omit `--cursor` entirely — this matches
-what `orca-task-runner` already does today (`orca terminal read --terminal <handle> --json`) and avoids
-relying on unverified behavior for `--cursor 0`:
+what `orca-task-runner` §5's close block does (`read_json="$(orca terminal read --terminal <handle> --json)"`,
+right before `orca terminal close`) and avoids relying on unverified behavior for `--cursor 0`:
 
 ```bash
 read_json="$(orca terminal read --terminal <handle> --json)"

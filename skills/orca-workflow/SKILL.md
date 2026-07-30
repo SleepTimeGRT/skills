@@ -64,11 +64,13 @@ spec_text="<issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + �
 orca orchestration task-create --spec "$spec_text" --json
 orca orchestration dispatch --task <task_id> --to <run-handle> --inject --json
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. dispatch와 같은 블록에서 즉시 실행(누락 방지).
-#  §1 assign 이벤트: role="task-runner", issue=<issue-num>, task_id=<task_id>, provider/model/effort=resolved 값,
+#  logging.md §1 assign 이벤트: role="task-runner", issue=<issue-num>, task_id=<task_id>, provider/model/effort=resolved 값,
 #    terminal=<run-handle>, worktree=<worktree 경로>
-#  §2 term 로그: skill="orca-workflow", role="task-runner", terminal=<run-handle>, meta 기록 후
+#  logging.md §2 term 로그: skill="orca-workflow", role="task-runner", terminal=<run-handle>, meta 기록 후
 #    sent.content=$spec_text. recv는 기록하지 않는다 — 이 스킬은 diff/report 본문을 직접 읽지 않는다
-#    (도입부 원칙); task-runner 자신의 왕복 내용은 task-runner의 term-<run-handle>.jsonl에 이미 남는다.
+#    (도입부 원칙); term-<run-handle>.jsonl은 orca-workflow 자신이 소유하는 파일이라 task-runner는
+#    거기 쓰지 않는다 — task-runner 자신의 왕복 내용은 그쪽이 스폰한 term-<impl_handle>.jsonl들
+#    (subtask worker마다 하나씩)에 이미 남는다.
 
 # evaluate 호출 — REPL 필수(one-shot은 이후 dispatch --inject를 못 받음), agy는 제외한다
 # (agy REPL은 포커스 경합 시 영구 hang — `~/.agents/orca-workflows/models/agy.md`,
@@ -84,9 +86,9 @@ spec_text="<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문
 orca orchestration task-create --spec "$spec_text" --json
 orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로.
-#  §1 assign 이벤트: role="evaluator", issue=<issue-num>, task_id=<task_id>, provider/model/effort=resolved 값,
+#  logging.md §1 assign 이벤트: role="evaluator", issue=<issue-num>, task_id=<task_id>, provider/model/effort=resolved 값,
 #    terminal=<evaluate-handle>, worktree=<worktree 경로>
-#  §2 term 로그: skill="orca-workflow", role="evaluator", terminal=<evaluate-handle>, meta 기록 후
+#  logging.md §2 term 로그: skill="orca-workflow", role="evaluator", terminal=<evaluate-handle>, meta 기록 후
 #    sent.content=$spec_text. recv는 기록하지 않는다 — 위 task-runner 사이트와 같은 이유.
 ```
 
