@@ -359,6 +359,32 @@ def test_poll_timeout_path_keeps_stdout_and_stderr_separate(tmp_path):
     assert "PARTIAL-STDOUT-DATA" in result.stdout
     assert "PARTIAL-STDOUT-DATA" not in result.stderr
     assert "Could not connect" in result.stderr
+
+
+def test_logged_failure_signature_is_matched_substring_not_full_output(tmp_path):
+    stubs = {
+        "orca": """
+            #!/usr/bin/env bash
+            [ "$1" = "status" ] && echo '{"state":"ready"}' && exit 0
+            exit 1
+        """,
+        "real-cmd": """
+            #!/usr/bin/env bash
+            echo "UNRELATED-STDOUT-NOISE"
+            echo "Could not connect to the running Orca app. Restart Orca and try again." >&2
+            exit 1
+        """,
+    }
+    _, home = _run(
+        tmp_path,
+        stubs,
+        'orca_call_with_retry "test-skill" "test-role" -- real-cmd',
+        extra_env={"ORCA_RETRY_POLL_INTERVAL": "0", "ORCA_RETRY_POLL_MAX": "1", "ORCA_RETRY_MAX_CYCLES": "1"},
+    )
+    logs = _log_lines(home)
+    assert len(logs) == 1
+    assert logs[0]["failure_signature"] == "Could not connect to the running Orca app"
+    assert "UNRELATED-STDOUT-NOISE" not in logs[0]["failure_signature"]
 ```
 
 - [ ] **Step 2: Run tests to verify the new ones fail**
@@ -414,7 +440,9 @@ orca_call_with_retry() {
     cycle=$((cycle + 1))
     local outcome="retrying"
     [ "$cycle" -ge "$max_cycles" ] && outcome="exhausted"
-    _orca_retry_log_occurrence "$skill" "$role" "$combined" "$outcome" "$cycle"
+    local matched_signature
+    matched_signature="$(printf '%s' "$combined" | grep -oE "$_ORCA_RETRY_SIGNATURE_RE" | head -1)"
+    _orca_retry_log_occurrence "$skill" "$role" "$matched_signature" "$outcome" "$cycle"
 
     if [ "$cycle" -ge "$max_cycles" ]; then
       cat "$out"
@@ -613,6 +641,22 @@ def test_sources_retry_wrapper_script(name):
     assert "source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh" in text, (
         f"{name}: must source orca_call_with_retry.sh before using the wrapper function"
     )
+
+
+@pytest.mark.parametrize("name", NEW_SKILLS)
+def test_every_retry_invocation_block_sources_the_wrapper(name):
+    """A file-wide 'source appears somewhere' check (the test above) is not sufficient: separate
+    ```bash fenced blocks in these docs represent separate shell invocations/spawned terminals, so
+    a function sourced in one block (e.g. orca-evaluate's §0) is not available in another (§1/§2/§3)
+    — each self-contained block that calls orca_call_with_retry must source it itself."""
+    text = _read_skill(name)
+    for m in _BASH_FENCE_RE.finditer(text):
+        block = m.group(1)
+        if _RETRY_INVOCATION_LINE_RE.search(block):
+            assert "source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh" in block, (
+                f"{name}: a fenced block using orca_call_with_retry (starting near char offset "
+                f"{m.start()}) is missing its own source line"
+            )
 
 
 def test_orca_workflow_section0_notes_retry_wrapping():
@@ -1063,6 +1107,7 @@ orca orchestration dispatch --task <task_id> --to <contract-handle> --inject --j
 with:
 
 ```bash
+source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 # 다회 왕복(핑퐁)이 필요한 역할 — one-shot(`agy -p`/`codex exec`) 금지, 반드시 인터랙티브(REPL)
 # 세션으로 띄운다(provider 이름에 종속되지 않는 공통 원칙)
 orca_call_with_retry "orca-evaluate" "contract-review" -- \
@@ -1094,6 +1139,7 @@ orca terminal create --worktree active --title eval-agent-e2e \
 with:
 
 ```bash
+source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 report_path="<worktree 루트>/.evaluate-agent-e2e-report.md"
 orca_call_with_retry "orca-evaluate" "agent-e2e" -- \
   orca terminal create --worktree active --title eval-agent-e2e \
@@ -1117,6 +1163,7 @@ orca orchestration dispatch --task <task_id> --to <review-handle> --inject --jso
 with:
 
 ```bash
+source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 # REPL 필수, one-shot 금지 — 이유는 §1의 동일 주석 참고
 orca_call_with_retry "orca-evaluate" "code-review" -- \
   orca terminal create --worktree active --title eval-review \

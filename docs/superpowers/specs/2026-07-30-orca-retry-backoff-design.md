@@ -136,8 +136,11 @@ caller-side human-facing report).
 
 ## 6. Integration Points
 
-**Call sites wrapped** (every one becomes `source .../orca_call_with_retry.sh` once per session, then
-`orca_call_with_retry <skill> <role> -- <original command>`):
+**Call sites wrapped** (every one becomes `source .../orca_call_with_retry.sh` then
+`orca_call_with_retry <skill> <role> -- <original command>`). The `source` line is repeated at the
+top of every independently-executed fenced ```bash block that uses the wrapper — not once per
+`SKILL.md` file — since separate fenced blocks in these docs represent separate shell
+invocations/spawned terminals that don't share a sourced function across block boundaries:
 
 - `orca-workflow/SKILL.md`: lines 61, 64, 65 (task-runner spawn + task-create + dispatch), 80, 86, 87
   (evaluate spawn + task-create + dispatch)
