@@ -725,3 +725,15 @@ def test_orca_evaluate_section0_notes_retry_wrapping():
     section0_end = text.index("## 1.")
     section0 = text[section0_start:section0_end]
     assert "orca_call_with_retry" in section0 and "#42" in section0
+
+
+def test_agents_md_orca_workflows_note_mentions_scripts_dir():
+    text = (REPO_ROOT / "AGENTS.md").read_text()
+    idx = text.index("orca-workflows/` deploy path (decision, #22)")
+    remainder = text[idx:]
+    section_end_offset = remainder.index("\n## ") if "\n## " in remainder else len(remainder)
+    section = remainder[:section_end_offset]
+    assert "scripts/" in section and "orca_call_with_retry.sh" in section, (
+        "AGENTS.md's orca-workflows/ deploy-path note must mention the new scripts/ directory "
+        "now that it holds an executable helper, not just reference docs"
+    )

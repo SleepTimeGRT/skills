@@ -62,7 +62,9 @@ skills so the recorded commit never lies about the deployed content.
 `orca-workflows/` is intentionally *not* brought under the commit-pinned mechanism above.
 `~/.agents/orca-workflows/` is a plain symlink to this repo's local main-branch checkout
 (single machine, single consumer: the three `orca-*` skills that read
-`model-selection.md`/`spawn-failures.md`/`logging.md` from it). It isn't installed by other repos via
+`model-selection.md`/`spawn-failures.md`/`logging.md` from it, plus `orca-workflows/scripts/` for
+executable helpers such as `orca_call_with_retry.sh` — issue #42 — that call sites `source`
+directly and invoke, not just read as reference prose). It isn't installed by other repos via
 `npx skills add`, so `skills/`'s N-repo integrity guarantees don't apply here — changes go
 live the moment they merge to main, with no separate deploy step to forget.
 
