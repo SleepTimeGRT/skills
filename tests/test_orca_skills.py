@@ -680,6 +680,22 @@ def test_sources_retry_wrapper_script(name):
     )
 
 
+@pytest.mark.parametrize("name", NEW_SKILLS)
+def test_every_retry_invocation_block_sources_the_wrapper(name):
+    """A file-wide 'source appears somewhere' check (the test above) is not sufficient: separate
+    ```bash fenced blocks in these docs represent separate shell invocations/spawned terminals, so
+    a function sourced in one block (e.g. orca-evaluate's §0) is not available in another (§1/§2/§3)
+    — each self-contained block that calls orca_call_with_retry must source it itself."""
+    text = _read_skill(name)
+    for m in _BASH_FENCE_RE.finditer(text):
+        block = m.group(1)
+        if _RETRY_INVOCATION_LINE_RE.search(block):
+            assert "source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh" in block, (
+                f"{name}: a fenced block using orca_call_with_retry (starting near char offset "
+                f"{m.start()}) is missing its own source line"
+            )
+
+
 def test_orca_workflow_section0_notes_retry_wrapping():
     text = _read_skill("orca-workflow")
     section0_start = text.index("## 0.")

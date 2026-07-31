@@ -40,7 +40,9 @@ orca_call_with_retry() {
     cycle=$((cycle + 1))
     local outcome="retrying"
     [ "$cycle" -ge "$max_cycles" ] && outcome="exhausted"
-    _orca_retry_log_occurrence "$skill" "$role" "$combined" "$outcome" "$cycle"
+    local matched_signature
+    matched_signature="$(printf '%s' "$combined" | grep -oE "$_ORCA_RETRY_SIGNATURE_RE" | head -1)"
+    _orca_retry_log_occurrence "$skill" "$role" "$matched_signature" "$outcome" "$cycle"
 
     if [ "$cycle" -ge "$max_cycles" ]; then
       cat "$out"

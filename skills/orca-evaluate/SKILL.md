@@ -38,6 +38,7 @@ orca_call_with_retry "orca-workflow" "evaluator" -- \
 `orca-task-runner`가 구현 전 제안서(범위 + 검증 방법)를 보내오면, 이 세션(evaluator)이 직접 판단하지 않고 **coding agent 터미널을 스폰**해서 issue의 원본 acceptance-criteria 섹션(`orca-workflow`가 dispatch spec으로 넘겨준 섹션명)에 대조 검토를 맡긴다 — 제안된 파일 범위·검증 방법이 실제 코드베이스에서 기술적으로 타당한지 보는, 구현 착수 전의 1회성 판단이라 diff 규모 같은 위험도를 낮출 신호가 아직 존재하지 않는 시점이다. 그래서 여기는 고정된 강한 reasoning 모델(`model-selection.md` High Risk tier)을 쓴다 — §3처럼 사후에 diff 통계로 동적으로 낮추지 않는다.
 
 ```bash
+source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 # 다회 왕복(핑퐁)이 필요한 역할 — one-shot(`agy -p`/`codex exec`) 금지, 반드시 인터랙티브(REPL)
 # 세션으로 띄운다(provider 이름에 종속되지 않는 공통 원칙)
 orca_call_with_retry "orca-evaluate" "contract-review" -- \
@@ -71,6 +72,7 @@ gate로 처리한다(`skills/orca-workflow/SKILL.md` §2, outcome `NO_ACCEPTANCE
 앱을 직접 조작하는 e2e. Playwright MCP(accessibility-tree 기반 — 스크린샷·좌표 클릭보다 UI 변경에 덜 깨진다)를 붙인 agy(Gemini) 세션을 **headless(`-p`, one-shot)로** 스폰한다, REPL 아님(agy는 이 스킬 전체에서 REPL 금지 — 이유는 §0). 시나리오·경로·요청 형식을 launch 시점의 `-p` 인자 하나에 다 담아 한 번에 실행하고, 이후 orchestration 왕복 없이 완료를 회수한다. (e2e·pgTAP은 여기서 안 돈다 — `orca-task-runner`의 task-레벨 게이트를 이미 통과한 뒤에만 이 스킬이 호출되므로 전량 신뢰한다.)
 
 ```bash
+source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 report_path="<worktree 루트>/.evaluate-agent-e2e-report.md"
 orca_call_with_retry "orca-evaluate" "agent-e2e" -- \
   orca terminal create --worktree active --title eval-agent-e2e \
@@ -118,6 +120,7 @@ fi
 fresh-context code-reviewer terminal을 하나 스폰한다(이 evaluator 세션과는 별개 세션 — `orca-task-runner`(generator)와 달라야 한다는 뜻은 아니다). 모델·effort는 diff 통계(변경 파일 수·라인 수)를 `<skill-dir>/scripts/select_reviewer.py`에 넘겨 동적으로 고른다 — 후보 풀·제외 사유·high-risk-signal 오버라이드·Codex 가용성 판단·스폰 실패 시 재시도 로직은 `references/reviewer-selection.md` 참고(구체 모델명을 SKILL.md 본문에 복제하지 않는다 — `orca-task-runner` §0과 같은 원칙). 리뷰어는 반드시 이 항목들을 갖는다: ①skeptical 지침("동의 표명 불필요, 결함·spec-divergence만 보고, 근거 있는 우려를 안이하게 넘기지 말 것") ②issue의 acceptance criteria 원문 ③**§2 agent e2e 결과 요약** — diff만으로는 안 보이는 런타임 동작(무엇이 실제로 실패했는지)을 code review가 근거로 쓸 수 있게 한다 ④**(schema/migration 변경이 있으면) `.migration-lint.json` 결과 + §1에서 받은 "의도된 destructive 오퍼레이션" 선언** — 린터가 flag한 항목 중 선언에 커버되지 않는 게 있으면 report에 명시하라는 지시와 함께 ⑤**게이트-안전성 판단 지시** — 이 diff가 orca 파이프라인 자신의 머지/게이트 안전성에 영향을 주는지(예시일 뿐 비망라적: 워크플로 스킬 문서, 게이트·훅 스크립트, CI·hook 설정, 이 파이프라인이 의존하는 셸 배선 자체를 수정하는 diff인지 등) 리뷰의 첫 단계로 판단하라고 지시한다. 영향이 있다고 판단되면 그 부분을 diff의 다른 코드보다 더 엄격하게(더 회의적으로, 더 많은 재현·실패 시나리오로) 검토하라고 요구한다. 이 판단은 정적 파일 경로 목록과 절대 대조하지 않는다 — 리뷰어 자신의 판단이다. 게이트-안전성 영향이 있다고 판단했는데 주어진 정보로 완전히 clear하지 못하면 Critical/Important finding 또는 명시적 escalation 사유로 report에 반드시 남기라고 지시한다(diff 규모가 작아 이 리뷰가 낮은 tier로 동적 선택됐더라도, 그 사실만으로 게이트-안전성 우려를 낮잡아 보지 말 것).
 
 ```bash
+source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 diff_shortstat="$(git diff --shortstat "$(git merge-base origin/main HEAD)"...HEAD)"
 # codex_available: 1차 근거는 이번 세션에서 사용자가 알려준 정보. 그 정보가 없을 때만
 # `command -v codex`로 바이너리 존재를 보조 확인한다(토큰/쿼터까지는 증명하지 못한다).
