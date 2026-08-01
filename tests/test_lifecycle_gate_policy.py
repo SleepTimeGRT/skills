@@ -691,3 +691,87 @@ class MigrationLintPremergeTests(PremergeFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+PRE_PUSH = ROOT / "skills" / "lifecycle-gate-policy" / "assets" / "githooks" / "pre-push"
+
+
+class PrePushCacheTests(GitFixture):
+    """#36: identical, already-verified trees skip static-verify on re-push; the hook
+    stays the deterministic enforcement point (cache trims cost, never force)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        run("git", "config", "user.email", "t@t", cwd=self.repo)
+        run("git", "config", "user.name", "t", cwd=self.repo)
+        hooks_dir = self.repo / ".githooks"
+        hooks_dir.mkdir()
+        scripts_dir = self.repo / "scripts"
+        scripts_dir.mkdir()
+        shutil.copy(PRE_PUSH, hooks_dir / "pre-push")
+        (hooks_dir / "pre-push").chmod(0o755)
+        shutil.copy(RUNNER, scripts_dir / "token-gate.sh")
+        run("git", "config", "core.hooksPath", ".githooks", cwd=self.repo)
+
+        self.counter = Path(self.tempdir.name) / "verify count"
+        self.stub_bin = Path(self.tempdir.name) / "stub bin"
+        self.stub_bin.mkdir()
+        (self.stub_bin / "pnpm").write_text(
+            "#!/usr/bin/env bash\n"
+            f'if [ "$1" = "verify:static" ]; then echo run >> {json.dumps(str(self.counter))}; fi\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        (self.stub_bin / "pnpm").chmod(0o755)
+        self.env = {**os.environ, "PATH": f"{self.stub_bin}:{os.environ['PATH']}"}
+
+        self.remote = Path(self.tempdir.name) / "remote.git"
+        run("git", "init", "-q", "--bare", str(self.remote), cwd=Path(self.tempdir.name))
+        self.write("src.txt", "v1\n")
+        # hooks/scripts are tracked in real consumer repos; untracked copies would make
+        # `git status --porcelain` non-empty and defeat the clean-tree cache condition
+        run("git", "add", "-A", cwd=self.repo)
+        run("git", "commit", "-q", "-m", "c1", cwd=self.repo)
+        run("git", "remote", "add", "origin", str(self.remote), cwd=self.repo)
+
+    def verify_runs(self) -> int:
+        return len(self.counter.read_text().splitlines()) if self.counter.exists() else 0
+
+    def push(self, branch: str) -> subprocess.CompletedProcess[str]:
+        return run(
+            "git", "push", "origin", f"HEAD:refs/heads/{branch}",
+            cwd=self.repo, check=False, env=self.env,
+        )
+
+    def test_second_push_of_same_tree_skips_verification(self) -> None:
+        first = self.push("b1")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(self.verify_runs(), 1)
+        second = self.push("b2")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(self.verify_runs(), 1, "identical tree must not re-verify")
+        self.assertIn("SKIP", second.stdout + second.stderr)
+
+    def test_changed_tree_reverifies(self) -> None:
+        self.push("b1")
+        self.write("src.txt", "v2\n")
+        run("git", "commit", "-q", "-m", "c2", cwd=self.repo)
+        third = self.push("b3")
+        self.assertEqual(third.returncode, 0, third.stderr)
+        self.assertEqual(self.verify_runs(), 2, "a new tree must be verified")
+
+    def test_dirty_worktree_never_skips(self) -> None:
+        self.push("b1")
+        (self.repo / "src.txt").write_text("dirty\n", encoding="utf-8")
+        fourth = self.push("b4")
+        self.assertEqual(fourth.returncode, 0, fourth.stderr)
+        self.assertEqual(
+            self.verify_runs(), 2,
+            "verification runs against the working tree, so a dirty tree must never hit the cache",
+        )
+
+    def test_docs_record_the_cache_decision(self) -> None:
+        spec = (ROOT / "skills" / "lifecycle-gate-policy" / "references" / "policy-spec.md").read_text(encoding="utf-8")
+        rationale = (ROOT / "skills" / "lifecycle-gate-policy" / "references" / "policy-rationale.md").read_text(encoding="utf-8")
+        self.assertIn("cache", spec.lower(), "policy-spec must state the cache-skip allowance")
+        self.assertIn("static-verify cache", rationale.lower(), "rationale must record the decision")

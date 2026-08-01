@@ -34,6 +34,21 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 . "$REPO_ROOT/scripts/token-gate.sh"
 cd "$REPO_ROOT"
 
+# static-verify cache: a tree that already passed here is not re-verified on a later push.
+# Enforcement stays inside the hook (deterministic — not a wrapper convention someone can
+# forget); only the repeat cost is removed. Consulted and written ONLY when the working tree
+# is clean, because verification runs against the working tree — a dirty tree is not the
+# recorded HEAD tree. Toolchain drift (node/pnpm upgrade with no tree change) is accepted
+# staleness, bounded by the cache size and cleared by any commit that changes the tree.
+CACHE_FILE="$(git rev-parse --git-dir)/lifecycle-static-verify-cache"
+tree_hash=$(git rev-parse 'HEAD^{tree}')
+worktree_clean=0
+[ -z "$(git status --porcelain)" ] && worktree_clean=1
+if [ "$worktree_clean" -eq 1 ] && [ -f "$CACHE_FILE" ] && grep -qx "$tree_hash" "$CACHE_FILE"; then
+  echo "[pre-push] SKIP — static-verify already passed for tree ${tree_hash:0:12} (clean tree, cached)"
+  exit 0
+fi
+
 # Optional repo tuning: .githooks/pre-push.conf may set WARN_REGEX to surface a
 # meaningful exit-zero warning marker (narrow pattern only — see token-efficient-gates).
 WARN_REGEX=""
@@ -43,4 +58,10 @@ if [ -n "$WARN_REGEX" ]; then
   token_gate_capture --warn-regex "$WARN_REGEX" pre-push -- pnpm verify:static
 else
   token_gate_capture pre-push -- pnpm verify:static
+fi
+
+# Record the pass (set -e means we only get here on success). Clean trees only — see above.
+if [ "$worktree_clean" -eq 1 ]; then
+  printf '%s\n' "$tree_hash" >> "$CACHE_FILE"
+  tail -n 50 "$CACHE_FILE" > "$CACHE_FILE.tmp" && mv "$CACHE_FILE.tmp" "$CACHE_FILE"
 fi
