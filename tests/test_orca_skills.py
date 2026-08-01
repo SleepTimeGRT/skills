@@ -818,3 +818,16 @@ def test_spawn_failures_has_dispatch_inject_unsent_row():
         f"expected exactly one 'Known signatures' table (one header line), found {header_count} "
         "— a regression could reintroduce #43 as a second, separate table instead of a row in the existing one"
     )
+
+
+# --- orca-retro: epic-end skill-defect feedback loop (layer-3) ---
+
+
+def test_logging_outcome_enum_includes_retro_values():
+    text = (WORKFLOWS_DIR / "logging.md").read_text()
+    m = re.search(r'"outcome":"<([^>]+)>"', text)
+    assert m, "outcome enum line missing in logging.md"
+    assert "RETRO_DONE" in m.group(1) and "RETRO_FAIL" in m.group(1), (
+        "outcome enum must document the epic-retro results; filing undocumented "
+        "values is exactly the drift the retro loop hunts"
+    )
