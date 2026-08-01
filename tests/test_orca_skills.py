@@ -960,3 +960,14 @@ def test_orca_workflow_runs_stale_dispatched_sweep():
         "orca-workflow §0 must run the stale-dispatched sweep at session start so stuck tasks "
         "surface instead of accumulating silently"
     )
+
+
+def test_orca_task_runner_spawn_template_verbatim_rule():
+    text = _read_skill("orca-task-runner")
+    assert "verbatim 복사" in text, (
+        "orca-task-runner must require spawn commands be copied verbatim from the template — "
+        "hand-reassembly dropped/altered flags in a measured case (#40)"
+    )
+    assert "fallback shell" in text, (
+        "orca-task-runner must forbid the bare-fallback-shell + retype spawn path"
+    )

@@ -75,6 +75,8 @@ subtask spec 필수 항목: ①구체적 작업 내용(코드 블록 포함 그�
 
 wave 크기 상한은 임시로 없다(§5 wave telemetry로 데이터를 쌓아 재계측 중) — 그렇다고 무제한으로 키우지는 않는다: 머신 리소스 상황을 보며 판단하고, 한 wave에서 스폰 실패·timeout 재시도가 2회 이상 발생하면 그 즉시 wave 크기를 3 이하로 되돌리고 사용자에게 보고한다. provider는 자유 선택(claude/codex/agy 아무거나, 토큰 효율을 위해 섞어도 됨) — 모델·effort는 subtask 성격에 맞게 provider 문서에서 고른다.
 
+**스폰 커맨드는 아래 템플릿을 verbatim 복사한다 — 손으로 재타이핑·재조립하지 않는다.** placeholder(`<model>`/`<effort>`/`<n>`) 치환 외의 어떤 변형도 금지: 재조립 과정에서 플래그가 누락·변형된 실측 사례가 spawn-failures.md에 known signature로 등록돼 있다(issue #40 — `--permission-mode acceptEdits`로 틀어진 채 `--effort` 누락). 같은 이유로 빈 fallback shell을 만들어 거기에 커맨드를 쳐 넣는 경로를 쓰지 않는다 — 터미널은 항상 아래처럼 `terminal create --command`로 launch 문법을 함께 넘겨 생성한다.
+
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 # claude
