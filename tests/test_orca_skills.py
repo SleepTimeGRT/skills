@@ -554,8 +554,8 @@ def test_dispatch_site_count_and_section0_exception_shape():
             start, end = _evaluate_section0_span(text)
             excluded += sum(1 for pos in positions if start <= pos < end)
     assert total == 7, (
-        f"expected 7 `dispatch --task ... --inject` sites across the three SKILL.md files "
-        f"combined, found {total}"
+        f"expected 7 `dispatch --task ... --inject` sites across the NEW_SKILLS family's "
+        f"SKILL.md files combined, found {total}"
     )
     assert excluded == 1, (
         f"expected exactly 1 dispatch site inside orca-evaluate's §0 (the documented exception "

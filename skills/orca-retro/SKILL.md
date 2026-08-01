@@ -13,8 +13,9 @@ sleeptimegrt-skills 이슈(또는 기존 이슈의 재발 코멘트)뿐이며, �
 ## 0. 입력·전제
 
 - 입력 3개: epic 이슈 번호, 대상 repo, skills repo(sleeptimegrt-skills)의 GitHub slug.
-- child 목록: `~/.agents/orca-workflows/issue-trackers/selection.md` 절차로 백엔드를 정하고
-  `list_children(epic-num)`으로 얻는다. epic 자신 + child 전체가 이번 분석의 issue 집합이다.
+- child 목록: 호출자(`orca-workflow` §1d)가 spec_text로 넘긴 목록을 그대로 쓴다. 목록이 안 넘어온
+  경우에만 `~/.agents/orca-workflows/issue-trackers/selection.md` 절차로 백엔드를 정해
+  `list_children(epic-num)`으로 해석한다. epic 자신 + child 전체가 이번 분석의 issue 집합이다.
 - 로그 루트 `~/.local/state/orca-workflows/logs/`가 없거나 비어 있으면 §5 요약(filed=[])으로 즉시
   종료한다 — harness 밖에서 처리된 epic은 정상 케이스다.
 
@@ -41,6 +42,10 @@ done
 
 **날짜 범위**: issue 필터에 걸린 레코드의 최소 `ts`부터 현재까지. §2 렌즈 1은 이 범위의 dated 파일
 전체 내용을 대상으로 한다(아래).
+
+**필터 공집합**: issue 필터에 걸린 레코드가 0개면 여기서 §5 요약(`filed=[]`)으로 즉시 종료한다 — 로그
+루트에 다른 epic의 기록만 있는 경우가 이에 해당한다. `spawn-failures.jsonl`에는 `issue` 필드가
+없으므로 렌즈 4도 이 날짜 범위(`ts` 기준)로 한정한다 — 범위 밖 항목은 이번 epic의 후보가 아니다.
 
 ## 2. 결함 후보 — 렌즈 4개
 
