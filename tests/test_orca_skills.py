@@ -936,6 +936,10 @@ def test_sweep_stale_dispatched_script_is_report_only():
         "sweep is report-only — it must never mutate task state; recovery stays a documented "
         "manual step in orca-task-runner §5"
     )
+    assert "SWEEP_IGNORE_FILE" in text, (
+        "sweep must support an ignore-list for verified-moot tasks that the Orca CLI cannot "
+        "bookkeep (orphaned adopted runs refuse takeover), or every session re-reports them"
+    )
 
 
 def test_orca_task_runner_orphan_result_fallback():

@@ -22,17 +22,31 @@ here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/orca_call_with_retry.sh"
 skill="${SWEEP_SKILL:-orca-workflow}"
 
+# Ignore-list: one task_id per line ('#' comments allowed) for tasks verified moot but
+# impossible to bookkeep via CLI — an orphaned adopted run (coordinator_handle null) refuses
+# both plain run-use and --takeover-legacy from every terminal kind, so its tasks can never
+# be marked completed. Listing here keeps the sweep usable without hiding future stales.
+ignore_file="${SWEEP_IGNORE_FILE:-$HOME/.local/state/orca-workflows/logs/sweep-ignore.txt}"
+ignored_ids=""
+[ -r "$ignore_file" ] && ignored_ids="$(grep -v '^#' "$ignore_file" | grep -v '^[[:space:]]*$' || true)"
+
 runs_json="$(orca_call_with_retry "$skill" "janitor" -- orca orchestration run-list --json)" || exit 1
 terms_json="$(orca_call_with_retry "$skill" "janitor" -- orca terminal list --limit 100 --json)" || exit 1
 terms_slim="$(printf '%s' "$terms_json" | jq '[.result.terminals[]? | {handle, connected, orphaned}]')" || exit 1
 now="$(date -u +%s)"
 
 total=0
+ignored=0
 for rid in $(printf '%s' "$runs_json" | jq -r '.result.runs[].id'); do
   tasks_json="$(orca_call_with_retry "$skill" "janitor" -- \
     orca orchestration task-list --run "$rid" --status dispatched --brief --json)" || continue
   while IFS= read -r line; do
     [ -n "$line" ] || continue
+    tid="$(printf '%s' "$line" | awk '{print $3}')"
+    if [ -n "$ignored_ids" ] && printf '%s\n' "$ignored_ids" | grep -qx "$tid"; then
+      ignored=$((ignored + 1))
+      continue
+    fi
     total=$((total + 1))
     printf '%s\n' "$line"
   done < <(printf '%s' "$tasks_json" | jq -r --argjson now "$now" --argjson thr "$threshold" \
@@ -50,5 +64,5 @@ for rid in $(printf '%s' "$runs_json" | jq -r '.result.runs[].id'); do
   ')
 done
 
-printf 'STALE_DISPATCHED total=%d\n' "$total"
+printf 'STALE_DISPATCHED total=%d ignored=%d\n' "$total" "$ignored"
 [ "$total" -eq 0 ] && exit 0 || exit 3
