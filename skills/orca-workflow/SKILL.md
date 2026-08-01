@@ -22,6 +22,12 @@ description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-ma
   `~/.agents/orca-workflows/spawn-failures.md`, issue #42), §2a의 `orca orchestration`/
   `orca terminal create` 호출은 전부 `source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh`
   후 `orca_call_with_retry <skill> <role> -- <원명령>`으로 감싼다.
+- **고착 dispatched 스윕(세션 시작 시 1회, report-only)**:
+  `bash ~/.agents/orca-workflows/scripts/sweep_stale_dispatched.sh`를 실행해 임계(기본 1시간)를 넘긴
+  `dispatched` task 목록을 확보하고, 발견되면(exit 3 — 전제 실패가 아니다, 진행은 계속한다) 사용자
+  보고에 그대로 포함한다. 복구는 이 스킬이 직접 하지 않는다 — worker_done 유실 복구는
+  `orca-task-runner` §5 절차(worktree의 `.orca-orphaned-result-<task_id>.json` 확인 포함)를 해당
+  run의 소유자가 수행한다(issue #41).
 
 ## 1. Epic 경로
 

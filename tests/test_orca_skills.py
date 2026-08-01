@@ -923,3 +923,36 @@ def test_orca_workflow_premerge_exit_semantics_not_replicated():
         "orca-workflow §2d must require checking the repo's merge policy independently of "
         "premerge exit codes before self-merging a migration-touching diff"
     )
+
+
+def test_sweep_stale_dispatched_script_is_report_only():
+    script = WORKFLOWS_DIR / "scripts" / "sweep_stale_dispatched.sh"
+    assert script.is_file(), "orca-workflows/scripts/sweep_stale_dispatched.sh missing (#41 janitor)"
+    text = script.read_text()
+    assert "run-list" in text and "--status dispatched" in text, (
+        "sweep must enumerate runs and filter dispatched tasks per run (task-list is run-scoped)"
+    )
+    assert "task-update" not in text, (
+        "sweep is report-only — it must never mutate task state; recovery stays a documented "
+        "manual step in orca-task-runner §5"
+    )
+
+
+def test_orca_task_runner_orphan_result_fallback():
+    text = _read_skill("orca-task-runner")
+    assert ".orca-orphaned-result-" in text, (
+        "orca-task-runner must define the orphan-result file fallback for worker_done sends "
+        "that exhaust the retry wrapper (#41)"
+    )
+    assert "ask" not in text.split("exhausted")[1][:200] or "ask를 포함한 추가" in text, (
+        "on exhaustion the worker must not attempt further orchestration calls (ask rides the "
+        "same dead transport)"
+    )
+
+
+def test_orca_workflow_runs_stale_dispatched_sweep():
+    text = _read_skill("orca-workflow")
+    assert "sweep_stale_dispatched.sh" in text, (
+        "orca-workflow §0 must run the stale-dispatched sweep at session start so stuck tasks "
+        "surface instead of accumulating silently"
+    )
