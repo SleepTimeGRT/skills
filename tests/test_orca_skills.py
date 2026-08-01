@@ -553,8 +553,8 @@ def test_dispatch_site_count_and_section0_exception_shape():
         if name == "orca-evaluate":
             start, end = _evaluate_section0_span(text)
             excluded += sum(1 for pos in positions if start <= pos < end)
-    assert total == 6, (
-        f"expected 6 `dispatch --task ... --inject` sites across the three SKILL.md files "
+    assert total == 7, (
+        f"expected 7 `dispatch --task ... --inject` sites across the three SKILL.md files "
         f"combined, found {total}"
     )
     assert excluded == 1, (
@@ -657,7 +657,7 @@ def test_no_bare_wrapped_call_sites(name):
 
 
 EXPECTED_RETRY_WRAP_COUNTS = {
-    "orca-workflow": 6,
+    "orca-workflow": 9,
     "orca-task-runner": 6,
     "orca-evaluate": 10,
 }
@@ -869,4 +869,22 @@ def test_orca_retro_schema_lens_scans_unfiltered():
     assert "issue 필터를 거치지 않고" in text, (
         "lens 1 must scan full dated files — records with a drifted issue field "
         "escape the issue filter"
+    )
+
+
+def test_orca_workflow_runs_retro_after_epic_close():
+    text = _read_skill("orca-workflow")
+    close_pos = text.index("close_issue(epic-num")
+    retro_pos = text.index("orca-retro")
+    assert close_pos < retro_pos, (
+        "retro must run after close_issue succeeds — running before risks leaving "
+        "a fully-done epic open if the coordinator dies mid-retro"
+    )
+
+
+def test_orca_workflow_retro_is_best_effort():
+    text = _read_skill("orca-workflow")
+    assert "RETRO_FAIL" in text and "RETRO_DONE" in text
+    assert "실패시키지 않는다" in text, (
+        "retro failures must never fail the workflow"
     )

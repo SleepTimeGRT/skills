@@ -48,6 +48,38 @@ list_children(epic-num)의 각 항목에 is_open() 확인
 close_issue(epic-num, "All child tasks complete: <child-num-1>, <child-num-2>, ...")
 ```
 
+**1d. Retro (best-effort, epic close 직후)** — 방금 닫힌 epic의 로그를 분석해 스킬 결함 이슈를 만들도록
+retro 터미널 1개를 띄워 `orca-retro`를 실행시킨다. close **후**에 실행한다 — close 전에 돌리다
+coordinator가 죽으면 child가 전부 닫힌 epic이 열린 채 남는다. retro의 어떤 실패(스폰·dispatch·분석·gh)도
+이 워크플로를 실패시키지 않는다: `RETRO_FAIL` outcome만 남기고 정상 종료한다. 이 스킬은 여기서도 로그
+본문을 직접 분석하지 않는다 — 분석은 전부 retro 터미널 몫이고, 이 스킬은 §5 요약 한 줄만 받는다.
+
+```bash
+source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
+# provider는 model-selection.md 기준 resolve — 판단(judgment) 작업. REPL 필수, agy 제외
+# (§2a evaluate 사이트와 같은 제약, 같은 이유).
+orca_call_with_retry "orca-workflow" "retro" -- \
+  orca terminal create --worktree active --title epic-retro-<epic-num> \
+  --command "<REPL 가능, agy 제외 provider의 launch 문법 — provider 문서에서 resolve>" --json
+orca terminal wait --terminal <retro-handle> --for tui-idle --timeout-ms 60000 --json
+spec_text="<orca-retro SKILL.md 지침 + epic 번호 + child 목록 + 대상 repo + skills repo(sleeptimegrt-skills) slug>"
+orca_call_with_retry "orca-workflow" "retro" -- \
+  orca orchestration task-create --spec "$spec_text" --json
+orca_call_with_retry "orca-workflow" "retro" -- \
+  orca orchestration dispatch --task <task_id> --to <retro-handle> --inject --json
+# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43).
+# 로그 — ~/.agents/orca-workflows/logging.md 절차대로, dispatch와 같은 블록에서 즉시:
+#  §1 assign 이벤트: role="retro", issue=<epic-num>, task_id=<task_id>, provider/model/effort=resolved 값,
+#    terminal=<retro-handle>, worktree=<worktree 경로>
+#  §2 term 로그: skill="orca-workflow", role="retro", terminal=<retro-handle>, meta 기록 후
+#    sent.content=$spec_text. 이 사이트는 §2a의 두 사이트와 달리 요약을 터미널에서 직접 읽으므로,
+#    요약 수신 시점에 logging.md §2의 최초-read 레시피(--cursor 없이)로 recv도 기록한다.
+# 요약(RETRO filed=[...] commented=[...] discarded=<n>) 수신 후 — 수신 실패·timeout이면 RETRO_FAIL:
+printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<epic-num>","outcome":"<RETRO_DONE|RETRO_FAIL>","retry":0,"filed":<n>,"commented":<n>,"discarded":<n>}\n' \
+  "$(date -u +%FT%TZ)" >> "$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
+# RETRO_FAIL이면 filed/commented/discarded 필드는 생략한다(logging.md §1). 터미널 close 후 epic 경로 종료.
+```
+
 ## 2. Task 경로
 
 **2. 전제 — acceptance-criteria 섹션 존재 확인**: `orca-task-runner`를 dispatch하기 전에, §0에서 해석한
