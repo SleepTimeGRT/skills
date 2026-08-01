@@ -14,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SKILLS_DIR = REPO_ROOT / "skills"
 WORKFLOWS_DIR = REPO_ROOT / "orca-workflows"
 
-NEW_SKILLS = ["orca-workflow", "orca-task-runner", "orca-evaluate"]
+NEW_SKILLS = ["orca-workflow", "orca-task-runner", "orca-evaluate", "orca-retro"]
 RETIRED_SKILLS = ["orca-review-gate", "orca-sdd"]
 STALE_TERMS = [
     "orca-review-gate",
@@ -553,9 +553,9 @@ def test_dispatch_site_count_and_section0_exception_shape():
         if name == "orca-evaluate":
             start, end = _evaluate_section0_span(text)
             excluded += sum(1 for pos in positions if start <= pos < end)
-    assert total == 6, (
-        f"expected 6 `dispatch --task ... --inject` sites across the three SKILL.md files "
-        f"combined, found {total}"
+    assert total == 7, (
+        f"expected 7 `dispatch --task ... --inject` sites across the NEW_SKILLS family's "
+        f"SKILL.md files combined, found {total}"
     )
     assert excluded == 1, (
         f"expected exactly 1 dispatch site inside orca-evaluate's §0 (the documented exception "
@@ -657,7 +657,7 @@ def test_no_bare_wrapped_call_sites(name):
 
 
 EXPECTED_RETRY_WRAP_COUNTS = {
-    "orca-workflow": 6,
+    "orca-workflow": 9,
     "orca-task-runner": 6,
     "orca-evaluate": 10,
 }
@@ -672,7 +672,10 @@ def test_orca_call_with_retry_count_per_skill(name, expected):
     assert actual == expected, f"{name}: expected {expected} orca_call_with_retry invocations, found {actual}"
 
 
-@pytest.mark.parametrize("name", NEW_SKILLS)
+# Scoped to the skills that actually invoke the wrapper, not the whole NEW_SKILLS family —
+# orca-retro makes no `orca` CLI calls, so a `source` line there would be dead prose. Per-block
+# enforcement lives in test_every_retry_invocation_block_sources_the_wrapper (correctly conditional).
+@pytest.mark.parametrize("name", list(EXPECTED_RETRY_WRAP_COUNTS))
 def test_sources_retry_wrapper_script(name):
     text = _read_skill(name)
     assert "source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh" in text, (
@@ -817,4 +820,71 @@ def test_spawn_failures_has_dispatch_inject_unsent_row():
     assert header_count == 1, (
         f"expected exactly one 'Known signatures' table (one header line), found {header_count} "
         "— a regression could reintroduce #43 as a second, separate table instead of a row in the existing one"
+    )
+
+
+# --- orca-retro: epic-end skill-defect feedback loop (layer-3) ---
+
+
+def test_logging_outcome_enum_includes_retro_values():
+    text = (WORKFLOWS_DIR / "logging.md").read_text()
+    m = re.search(r'"outcome":"<([^>]+)>"', text)
+    assert m, "outcome enum line missing in logging.md"
+    assert "RETRO_DONE" in m.group(1) and "RETRO_FAIL" in m.group(1), (
+        "outcome enum must document the epic-retro results; filing undocumented "
+        "values is exactly the drift the retro loop hunts"
+    )
+
+
+def test_orca_retro_files_issues_never_edits_skills():
+    text = _read_skill("orca-retro")
+    assert "gh issue create" in text, "output channel must be GitHub issues"
+    assert "직접 수정하지 않는다" in text, (
+        "orca-retro must state it never edits skill files itself"
+    )
+
+
+def test_orca_retro_has_four_defect_lenses():
+    text = _read_skill("orca-retro")
+    for marker in ("스키마 위반", "반복 FAIL", "ESCALATE", "spawn-failure"):
+        assert marker in text, f"orca-retro: defect lens marker missing: {marker}"
+
+
+def test_orca_retro_evidence_bar_and_issue_cap():
+    text = _read_skill("orca-retro")
+    assert "원문 인용" in text, "evidence-quote requirement missing"
+    assert "최대 3개" in text, "per-epic new-issue cap missing"
+
+
+def test_orca_retro_dedup_against_open_issues():
+    text = _read_skill("orca-retro")
+    assert "gh issue list" in text and "--state open" in text, (
+        "must check open issues before filing"
+    )
+    assert "재발 코멘트" in text, "recurrence must become a comment, not a duplicate issue"
+
+
+def test_orca_retro_schema_lens_scans_unfiltered():
+    text = _read_skill("orca-retro")
+    assert "issue 필터를 거치지 않고" in text, (
+        "lens 1 must scan full dated files — records with a drifted issue field "
+        "escape the issue filter"
+    )
+
+
+def test_orca_workflow_runs_retro_after_epic_close():
+    text = _read_skill("orca-workflow")
+    close_pos = text.index("close_issue(epic-num")
+    retro_pos = text.index("orca-retro")
+    assert close_pos < retro_pos, (
+        "retro must run after close_issue succeeds — running before risks leaving "
+        "a fully-done epic open if the coordinator dies mid-retro"
+    )
+
+
+def test_orca_workflow_retro_is_best_effort():
+    text = _read_skill("orca-workflow")
+    assert "RETRO_FAIL" in text and "RETRO_DONE" in text
+    assert "실패시키지 않는다" in text, (
+        "retro failures must never fail the workflow"
     )

@@ -47,10 +47,14 @@ Extra fields (`wave_index`, `subtask_type`, `advisor`, ...) are added per call s
 ```bash
 install -d -m 700 ~/.local/state/orca-workflows/logs
 target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
-printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|PREMERGE_FAIL|NO_ACCEPTANCE_CRITERIA|NO_DONE_TRANSITION>","retry":<n>}\n' \
+printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|PREMERGE_FAIL|NO_ACCEPTANCE_CRITERIA|NO_DONE_TRANSITION|RETRO_DONE|RETRO_FAIL>","retry":<n>}\n' \
   "$(date -u +%FT%TZ)" >> "$target"
 chmod 600 "$target"
 ```
+
+`RETRO_DONE`/`RETRO_FAIL`은 task 라우팅이 아니라 epic retro 결과다 — `orca-workflow` §1d(epic close 직후의
+retro 사이트)만 쓴다. `RETRO_DONE` 라인은 per-call-site 추가 필드 규칙에 따라 `filed`/`commented`/`discarded`
+정수 카운트를 더해 남기고, `RETRO_FAIL` 라인은 카운트 필드를 생략한다.
 
 **`wave_start`/`wave_end`** (`orca-task-runner` only): same jq schema as today, written to
 `waves-$(date -u +%F).jsonl` instead of the fixed `waves.jsonl`.
