@@ -1,6 +1,6 @@
 # Spawn Failures
 
-> verified_at: 2026-07-26
+> verified_at: 2026-07-30
 
 Shared reference for `orca-workflow`/`orca-task-runner`/`orca-evaluate` so a spawn failure gets checked
 against known causes before re-diagnosing from scratch. The recurring problem (issue #16) wasn't that
@@ -66,9 +66,18 @@ the run looked like it succeeded — see that row's fix column.
 | `zsh: parse error` right after `dispatch --inject`, where the target terminal's *previous* command had already finished and returned to an idle shell prompt — not right after `terminal create`/`terminal send` (that's `#16` above) | the terminal was running a one-shot headless process (`agy -p ...`, `codex exec`) that already exited by the time `dispatch --inject` arrived, so the injected payload lands on a bare shell instead of a live application — a different root cause from `#16`'s quoting/parsing problem even though the surface error string is identical | fix depends on the provider. For a provider other than agy: do not launch ping-pong roles (contract review, code review) as one-shot — launch as a persistent REPL and confirm `tui-idle` before `dispatch --inject`. For agy specifically: do not use REPL at all (agy REPL is unsupported here, `models/agy.md` — 2026-07-30 unfocused-boot hang and concurrent-focus deadlock, `references/models/agy.md`) — instead put the complete task in the `-p` argument at launch time so no later `dispatch --inject` is ever needed; this is why agent-e2e reporting (`skills/orca-evaluate/SKILL.md` §2) is headless, not REPL | #37 |
 | `--permission-mode acceptEdits` (or any value other than `bypassPermissions`/`--dangerously-skip-permissions`) appearing in a launched `claude` command line for an SDD implementation worker, especially missing `--effort` alongside it | the worktree had a bare fallback shell (created by `worktree create` without `--agent`, not the agent-first path) and the spawn template was hand-retyped into it instead of copied verbatim, dropping/altering flags in the process | re-spawn using the exact template in `skills/orca-task-runner/SKILL.md` (`claude --model <model> --effort <effort> --dangerously-skip-permissions`) copied verbatim, not retyped; prefer `--agent claude` at worktree-create time so no bare fallback shell exists to retype into | #40 |
 | `Could not connect to the running Orca app` / `Orca is not running. Run 'orca open' first.` | Orca 앱 자동 업데이트가 세션 도중 앱을 재시작시켜, 그 창에 걸린 orchestration 호출이 실패 | `orca_call_with_retry`(`orca-workflows/scripts/orca_call_with_retry.sh`)로 감싼다 — `orca status --json`이 `ready`가 될 때까지 바운드 폴링(5s×6) 후 같은 호출을 재시도, 최대 2사이클 후에도 실패하면 호출부에 그대로 반환 | #42 |
+| *(no retrospective log-based signature — see root cause)* | `dispatch --inject`'s text-injection and Enter-confirmation are not atomic from the caller's side — one can complete while the other silently does not, and a single `terminal read` cannot distinguish the resulting stuck state from normal post-completion idle. Target is still a live REPL holding an unsent draft, not a bare dead shell — cf. `#37` above, whose target has already exited. This failure has no signature detectable after the fact from `term-<handle>.jsonl` alone: a `sent` event with no following `recv` is the by-design normal state at most dispatch sites (`logging.md`'s `recv` section), so it's indistinguishable from a successful dispatch in the log. The actual detection mechanism is the live bounded tail-diff in `dispatch-verify.md`, run at dispatch time — not something diagnosable retrospectively. If diagnosing this after the fact (not via the live verify procedure), the only way to confirm it is to `orca terminal read` the specific terminal directly and check whether it's still holding unsubmitted input | If arriving here after `dispatch-verify.md`'s own two-round check already ran (initial dispatch + one Enter-only retry, both static) — do not re-run that procedure. Instead: manually confirm via `orca terminal read` whether the terminal still holds unsubmitted input; if so, manually resend Enter once (`orca terminal send --terminal <handle> --enter --json`); if the terminal is instead fully dead (no process responding at all), treat as a different failure and diagnose fresh. Log an occurrence either way per the Procedure section above | #43 |
 
 ## Adding a new row
 
 Keep `failure_signature` a short, literal substring that would actually appear in `terminal read` output —
 not a paraphrase, or grep won't find it next time. Link the GitHub issue number rather than re-explaining
 the cause here; this table maps symptom → issue, it doesn't replace the issue body.
+
+**Exception (no-signature rows):** issue #43's row in the table above has no literal terminal-output
+substring, and no reliable log-based one either — its failure is an *absence* of change, and a `sent` event
+with no following `recv` in `term-<handle>.jsonl` is by-design normal at most dispatch sites (`logging.md`
+§2), not a distinguishing signature. Detection for this failure happens live, at dispatch time
+(`dispatch-verify.md`), not retrospectively from logs. Use a signature-less row like this only when a
+failure genuinely has neither a literal substring nor a reliable retrospective log check; default to the
+literal-substring form whenever one exists.

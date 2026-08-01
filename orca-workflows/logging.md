@@ -115,6 +115,10 @@ existing read. If a `dispatch --inject` site never reads the terminal back (resu
 channel — e.g. a relayed judgment, or a report file read directly), it logs `sent` only. Each `SKILL.md`
 call site states explicitly which case it is.
 
+**Carve-out:** the post-`dispatch --inject` liveness probe in `dispatch-verify.md` (a bounded, opaque tail
+equality comparison, never inspected for content) does not count as "already reads that terminal's output"
+for this rule — a site whose only read of a terminal is that probe still logs `sent` only, not `recv`.
+
 For a terminal's **first** read (no prior cursor for this handle), omit `--cursor` entirely — this matches
 what `orca-task-runner` §5's close block does (`read_json="$(orca terminal read --terminal <handle> --json)"`,
 right before `orca terminal close`) and avoids relying on unverified behavior for `--cursor 0`:
