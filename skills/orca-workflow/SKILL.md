@@ -175,6 +175,10 @@ orca_call_with_retry "orca-workflow" "evaluator" -- \
   # 안 본다. 그건 lifecycle-gate-policy의 premerge.sh 몫이라 merge 직전에 따로 불러야 한다.
   # 이 레포가 그 컨벤션을 아직 안 썼으면(scripts/premerge.sh 자체가 없으면) 예전처럼 바로 merge —
   # 여기서 새로 강제하지 않는다.
+  # migration/schema 변경이 diff에 있으면 premerge가 MIGRATION_ESCALATE로 막아줄 것이라 가정하지
+  # 않는다(#45) — 그 체크는 배포된 템플릿 버전에 따라 아예 없거나(v1), 있어도 기본 꺼짐이다
+  # (opt-in MIGRATION_LINT_ENABLED). 대상 repo의 merge policy 문서(AGENTS.md 등)를 exit code와
+  # 별개로 직접 확인한 뒤에만 self-merge한다.
   if [ -f scripts/premerge.sh ]; then
     # --review-done: orca-evaluate §3의 code review가 이미 그 review 통과를 의미한다.
     if ! bash scripts/premerge.sh --review-done; then
@@ -183,8 +187,9 @@ orca_call_with_retry "orca-workflow" "evaluator" -- \
         "$(date -u +%FT%TZ)" "$premerge_exit" >> "$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
       # 여기서 merge하지 않는다 — gh pr merge를 건너뛰고 바로 아래 "3. Inspecting"으로 분기한다
       # (GATE_FAIL과 같은 원칙: 여기서 추가 재시도 걸지 않음).
-      # premerge.sh exit code: 2=precondition(stale-main 등) 3=PROTECTED 4=REVIEW 5=MIGRATION_ESCALATE
-      # 그 외=verify/e2e 실패 통과값. Inspecting 보고에 이 exit code와 마지막 stderr 몇 줄을 그대로 첨부한다.
+      # exit code의 의미는 여기 복제하지 않는다 — 대상 repo의 scripts/premerge.sh 헤더 주석이 정본이다
+      # (복제한 표가 배포본 구현과 어긋난 실측: #45). Inspecting 보고에 이 exit code + 그 헤더에서
+      # 디코드한 의미 + 마지막 stderr 몇 줄을 그대로 첨부한다.
     else
       gh pr merge "$pr_num" --squash --delete-branch
     fi
@@ -209,7 +214,7 @@ printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num
 
 ## 3. Inspecting
 
-사람 체크포인트. 보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/PREMERGE_FAIL/NO_ACCEPTANCE_CRITERIA/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **PREMERGE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 merge 직전 게이트에서 막혔다는 뜻이므로, premerge.sh의 exit code(2=stale-main 등 precondition, 3=PROTECTED, 4=REVIEW, 5=MIGRATION_ESCALATE, 그 외=verify/e2e 실패)와 마지막 출력 몇 줄을 그대로 표시한다 — 사람이 그 의미를 다시 유추하지 않게. **NO_ACCEPTANCE_CRITERIA**는 §2 전제 확인에서 acceptance-criteria 섹션이 issue body에 없어 `orca-task-runner`를 아예 호출하지 않았다는 뜻이다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음). 두 outcome 모두 §2d를 거치지 않고 발생하므로(GATE_FAIL과 같은 이유), 발생 시점에서 즉시 위 outcome 로그 라인을 해당 outcome 값으로 직접 남긴다. 사람이 고를 수 있는 것: 계속(피드백 반영해 재시도) / 재계획(요구사항 자체를 다시 논의 — 1a 또는 issue 수정으로 복귀) / 중단.
+사람 체크포인트. 보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/PREMERGE_FAIL/NO_ACCEPTANCE_CRITERIA/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **PREMERGE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 merge 직전 게이트에서 막혔다는 뜻이므로, premerge.sh의 exit code와 그 의미(대상 repo `scripts/premerge.sh`의 헤더 주석에서 디코드한다 — 그 헤더 주석이 정본이고, 표를 이 스킬에 복제하지 않는다), 마지막 출력 몇 줄을 그대로 표시한다 — 사람이 그 의미를 다시 유추하지 않게. **NO_ACCEPTANCE_CRITERIA**는 §2 전제 확인에서 acceptance-criteria 섹션이 issue body에 없어 `orca-task-runner`를 아예 호출하지 않았다는 뜻이다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음). 두 outcome 모두 §2d를 거치지 않고 발생하므로(GATE_FAIL과 같은 이유), 발생 시점에서 즉시 위 outcome 로그 라인을 해당 outcome 값으로 직접 남긴다. 사람이 고를 수 있는 것: 계속(피드백 반영해 재시도) / 재계획(요구사항 자체를 다시 논의 — 1a 또는 issue 수정으로 복귀) / 중단.
 
 ## 폴백
 
