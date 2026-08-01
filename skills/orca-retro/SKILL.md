@@ -15,7 +15,7 @@ sleeptimegrt-skills 이슈(또는 기존 이슈의 재발 코멘트)뿐이며, �
 - 입력 3개: epic 이슈 번호, 대상 repo, skills repo(sleeptimegrt-skills)의 GitHub slug.
 - child 목록: `~/.agents/orca-workflows/issue-trackers/selection.md` 절차로 백엔드를 정하고
   `list_children(epic-num)`으로 얻는다. epic 자신 + child 전체가 이번 분석의 issue 집합이다.
-- 로그 루트 `~/.local/state/orca-workflows/logs/`가 없거나 비어 있으면 §5 요약(filed=0)으로 즉시
+- 로그 루트 `~/.local/state/orca-workflows/logs/`가 없거나 비어 있으면 §5 요약(filed=[])으로 즉시
   종료한다 — harness 밖에서 처리된 epic은 정상 케이스다.
 
 ## 1. 수집
