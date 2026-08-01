@@ -6,7 +6,7 @@ This file owns the tier-to-model mapping. Provider documents own launch syntax a
 Load [the selection reference](references/model-selection.md) only when auditing, changing, or re-validating
 the mapping.
 
-Workflow orchestration is owned by `orca-workflow`, `orca-task-runner`, and `orca-evaluate`.
+Workflow orchestration is owned by `orca-workflow`, `orca-task-runner`, `orca-evaluate`, and `orca-retro`.
 
 ## 1. Classify the task
 
