@@ -11,18 +11,22 @@ task(issue) 하나를 **1회** 평가한다(subtask마다 하지 않음). 코드
 
 ## 0. 이 세션 자체의 launch — REPL 가능한 provider로, agy는 제외
 
-`orca-workflow`가 이 스킬을 orchestration으로 띄운다 — 별도 터미널을 만들어 넘기는 것이지 자기 세션에서 도는 게 아니다. 스폰 실패 시(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않고 `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다 — 아래 §1·§2·§3의 `terminal create` 호출에도 동일하게 적용된다.
+`orca-workflow`가 이 스킬을 orchestration으로 띄운다 — 별도 터미널을 만들어 넘기는 것이지 자기 세션에서 도는 게 아니다. 스폰 실패 시(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않고 `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다 — 아래 §1·§2·§3의 `terminal create` 호출에도 동일하게 적용된다. 자동 업데이트로 Orca 앱이 세션 도중 재시작해 orchestration 호출이 일시적으로 끊기면(known signature: 같은 문서, issue #42), 아래 §0·§1·§2·§3의 `orca orchestration`/`orca terminal create` 호출은 전부 `source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh` 후 `orca_call_with_retry <skill> <role> -- <원명령>`으로 감싼다.
 
 **이 세션은 REPL로 띄우되, agy는 제외한다.** One-shot(`agy -p ... --print-timeout`)은 이후 `dispatch --inject`가 이미 종료된 프로세스의 셸에 떨어져 도달하지 못하므로(issue #37, `spawn-failures.md` 참고) REPL이 필요하다 — 하지만 agy로 그 REPL을 띄우면 안 된다: 포커스 없이 부팅이 멈추거나 동시 focus 경합 시 영구 데드락으로 이어질 수 있다(`~/.agents/orca-workflows/models/agy.md` — agy는 이 repo 전체에서 headless 전용). 그래서 `model-selection.md` 기준으로 REPL이 검증된, agy 아닌 provider로 resolve한다(구체 모델명은 여기 복제하지 않는다 — 아래 §1·§3의 sub-agent 스폰과 같은 원칙). launch-then-inject 시퀀스는 그 provider 자신의 launch 문서를 따른다:
 
 ```bash
-orca terminal create --worktree active --title task-evaluate-<n> \
+source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
+orca_call_with_retry "orca-workflow" "evaluator" -- \
+  orca terminal create --worktree active --title task-evaluate-<n> \
   --command "<REPL이 가능한, agy 제외 provider의 launch 문법 — provider 문서에서 resolve>" --json
 orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json
 # 해당 provider가 최초 launch 시 신뢰/승인류 재프롬프트를 요구하면 그 provider 문서가 정의하는 절차를 따른다
 # (agy처럼 자동 확정 가능한 provider도 있고 아닐 수도 있다 — 여기서 agy 전용 시퀀스를 가정하지 않는다).
-orca orchestration task-create --spec "<이 SKILL.md 지침 + diff 경로 + issue 원문 acceptance criteria + PASS/FAIL/ESCALATE 요청>" --json
-orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
+orca_call_with_retry "orca-workflow" "evaluator" -- \
+  orca orchestration task-create --spec "<이 SKILL.md 지침 + diff 경로 + issue 원문 acceptance criteria + PASS/FAIL/ESCALATE 요청>" --json
+orca_call_with_retry "orca-workflow" "evaluator" -- \
+  orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
 ```
 
 **이 세션 자체는 agy가 아니다.** agy는 §2(agent e2e)에서만, headless sub-spawn으로만 쓴다 — Gemini의 속도·비용·컴퓨터 사용 강점이 거기 맞기 때문이다(`model-selection.md`의 Computer Use / Long-Context 축, `models/agy.md` 참고). e2e·pgTAP 자체는 새로 안 들어온다 — `orca-task-runner`의 task-레벨 게이트(`skills/orca-task-runner/SKILL.md` §6)를 이미 통과한 뒤에만 이 스킬이 호출되므로 전량 신뢰한다.
@@ -34,14 +38,18 @@ orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --j
 `orca-task-runner`가 구현 전 제안서(범위 + 검증 방법)를 보내오면, 이 세션(evaluator)이 직접 판단하지 않고 **coding agent 터미널을 스폰**해서 issue의 원본 acceptance-criteria 섹션(`orca-workflow`가 dispatch spec으로 넘겨준 섹션명)에 대조 검토를 맡긴다 — 제안된 파일 범위·검증 방법이 실제 코드베이스에서 기술적으로 타당한지 보는, 구현 착수 전의 1회성 판단이라 diff 규모 같은 위험도를 낮출 신호가 아직 존재하지 않는 시점이다. 그래서 여기는 고정된 강한 reasoning 모델(`model-selection.md` High Risk tier)을 쓴다 — §3처럼 사후에 diff 통계로 동적으로 낮추지 않는다.
 
 ```bash
+source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 # 다회 왕복(핑퐁)이 필요한 역할 — one-shot(`agy -p`/`codex exec`) 금지, 반드시 인터랙티브(REPL)
 # 세션으로 띄운다(provider 이름에 종속되지 않는 공통 원칙)
-orca terminal create --worktree active --title eval-contract \
+orca_call_with_retry "orca-evaluate" "contract-review" -- \
+  orca terminal create --worktree active --title eval-contract \
   --command "<강한 reasoning provider의 launch 문법 — provider 문서에서 resolve>" --json
 orca terminal wait --terminal <contract-handle> --for tui-idle --timeout-ms 60000 --json
-spec_text="<제안서 경로 + acceptance criteria 원문 + 승인/반려 판정 요청 + 반려 시 어느 criteria가 안 커버되는지 명시>"
-orca orchestration task-create --spec "$spec_text" --json
-orca orchestration dispatch --task <task_id> --to <contract-handle> --inject --json
+spec_text="<제안서 경로 + acceptance criteria 원문 + 승인/반려 판정 요청 + 반려 시 어느 criteria가 안 커버되는지 명시 + 판정 결과를 보낼 orchestration 호출은 orca_call_with_retry로 감싸고 연결 실패를 즉시 사람에게 알리지 말라는 지시>"
+orca_call_with_retry "orca-evaluate" "contract-review" -- \
+  orca orchestration task-create --spec "$spec_text" --json
+orca_call_with_retry "orca-evaluate" "contract-review" -- \
+  orca orchestration dispatch --task <task_id> --to <contract-handle> --inject --json
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43): 15초 뒤 재-read해서
 # tail이 그대로면 Enter만 재전송, 그래도 그대로면 spawn-failures.md로. §3 스폰도 동일하게 적용한다.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. §3 스폰도 동일한 형태(§2 agent-e2e는
@@ -67,8 +75,10 @@ gate로 처리한다(`skills/orca-workflow/SKILL.md` §2, outcome `NO_ACCEPTANCE
 앱을 직접 조작하는 e2e. Playwright MCP(accessibility-tree 기반 — 스크린샷·좌표 클릭보다 UI 변경에 덜 깨진다)를 붙인 agy(Gemini) 세션을 **headless(`-p`, one-shot)로** 스폰한다, REPL 아님(agy는 이 스킬 전체에서 REPL 금지 — 이유는 §0). 시나리오·경로·요청 형식을 launch 시점의 `-p` 인자 하나에 다 담아 한 번에 실행하고, 이후 orchestration 왕복 없이 완료를 회수한다. (e2e·pgTAP은 여기서 안 돈다 — `orca-task-runner`의 task-레벨 게이트를 이미 통과한 뒤에만 이 스킬이 호출되므로 전량 신뢰한다.)
 
 ```bash
+source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 report_path="<worktree 루트>/.evaluate-agent-e2e-report.md"
-orca terminal create --worktree active --title eval-agent-e2e \
+orca_call_with_retry "orca-evaluate" "agent-e2e" -- \
+  orca terminal create --worktree active --title eval-agent-e2e \
   --command "agy -p '<Playwright MCP 지침 + 테스트 시나리오 + 앱 URL/worktree 경로 + 실패 시 무엇을 관찰했는지 요약해서 $report_path에 저장하고 완료 시 한 줄 요약도 출력하라는 지침>' --model <token> --print-timeout 15m --dangerously-skip-permissions" --json
 orca terminal wait --terminal <agent-e2e-handle> --for tui-idle --timeout-ms 900000 --json
 # 완료 확인은 orchestration이 아니라 터미널 출력/report 파일로 한다 — headless는 dispatch --inject
@@ -113,6 +123,7 @@ fi
 fresh-context code-reviewer terminal을 하나 스폰한다(이 evaluator 세션과는 별개 세션 — `orca-task-runner`(generator)와 달라야 한다는 뜻은 아니다). 모델·effort는 diff 통계(변경 파일 수·라인 수)를 `<skill-dir>/scripts/select_reviewer.py`에 넘겨 동적으로 고른다 — 후보 풀·제외 사유·high-risk-signal 오버라이드·Codex 가용성 판단·스폰 실패 시 재시도 로직은 `references/reviewer-selection.md` 참고(구체 모델명을 SKILL.md 본문에 복제하지 않는다 — `orca-task-runner` §0과 같은 원칙). 리뷰어는 반드시 이 항목들을 갖는다: ①skeptical 지침("동의 표명 불필요, 결함·spec-divergence만 보고, 근거 있는 우려를 안이하게 넘기지 말 것") ②issue의 acceptance criteria 원문 ③**§2 agent e2e 결과 요약** — diff만으로는 안 보이는 런타임 동작(무엇이 실제로 실패했는지)을 code review가 근거로 쓸 수 있게 한다 ④**(schema/migration 변경이 있으면) `.migration-lint.json` 결과 + §1에서 받은 "의도된 destructive 오퍼레이션" 선언** — 린터가 flag한 항목 중 선언에 커버되지 않는 게 있으면 report에 명시하라는 지시와 함께 ⑤**게이트-안전성 판단 지시** — 이 diff가 orca 파이프라인 자신의 머지/게이트 안전성에 영향을 주는지(예시일 뿐 비망라적: 워크플로 스킬 문서, 게이트·훅 스크립트, CI·hook 설정, 이 파이프라인이 의존하는 셸 배선 자체를 수정하는 diff인지 등) 리뷰의 첫 단계로 판단하라고 지시한다. 영향이 있다고 판단되면 그 부분을 diff의 다른 코드보다 더 엄격하게(더 회의적으로, 더 많은 재현·실패 시나리오로) 검토하라고 요구한다. 이 판단은 정적 파일 경로 목록과 절대 대조하지 않는다 — 리뷰어 자신의 판단이다. 게이트-안전성 영향이 있다고 판단했는데 주어진 정보로 완전히 clear하지 못하면 Critical/Important finding 또는 명시적 escalation 사유로 report에 반드시 남기라고 지시한다(diff 규모가 작아 이 리뷰가 낮은 tier로 동적 선택됐더라도, 그 사실만으로 게이트-안전성 우려를 낮잡아 보지 말 것).
 
 ```bash
+source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 diff_shortstat="$(git diff --shortstat "$(git merge-base origin/main HEAD)"...HEAD)"
 # codex_available: 1차 근거는 이번 세션에서 사용자가 알려준 정보. 그 정보가 없을 때만
 # `command -v codex`로 바이너리 존재를 보조 확인한다(토큰/쿼터까지는 증명하지 못한다).
@@ -134,14 +145,17 @@ case "$reviewer_provider" in
 esac
 
 # REPL 필수, one-shot 금지 — 이유는 §1의 동일 주석 참고
-orca terminal create --worktree active --title eval-review \
+orca_call_with_retry "orca-evaluate" "code-review" -- \
+  orca terminal create --worktree active --title eval-review \
   --command "$launch_cmd" --json
 orca terminal wait --terminal <review-handle> --for tui-idle --timeout-ms 60000 --json
 # 스폰이 실패했고 reviewer_provider가 codex였다면(spawn-failures.md 절차로 확인) 여기서 재진단하지
 # 않고 --no-codex-available로 select_reviewer.py를 다시 불러 Claude 분기로 재시도한다.
-spec_text="<diff 절대경로 + acceptance criteria 원문 + §2 agent e2e 결과 요약 + (해당 시) migration-lint 결과와 §1 destructive-op 선언 + skeptical 리뷰 지침 + report 경로 + 코드 수정 금지>"
-orca orchestration task-create --spec "$spec_text" --json
-orca orchestration dispatch --task <task_id> --to <review-handle> --inject --json
+spec_text="<diff 절대경로 + acceptance criteria 원문 + §2 agent e2e 결과 요약 + (해당 시) migration-lint 결과와 §1 destructive-op 선언 + skeptical 리뷰 지침 + report 경로 + 코드 수정 금지 + 판정 결과를 보낼 orchestration 호출은 orca_call_with_retry로 감싸고 연결 실패를 즉시 사람에게 알리지 말라는 지시>"
+orca_call_with_retry "orca-evaluate" "code-review" -- \
+  orca orchestration task-create --spec "$spec_text" --json
+orca_call_with_retry "orca-evaluate" "code-review" -- \
+  orca orchestration dispatch --task <task_id> --to <review-handle> --inject --json
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43): 15초 뒤 재-read해서
 # tail이 그대로면 Enter만 재전송, 그래도 그대로면 spawn-failures.md로.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로.

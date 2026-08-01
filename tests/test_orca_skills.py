@@ -611,6 +611,75 @@ def test_orca_terminal_read_counts_per_skill_file():
         )
 
 
+def test_spawn_failures_has_orca_restart_retry_row():
+    text = (WORKFLOWS_DIR / "spawn-failures.md").read_text()
+    assert "Could not connect to the running Orca app" in text
+    assert "Orca is not running. Run 'orca open' first." in text
+    assert "orca_call_with_retry" in text
+    assert "#42" in text
+
+
+_BASH_FENCE_RE = re.compile(r"^[ \t]*```bash\n(.*?)^[ \t]*```", re.M | re.S)
+
+
+def _bare_wrapped_call_line_numbers(text: str) -> list[int]:
+    """Line numbers (1-indexed) where an orca terminal-create/task-create/dispatch call appears
+    inside a ```bash fenced block without 'orca_call_with_retry' on the same or immediately
+    preceding line. Scoped to fenced code on purpose — a prose sentence that merely mentions one of
+    these commands (e.g. describing a manual orphan-recovery diagnostic step) is not a call site
+    this plan wraps, and scanning the whole file would false-positive on such mentions."""
+    patterns = (
+        "orca terminal create",
+        "orca orchestration task-create --spec",
+        "orca orchestration task-list",
+        "orca orchestration dispatch --task",
+    )
+    bare = []
+    for m in _BASH_FENCE_RE.finditer(text):
+        block_start_line = text[: m.start()].count("\n") + 2
+        block_lines = m.group(1).splitlines()
+        for j, line in enumerate(block_lines):
+            if any(pat in line for pat in patterns):
+                window = "\n".join(block_lines[max(0, j - 1) : j + 1])
+                if "orca_call_with_retry" not in window:
+                    bare.append(block_start_line + j)
+    return bare
+
+
+@pytest.mark.parametrize("name", NEW_SKILLS)
+def test_no_bare_wrapped_call_sites(name):
+    text = _read_skill(name)
+    bare = _bare_wrapped_call_line_numbers(text)
+    assert bare == [], (
+        f"{name}: orca terminal create/task-create/dispatch call(s) not wrapped by "
+        f"orca_call_with_retry at line(s) {bare}"
+    )
+
+
+EXPECTED_RETRY_WRAP_COUNTS = {
+    "orca-workflow": 6,
+    "orca-task-runner": 6,
+    "orca-evaluate": 10,
+}
+
+
+_RETRY_INVOCATION_LINE_RE = re.compile(r'^orca_call_with_retry "', re.M)
+
+
+@pytest.mark.parametrize(("name", "expected"), EXPECTED_RETRY_WRAP_COUNTS.items())
+def test_orca_call_with_retry_count_per_skill(name, expected):
+    actual = len(_RETRY_INVOCATION_LINE_RE.findall(_read_skill(name)))
+    assert actual == expected, f"{name}: expected {expected} orca_call_with_retry invocations, found {actual}"
+
+
+@pytest.mark.parametrize("name", NEW_SKILLS)
+def test_sources_retry_wrapper_script(name):
+    text = _read_skill(name)
+    assert "source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh" in text, (
+        f"{name}: must source orca_call_with_retry.sh before using the wrapper function"
+    )
+
+
 DISPATCH_VERIFY_FILE = "dispatch-verify.md"
 
 
@@ -631,6 +700,81 @@ def test_dispatch_verify_file_documents_bounded_tail_diff_and_escalation():
     assert "spawn-failures.md" in text, "must document escalation to the existing spawn-failure procedure"
     assert "❯" not in text and "⏺" not in text, (
         "must stay provider-agnostic — no Claude-Code-specific UI markers"
+    )
+
+
+@pytest.mark.parametrize("name", NEW_SKILLS)
+def test_every_retry_invocation_block_sources_the_wrapper(name):
+    """A file-wide 'source appears somewhere' check (the test above) is not sufficient: separate
+    ```bash fenced blocks in these docs represent separate shell invocations/spawned terminals, so
+    a function sourced in one block (e.g. orca-evaluate's §0) is not available in another (§1/§2/§3)
+    — each self-contained block that calls orca_call_with_retry must source it itself."""
+    text = _read_skill(name)
+    for m in _BASH_FENCE_RE.finditer(text):
+        block = m.group(1)
+        if _RETRY_INVOCATION_LINE_RE.search(block):
+            assert "source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh" in block, (
+                f"{name}: a fenced block using orca_call_with_retry (starting near char offset "
+                f"{m.start()}) is missing its own source line"
+            )
+
+
+def test_orca_workflow_section0_notes_retry_wrapping():
+    text = _read_skill("orca-workflow")
+    section0_start = text.index("## 0.")
+    section0_end = text.index("## 1.")
+    section0 = text[section0_start:section0_end]
+    assert "orca_call_with_retry" in section0 and "#42" in section0
+
+
+def test_orca_task_runner_subtask_spec_required_items_includes_retry_wrapping():
+    text = _read_skill("orca-task-runner")
+    checklist_idx = text.index("subtask spec 필수 항목")
+    sixth_idx = text.index("⑥", checklist_idx)
+    seventh_idx = text.index("⑦", sixth_idx)
+    assert checklist_idx < sixth_idx < seventh_idx
+    para_end = text.index("\n\n", checklist_idx)
+    seventh_segment = text[seventh_idx:para_end]
+    assert "orca_call_with_retry" in seventh_segment
+
+
+def test_orca_task_runner_section0_notes_retry_wrapping():
+    text = _read_skill("orca-task-runner")
+    section0_start = text.index("## 0.")
+    section0_end = text.index("## 1.")
+    section0 = text[section0_start:section0_end]
+    assert "orca_call_with_retry" in section0 and "#42" in section0
+
+
+def test_orca_evaluate_worker_specs_instruct_retry_wrapping():
+    text = _read_skill("orca-evaluate")
+    for marker in ("제안서 경로", "diff 절대경로"):
+        idx = text.index(marker)
+        end = text.index('>"', idx)
+        segment = text[idx:end]
+        assert "orca_call_with_retry" in segment, (
+            f"orca-evaluate: spec_text placeholder starting near {marker!r} must instruct the "
+            "spawned worker to wrap its own orchestration replies in orca_call_with_retry"
+        )
+
+
+def test_orca_evaluate_section0_notes_retry_wrapping():
+    text = _read_skill("orca-evaluate")
+    section0_start = text.index("## 0.")
+    section0_end = text.index("## 1.")
+    section0 = text[section0_start:section0_end]
+    assert "orca_call_with_retry" in section0 and "#42" in section0
+
+
+def test_agents_md_orca_workflows_note_mentions_scripts_dir():
+    text = (REPO_ROOT / "AGENTS.md").read_text()
+    idx = text.index("orca-workflows/` deploy path (decision, #22)")
+    remainder = text[idx:]
+    section_end_offset = remainder.index("\n## ") if "\n## " in remainder else len(remainder)
+    section = remainder[:section_end_offset]
+    assert "scripts/" in section and "orca_call_with_retry.sh" in section, (
+        "AGENTS.md's orca-workflows/ deploy-path note must mention the new scripts/ directory "
+        "now that it holds an executable helper, not just reference docs"
     )
 
 

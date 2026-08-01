@@ -20,6 +20,10 @@ description: Use when generating the implementation for one task (issue) — pro
 - 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 —
   `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다. §3(launch)과 §5(폴링)에서
   이 확인이 걸리는 지점을 표시한다.
+- 자동 업데이트로 Orca 앱이 세션 도중 재시작해 orchestration 호출이 일시적으로 끊기면(known signature:
+  `~/.agents/orca-workflows/spawn-failures.md`, issue #42), §2·§3·§5의 `orca orchestration`/
+  `orca terminal create` 호출은 전부 `source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh`
+  후 `orca_call_with_retry <skill> <role> -- <원명령>`으로 감싼다.
 - **이 issue에 대해 이 세션이 처음이 아닐 수 있다면**(이전 coordinator가 도중에 죽어서 재개하는 경우) 새 wave를 시작하기 전에 orphan부터 정리한다 — §3/§5 wave telemetry는 coordinator가 살아서 markdown 지침을 끝까지 실행해야만 남는 best-effort 기록이라, coordinator가 wave 도중 죽으면(그리고 그게 바로 우리가 잡으려는 CPU 경합의 극단적 형태다) `wave_start`만 남고 `wave_end`가 영영 안 남을 수 있다:
 
   ```bash
@@ -50,8 +54,10 @@ description: Use when generating the implementation for one task (issue) — pro
 합의된 범위로 subtask를 쪼갠다. 각 subtask가 만들/수정할 파일 목록을 비교: **겹치면 `--deps` 순차 의존, 독립이면 같은 wave.** 판정이 애매하면 보수적으로 의존 처리.
 
 ```bash
+source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 spec_text="<subtask 본문 + 아래 필수 항목>"
-orca orchestration task-create --spec "$spec_text" --deps '["task_xxx"]' --json
+orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
+  orca orchestration task-create --spec "$spec_text" --deps '["task_xxx"]' --json
 # spec_text 사이드카(로그 아님 — 일회성 핸드오프 파일) — logging.md §2의 sent 레시피는 "task-create
 # --spec에 쓴 텍스트와 동일한 문자열"을 요구하는데, 그 원문을 코디네이터가 실제로 들고 있는 시점은
 # 지금뿐이다(§5 dispatch는 몇 wave, 잠재적으로 긴 시간 뒤). 이 시점엔 아직 dispatch 대상 handle을
@@ -63,18 +69,21 @@ printf '%s' "$spec_text" > "$HOME/.local/state/orca-workflows/logs/spec-<task_id
 chmod 600 "$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"
 ```
 
-subtask spec 필수 항목: ①구체적 작업 내용(코드 블록 포함 그대로) ②커밋 대상 브랜치·worktree 명시 ③resolved provider/model/effort 기록 ④"막히면 ask로 blocking 질문" ⑤"완료 시 preamble 지시대로 worker_done(payload에 filesModified)" ⑥**병렬 커밋 안전 규칙**(같은 worktree를 공유하는 병렬 워커가 서로의 미완성 변경을 덮어쓰지 않도록): `git add` 명시 경로만·`git commit -m "<msg>" -- <files>` pathspec 필수·index.lock 재시도.
+subtask spec 필수 항목: ①구체적 작업 내용(코드 블록 포함 그대로) ②커밋 대상 브랜치·worktree 명시 ③resolved provider/model/effort 기록 ④"막히면 ask로 blocking 질문" ⑤"완료 시 preamble 지시대로 worker_done(payload에 filesModified)" ⑥**병렬 커밋 안전 규칙**(같은 worktree를 공유하는 병렬 워커가 서로의 미완성 변경을 덮어쓰지 않도록): `git add` 명시 경로만·`git commit -m "<msg>" -- <files>` pathspec 필수·index.lock 재시도. ⑦**연결 실패 자동 재시도**: worker_done을 포함해 네가 보내는 `orca orchestration`/`orca terminal` 호출은 항상 `source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh` 후 `orca_call_with_retry`로 감싸고, 연결 실패는 wrapper가 exhausted를 반환할 때만 사람에게 ask로 보고한다(issue #42).
 
 ## 3. Wave 준비
 
 wave 크기 상한은 임시로 없다(§5 wave telemetry로 데이터를 쌓아 재계측 중) — 그렇다고 무제한으로 키우지는 않는다: 머신 리소스 상황을 보며 판단하고, 한 wave에서 스폰 실패·timeout 재시도가 2회 이상 발생하면 그 즉시 wave 크기를 3 이하로 되돌리고 사용자에게 보고한다. provider는 자유 선택(claude/codex/agy 아무거나, 토큰 효율을 위해 섞어도 됨) — 모델·effort는 subtask 성격에 맞게 provider 문서에서 고른다.
 
 ```bash
+source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 # claude
-orca terminal create --worktree active --title task-impl-<n> \
+orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
+  orca terminal create --worktree active --title task-impl-<n> \
   --command "claude --model <model> --effort <effort> --dangerously-skip-permissions" --json
 # codex
-orca terminal create --worktree active --title task-impl-<n> \
+orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
+  orca terminal create --worktree active --title task-impl-<n> \
   --command "codex --model <model> -c model_reasoning_effort=<effort> -s workspace-write -a never" --json
 # agy — 프롬프트는 파일에 먼저 쓰고 command substitution으로 전달한다(인라인 '<...>' quoting은
 # 괄호·따옴표·개행이 있는 프롬프트에서 라이브 셸 파싱 에러를 낸다 — orca-workflows/spawn-failures.md)
@@ -82,7 +91,8 @@ prompt_file="$(mktemp "${TMPDIR:-/tmp}/agy-prompt-XXXXXX.txt")"
 cat > "$prompt_file" <<'PROMPT_EOF'
 <subtask 지침>
 PROMPT_EOF
-orca terminal create --worktree active --title task-impl-<n> \
+orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
+  orca terminal create --worktree active --title task-impl-<n> \
   --command "agy -p \"\$(cat '$prompt_file')\" --model <model> --print-timeout 15m --dangerously-skip-permissions" --json
 orca terminal wait --terminal <impl-handle> --for tui-idle --timeout-ms 60000 --json   # agy는 --for exit --timeout-ms 960000
 ```
@@ -110,10 +120,13 @@ subtask가 worker_done을 보내기 전에 스스로 실행: typecheck, unit tes
 ## 5. Wave 루프
 
 ```bash
-orca orchestration task-list --ready --brief --json
+source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
+orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
+  orca orchestration task-list --ready --brief --json
 spec_sidecar="$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"   # §2에서 남긴 사이드카
 spec_text="$(cat "$spec_sidecar")"   # 지금 재구성하지 않는다 — §2에서 남긴 원문 그대로
-orca orchestration dispatch --task <task_id> --to <impl_handle> --inject --json   # wave 크기만큼 병렬 — 상한 임시 해제, §3 참고
+orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
+  orca orchestration dispatch --task <task_id> --to <impl_handle> --inject --json   # wave 크기만큼 병렬 — 상한 임시 해제, §3 참고
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43): 15초 뒤 재-read해서
 # tail이 그대로면 Enter만 재전송, 그래도 그대로면 spawn-failures.md로.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. dispatch와 같은 블록에서 즉시 실행(누락 방지).
