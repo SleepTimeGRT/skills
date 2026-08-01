@@ -903,3 +903,23 @@ def test_orca_workflow_retro_is_best_effort():
     assert "실패시키지 않는다" in text, (
         "retro failures must never fail the workflow"
     )
+
+
+def test_orca_workflow_premerge_exit_semantics_not_replicated():
+    text = _read_skill("orca-workflow")
+    # The replicated exit-code table drifted from reality once (#45): a deployed v1 premerge.sh
+    # never implements exit 5, and the current template ships it opt-in (MIGRATION_LINT_ENABLED
+    # defaults to false). The target repo's script header is the only source of truth.
+    for stale in ("5=MIGRATION_ESCALATE", "3=PROTECTED", "4=REVIEW"):
+        assert stale not in text, (
+            f"orca-workflow must not replicate premerge.sh's exit-code table ('{stale}') — "
+            "decode from the target repo's scripts/premerge.sh header comment instead"
+        )
+    assert "헤더 주석이 정본" in text, (
+        "orca-workflow must name the target repo's premerge.sh header comment as the exit-code "
+        "source of truth"
+    )
+    assert "merge policy" in text, (
+        "orca-workflow §2d must require checking the repo's merge policy independently of "
+        "premerge exit codes before self-merging a migration-touching diff"
+    )
