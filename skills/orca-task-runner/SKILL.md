@@ -69,7 +69,7 @@ printf '%s' "$spec_text" > "$HOME/.local/state/orca-workflows/logs/spec-<task_id
 chmod 600 "$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"
 ```
 
-subtask spec 필수 항목: ①구체적 작업 내용(코드 블록 포함 그대로) ②커밋 대상 브랜치·worktree 명시 ③resolved provider/model/effort 기록 ④"막히면 ask로 blocking 질문" ⑤"완료 시 preamble 지시대로 worker_done(payload에 filesModified)" ⑥**병렬 커밋 안전 규칙**(같은 worktree를 공유하는 병렬 워커가 서로의 미완성 변경을 덮어쓰지 않도록): `git add` 명시 경로만·`git commit -m "<msg>" -- <files>` pathspec 필수·index.lock 재시도. ⑦**연결 실패 자동 재시도**: worker_done을 포함해 네가 보내는 `orca orchestration`/`orca terminal` 호출은 항상 `source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh` 후 `orca_call_with_retry`로 감싸고, 연결 실패는 wrapper가 exhausted를 반환할 때만 사람에게 ask로 보고한다(issue #42).
+subtask spec 필수 항목: ①구체적 작업 내용(코드 블록 포함 그대로) ②커밋 대상 브랜치·worktree 명시 ③resolved provider/model/effort 기록 ④"막히면 ask로 blocking 질문" ⑤"완료 시 preamble 지시대로 worker_done(payload에 filesModified)" ⑥**병렬 커밋 안전 규칙**(같은 worktree를 공유하는 병렬 워커가 서로의 미완성 변경을 덮어쓰지 않도록): `git add` 명시 경로만·`git commit -m "<msg>" -- <files>` pathspec 필수·index.lock 재시도. ⑦**연결 실패 자동 재시도 + orphan 폴백**: worker_done을 포함해 네가 보내는 `orca orchestration`/`orca terminal` 호출은 항상 `source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh` 후 `orca_call_with_retry`로 감싸고(issue #42), wrapper가 exhausted를 반환하면 ask를 포함한 추가 orchestration 호출을 시도하지 않는다 — 같은 죽은 transport를 타므로 똑같이 실패한다(issue #41). 대신 보내려던 결과 전문(worker_done payload, 없으면 현재 상태 요약)을 worktree 루트에 `.orca-orphaned-result-<task_id>.json`으로 저장하고(커밋 금지 — ⑥의 명시 경로 규칙이 이미 이를 배제한다), 터미널에 `ORPHANED_RESULT <task_id> <파일 절대경로>` 한 줄을 출력한 뒤 명확히 멈춘다(이후 도착하는 무관한 프롬프트를 집어삼키지 말 것).
 
 ## 3. Wave 준비
 
@@ -144,7 +144,7 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
 - timeout·`count:0` = 체크포인트. `terminal read`로 생사 확인, 활동 중이면 계속 대기. 생사가 아니라
   셸 에러/no-output이면 스폰 실패 — `~/.agents/orca-workflows/spawn-failures.md` 절차로.
 - decision_gate(워커 ask) → 판단 가능하면 `reply`, 불가하면 `orca-workflow`에 에스컬레이션.
-- worker_done 유실 복구: 커밋/산출물 확인 + `task-update --status completed` 수동 복구, 기록.
+- worker_done 유실 복구: 커밋/산출물/worktree 루트의 `.orca-orphaned-result-<task_id>.json`(⑦의 exhausted 폴백 산출물) 확인 + `task-update --status completed` 수동 복구, 기록. orphan 파일은 복구 반영 후 삭제한다.
 - **완료 확인된 subtask 터미널은 즉시 닫는다** — wave 전체를 기다리지 않고, 그 subtask의 `worker_done` 수신(taskId+dispatchId 일치) 또는 위 유실 복구가 끝나는 즉시:
 
   ```bash
