@@ -394,8 +394,18 @@ def test_orca_evaluate_review_model_selection_is_dynamic_not_fixed_high_risk():
         "orca-evaluate §3 must not keep the stale 'deliberately different model' framing that "
         "implied a fixed High-Risk model regardless of diff size"
     )
-    assert "하드 요구사항은 없다" in section_3 or "하드 요구사항이 없다" in section_3, (
-        "orca-evaluate §3 must state that reviewer != generator is not a hard requirement"
+    # bd6a69f moved the "not a hard requirement" statement out of §3 into the reviewer-selection
+    # reference — the invariant now lives there, reachable via §3's pointer.
+    assert "references/reviewer-selection.md" in section_3, (
+        "orca-evaluate §3 must point at references/reviewer-selection.md for selection policy "
+        "details (candidate pool, exclusions, high-risk override)"
+    )
+    reviewer_selection = (
+        SKILLS_DIR / "orca-evaluate" / "references" / "reviewer-selection.md"
+    ).read_text()
+    assert "not a hard requirement" in reviewer_selection, (
+        "reviewer-selection.md must keep stating that a reviewer differing from the generator "
+        "is a diversity benefit, not a hard requirement"
     )
 
 
@@ -435,12 +445,17 @@ def test_orca_evaluate_high_risk_signal_wired_to_reviewer_selection():
 
 def test_orca_evaluate_preserves_evaluator_separation_intent():
     text = _read_skill("orca-evaluate")
-    # Removing "일부러 다른 모델을 쓰는 것" must not delete the one sentence in §3 saying the
-    # reviewer must differ from this evaluator session (Gemini) itself — a different concern from
-    # reviewer != generator, and the one round1 found at risk of accidental deletion.
-    assert "evaluator 세션(Gemini)" in text, (
-        "orca-evaluate §3 must keep stating the reviewer must be a different model from this "
-        "evaluator session (Gemini) itself, not just 'fresh context' in the abstract"
+    # b808d3d retired the agy(Gemini)-pinned evaluator session; the separation invariant survives
+    # in provider-neutral form and must not be lost to further rewording: the §3 reviewer spawn
+    # stays a separate session from this evaluator session, and the fallback keeps refusing
+    # self-judgment — a different concern from reviewer != generator.
+    assert "이 evaluator 세션과는 별개 세션" in text, (
+        "orca-evaluate §3 must keep stating the code reviewer is a separate session from this "
+        "evaluator session itself, not just 'fresh context' in the abstract"
+    )
+    assert "같은 세션이 스스로를 판단하지 않도록" in text, (
+        "orca-evaluate's fallback must keep the no-self-judgment clause for the §1/§3 coding "
+        "agents when the orca runtime is down"
     )
 
 
