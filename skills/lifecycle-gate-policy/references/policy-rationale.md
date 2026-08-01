@@ -123,6 +123,28 @@ section in [manifest-schema.md](manifest-schema.md).
   than either alone, since the habit fails silently on non-default bases and the
   check alone would be an easy step to forget without the reminder to look for it.
 
+## Static-verify cache at pre-push (2026-08-02)
+
+Running the full `static-verify` on every push was measured as a real burden on WIP branches
+(skills#36), and the documented mitigation — `git push --no-verify` for WIP — is manual discipline
+that silently reverts to "unverified push" when forgotten. Three candidates were weighed:
+
+- **Move `static-verify` to a PR-creation wrapper** (run once, at the moment that matters): rejected.
+  A wrapper is advisory, not enforced — the vprop comparison (2026-07-29) showed exactly this shape
+  (empty pre-push + AGENTS.md instructions) already failing the way this policy predicts: forgetting
+  the convention disables the gate with no signal. Retreating from hook to convention re-creates the
+  failure mode the policy exists to remove.
+- **Keep as-is**: keeps determinism, keeps the cost.
+- **Cache inside the hook** (chosen): the hook remains the enforcement point — deterministic, not
+  forgettable — and skips only when the exact tree (`HEAD^{tree}`) already passed and the working
+  tree is clean. Changed tree → runs. Dirty tree → runs (verification executes against the working
+  tree, so a dirty tree is not the recorded tree). Gate-integrity edits (hooks, configs) change the
+  tree, so they can never ride a stale pass.
+
+Accepted staleness: a toolchain upgrade (node/pnpm version) with no tree change can reuse a recorded
+pass. Bounded by cache size (last 50 trees) and cleared by any tree-changing commit; `premerge`'s
+`full-verify` still runs uncached at merge time, so nothing merges on a stale static pass alone.
+
 ## Superseded arrangements (for archaeology)
 
 - medicount: husky + `verify:ci` stamp gate in pre-push (stamp made sense when

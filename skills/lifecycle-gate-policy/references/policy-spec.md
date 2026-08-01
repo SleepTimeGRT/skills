@@ -32,6 +32,13 @@ manifest.
 | `pre-push` | `static-verify` | — |
 | `premerge` | `full-verify`, `protected-escalation`, `secret-scan` | `e2e` (see below), `sync-check` |
 
+`pre-push` `static-verify` MAY be cache-skipped for a tree (`HEAD^{tree}`) that an earlier run of
+the same hook already verified, provided the working tree is clean — verification runs against the
+working tree, so a dirty tree never matches a recorded pass. The skip decision must live inside the
+hook itself (deterministic enforcement is preserved; only repeat cost is removed): moving
+`static-verify` out to a push/PR wrapper convention is NOT conformant, because a wrapper is advisory
+and re-creates the "human forgets, gate silently off" failure mode this policy exists to remove.
+
 `secret-scan` at `premerge` exists for a different reason than at `pre-commit`: `pre-commit` and
 `pre-push` are both git hooks, so a shared dependency — whether `core.hooksPath` is actually wired in
 a given worktree/git client — can silently disable both at once (observed, not hypothetical, in
