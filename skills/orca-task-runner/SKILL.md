@@ -46,6 +46,10 @@ description: Use when generating the implementation for one task (issue) — pro
 - (schema/migration 파일을 건드리는 경우) **의도된 destructive 오퍼레이션 목록.** 없으면
   명시적으로 "없음"이라고 쓴다(공란은 "언급 안 함"이지 "없음"이 아니므로 구분한다). 이 선언은
   나중에 `orca-evaluate` §3가 diff에서 실제로 flag된 destructive-op와 대조하는 근거가 된다.
+- **이 변경으로 red가 되거나 갱신이 필요한 기존 테스트·단언 목록(파일:라인).** 없으면 명시적으로
+  "없음"이라고 쓴다(위 destructive-op 불릿과 같은 구분 — 공란은 "언급 안 함"이지 "없음"이 아니다).
+  "검증 방법" 불릿은 새로 추가할 검증만 묻는다 — 기존에 green이던 단언 중 이 변경으로 red가 될 것은
+  별도로 열거해야 한다(정확 일치 단언, 게이트 자체를 막는 회귀를 특히 놓치기 쉽다).
 
 `orca-evaluate`가 이 제안을 issue의 원본 acceptance criteria에 대조해 검토한다. 반려되면 수정해서 다시 제안한다. **최대 2 라운드.** 2라운드 안에 합의가 안 되면 이 스킬(generator)이 결정권을 가지고 그 제안대로 진행한다 — evaluator의 이견은 기록에 남기되 진행을 막지 않는다.
 
@@ -190,17 +194,30 @@ fi
 subtask 전부가 끝나 합쳐진 task 전체 diff 기준으로, 딱 한 번 재검증한다. subtask 게이트(§4)는 같은 wave 안에서 병렬 실행되는 형제 subtask의 커밋을 놓칠 수 있어(race) — 어떤 subtask가 자기 게이트를 실행하는 시점에 같은 wave의 형제가 아직 커밋 전일 수 있다 — 그 어떤 subtask의 통과도 "task 전체가 합쳐진 뒤"를 보장하지 않는다. 이 게이트가 그 구멍을 메운다.
 
 - typecheck / unit test / formatter / linter를 task 전체 diff 기준으로 재실행.
-- e2e·pgTAP 실행(결정론적, 모델 개입 없음):
+- e2e·pgTAP 실행(결정론적, 모델 개입 없음). **시도 회차별로 로그 파일명을 분리한다** — 고정 파일명에
+  `>`로 쓰면 재시도가 직전 실패 로그를 덮어써, 재시도 후 green을 얻었을 때 그 실패가 "이 diff와
+  무관한 flake"였다는 판정을 뒷받침할 증거가 물리적으로 사라진다(실측: issue #57):
 
 ```bash
-bash -lc '<repo의 e2e 커맨드> > <worktree 루트>/.gate-e2e.log 2>&1; \
-  echo EXIT:$? > <worktree 루트>/.gate-e2e-summary.txt'
-bash -lc '<repo의 pgTAP 커맨드, 예: pg_prove> > <worktree 루트>/.gate-pgtap.log 2>&1; \
-  echo EXIT:$? > <worktree 루트>/.gate-pgtap-summary.txt; \
-  grep -c "not ok" <worktree 루트>/.gate-pgtap.log >> <worktree 루트>/.gate-pgtap-summary.txt'
+bash -lc '<repo의 e2e 커맨드> > <worktree 루트>/.gate-e2e.attempt<N>.log 2>&1; \
+  echo EXIT:$? > <worktree 루트>/.gate-e2e.attempt<N>-summary.txt'
+bash -lc '<repo의 pgTAP 커맨드, 예: pg_prove> > <worktree 루트>/.gate-pgtap.attempt<N>.log 2>&1; \
+  echo EXIT:$? > <worktree 루트>/.gate-pgtap.attempt<N>-summary.txt; \
+  grep -c "not ok" <worktree 루트>/.gate-pgtap.attempt<N>.log >> <worktree 루트>/.gate-pgtap.attempt<N>-summary.txt'
 ```
 
+`<N>`은 1부터 시작(첫 실행도 포함 — "재시도 로그만" 분리하면 1회차 실패가 여전히 재시도로 덮인다).
+어떤 시도든 통과하면 이후 시도는 생략하되, 지금까지의 attempt 로그는 지우지 않는다 — §7 반환값이
+필요로 한다.
+
 실패 시 subtask 게이트(§4)와 같은 방식으로 스스로 고치고 재시도한다. 단 subtask 게이트와 달리 **재시도 한도 2회**(무한 자가치유가 아니다 — `orca-workflow` §2d의 evaluate-FAIL 재시도 한도와 같은 숫자로 맞췄다). 2회 시도 후에도 통과 못하면 `orca-evaluate`를 호출하지 않고 `orca-workflow`에 **`GATE_FAIL`**을 직접 반환한다 — 기계적으로도 안 돌아가는 코드를 agent e2e·code review 같은 비싼 단계에 태울 이유가 없다.
+
+**재시도 후 통과("flake"로 재분류)를 §7 반환값 없이 조용히 넘기지 않는다.** 1회차가 실패하고 이후
+시도가 통과해 게이트를 넘겼다면, §7 반환값에 다음을 반드시 포함한다: 실패했던 attempt의 spec
+파일명·에러 첫 줄(위 attempt 로그에서 추출), 그리고 레포에 알려진 flake 목록(예:
+`.claude/memory/project_known_flaky_e2e.md`, 존재하는 repo에 한함)이 있으면 그 목록과 대조한 결과.
+이 기록이 없으면 `orca-evaluate`·코디네이터가 "이 diff와 무관한 flake였다"는 재실행측 판단을 사후에
+검증할 방법이 없다 — 재실행-green과 "게이트 통과"를 구분하지 못하게 된다.
 
 **e2e 통과 시 캐시 기록 (premerge.sh 소비용)**: `<repo의 e2e 커맨드>`가 성공(EXIT:0)하면, `lifecycle-gate-policy`의 `scripts/premerge.sh`가 같은 커밋에 대해 e2e를 또 돌리지 않도록 캐시 레코드를 남긴다 — premerge는 이 task 브랜치를 그대로 merge하기 직전에 다시 호출되므로, 방금 통과한 것과 정확히 같은 commit·같은 e2e 커맨드라면 재실행이 낭비다(반대로 그 사이 origin/main이 움직여 이 브랜치가 rebase/merge로 흡수해야 했다면 commit이 바뀌어 캐시가 자연히 미스난다 — stale-main 재검증은 그대로 유지됨). **쓰기만 한다 — premerge.sh는 이 캐시를 읽기만 하고 쓰지 않는다**(범용 스크립트에 orca 전용 쓰기 경로를 넣지 않기 위함).
 
@@ -220,7 +237,7 @@ chmod 600 "$cache_dir/$head_sha.json"
 
 ## 7. 완료
 
-Task 레벨 게이트(§6)를 통과하면 → task 전체 diff를 정리해 `orca-workflow`에 반환한다(diff 경로 + resolved providers/models + wave 구성 기록). **`orca-evaluate`는 이 스킬이 직접 호출하지 않는다** — `orca-workflow`가 호출한다. (§6에서 `GATE_FAIL`을 반환한 경우엔 diff를 넘기지 않는다 — 그 자체가 반환값이다.)
+Task 레벨 게이트(§6)를 통과하면 → task 전체 diff를 정리해 `orca-workflow`에 반환한다(diff 경로 + resolved providers/models + wave 구성 기록 + (§6에서 재시도 후 통과한 경우) flake 증거: 실패 attempt의 spec 파일명·에러 첫 줄 + 알려진 flake 목록 대조 결과). **`orca-evaluate`는 이 스킬이 직접 호출하지 않는다** — `orca-workflow`가 호출한다. (§6에서 `GATE_FAIL`을 반환한 경우엔 diff를 넘기지 않는다 — 그 자체가 반환값이다.)
 
 ## 폴백
 
