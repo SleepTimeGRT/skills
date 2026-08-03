@@ -13,6 +13,12 @@ task(issue) 하나를 **1회** 평가한다(subtask마다 하지 않음). 코드
 
 `orca-workflow`가 이 스킬을 orchestration으로 띄운다 — 별도 터미널을 만들어 넘기는 것이지 자기 세션에서 도는 게 아니다. 스폰 실패 시(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않고 `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다 — 아래 §1·§2·§3의 `terminal create` 호출에도 동일하게 적용된다. 자동 업데이트로 Orca 앱이 세션 도중 재시작해 orchestration 호출이 일시적으로 끊기면(known signature: 같은 문서, issue #42), 아래 §0·§1·§2·§3의 `orca orchestration`/`orca terminal create` 호출은 전부 `source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh` 후 `orca_call_with_retry <skill> <role> -- <원명령>`으로 감싼다.
 
+**MCP 서버 인증 전제**(세션 시작 시 1회 확인) — 아래 §0·§1·§2·§3에서 스폰하는 터미널이 쓰는 MCP 서버
+(예: Context7)는 스폰 전에 이미 인증이 끝나 있거나, 그 프로필에서 비활성화돼 있어야 한다. 로그인
+프롬프트가 스폰된 세션을 막으면 주입된 spec이 처리되지 않고 사람이 직접 ESC로 해제해야 한다 —
+dispatch spec마다 그때그때 예방 문구를 덧붙이는 방식은 막지 못하는 것이 실측됐다(issue #60). 막히면
+재진단 없이 `~/.agents/orca-workflows/spawn-failures.md`의 해당 row로.
+
 **이 세션은 REPL로 띄우되, agy는 제외한다.** One-shot(`agy -p ... --print-timeout`)은 이후 `dispatch --inject`가 이미 종료된 프로세스의 셸에 떨어져 도달하지 못하므로(issue #37, `spawn-failures.md` 참고) REPL이 필요하다 — 하지만 agy로 그 REPL을 띄우면 안 된다: 포커스 없이 부팅이 멈추거나 동시 focus 경합 시 영구 데드락으로 이어질 수 있다(`~/.agents/orca-workflows/models/agy.md` — agy는 이 repo 전체에서 headless 전용). 그래서 `model-selection.md` 기준으로 REPL이 검증된, agy 아닌 provider로 resolve한다(구체 모델명은 여기 복제하지 않는다 — 아래 §1·§3의 sub-agent 스폰과 같은 원칙). launch-then-inject 시퀀스는 그 provider 자신의 launch 문서를 따른다:
 
 ```bash

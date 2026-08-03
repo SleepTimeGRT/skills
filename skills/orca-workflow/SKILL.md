@@ -22,6 +22,12 @@ description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-ma
   `~/.agents/orca-workflows/spawn-failures.md`, issue #42), §2a의 `orca orchestration`/
   `orca terminal create` 호출은 전부 `source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh`
   후 `orca_call_with_retry <skill> <role> -- <원명령>`으로 감싼다.
+- **MCP 서버 인증 전제**(세션 시작 시 1회 확인) — §2a에서 스폰하는 워커/평가자 터미널이 쓰는 MCP 서버
+  (예: Context7)는 스폰 전에 이미 인증이 끝나 있거나, 그 프로필에서 비활성화돼 있어야 한다. 로그인
+  프롬프트가 스폰된 세션을 막으면 주입된 spec이 처리되지 않고 사람이 직접 ESC로 해제해야 한다 —
+  dispatch spec마다 "로그인 프롬프트 뜨면 익명으로 계속"류 문구를 즉석으로 덧붙이는 방식은 막지
+  못하는 것이 실측됐다(4회 스폰 중 2회 여전히 블록). 막히면 재진단 없이
+  `~/.agents/orca-workflows/spawn-failures.md`의 해당 row로(issue #60).
 - **고착 dispatched 스윕(세션 시작 시 1회, report-only)**:
   `bash ~/.agents/orca-workflows/scripts/sweep_stale_dispatched.sh`를 실행해 임계(기본 1시간)를 넘긴
   `dispatched` task 목록을 확보하고, 발견되면(exit 3 — 전제 실패가 아니다, 진행은 계속한다) 사용자

@@ -20,6 +20,11 @@ description: Use when generating the implementation for one task (issue) — pro
 - 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 —
   `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다. §3(launch)과 §5(폴링)에서
   이 확인이 걸리는 지점을 표시한다.
+- **MCP 서버 인증 전제**(세션 시작 시 1회 확인) — §3에서 스폰하는 워커 터미널이 쓰는 MCP 서버
+  (예: Context7)는 스폰 전에 이미 인증이 끝나 있거나, 워커 프로필에서 비활성화돼 있어야 한다. 로그인
+  프롬프트가 스폰된 세션을 막으면 주입된 spec이 처리되지 않고 사람이 직접 ESC로 해제해야 한다 —
+  dispatch spec마다 그때그때 예방 문구를 덧붙이는 방식은 막지 못하는 것이 실측됐다(issue #60). 막히면
+  재진단 없이 `~/.agents/orca-workflows/spawn-failures.md`의 해당 row로.
 - 자동 업데이트로 Orca 앱이 세션 도중 재시작해 orchestration 호출이 일시적으로 끊기면(known signature:
   `~/.agents/orca-workflows/spawn-failures.md`, issue #42), §2·§3·§5의 `orca orchestration`/
   `orca terminal create` 호출은 전부 `source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh`
