@@ -24,10 +24,12 @@ must not write.
 |---|---|---|
 | `gpt-5.6-sol` | High Risk implementation and final review | high; xhigh for security/final gates with asymmetric miss cost |
 | `gpt-5.6-terra` | Routine implementation and bounded first-pass triage | medium |
-| `gpt-5.6-luna` | Short, clear, repeatable Simple work | low |
+| `gpt-5.6-luna` | Simple work, plus narrow-context Routine subtasks (single file or small bounded diff) | max |
 
 Routine review path: Terra may triage a bounded diff, but final or high-risk judgment escalates to Sol.
-Do not use Luna for large diffs, long logs, or final code review.
+Do not use Luna for large diffs, long logs, final code review, or anything requiring reasoning across
+multiple files or a large codebase — its long-context recall collapses regardless of effort level (see
+reference, MRCR). Luna's role is bounded-context volume work, not depth.
 
 ## Effort support
 
@@ -42,8 +44,11 @@ above.
 
 ## Launch precondition
 
-`gpt-5.6-luna` has no recorded boot smoke in this repository. Before its first real worker launch, run one
-bounded `codex exec` smoke and record the result in the reference.
+`gpt-5.6-luna` has no recorded boot smoke in this repository — it has never been dispatched to a real
+worker here (confirmed by grepping `assignments*.jsonl`, 2026-08-04: zero occurrences). Before its first
+real worker launch at the `max` effort above, run one bounded `codex exec` smoke and record the result in
+the reference. This precondition is unchanged by the low→max effort update; it was never satisfied at any
+effort level.
 
 Load [the Codex evidence reference](../references/models/codex.md) only when auditing, changing, or
 re-validating this mapping.
