@@ -50,15 +50,16 @@ orca_call_with_retry "orca-evaluate" "contract-review" -- \
   orca orchestration task-create --spec "$spec_text" --json
 orca_call_with_retry "orca-evaluate" "contract-review" -- \
   orca orchestration dispatch --task <task_id> --to <contract-handle> --inject --json
-# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43): 15초 뒤 재-read해서
-# tail이 그대로면 Enter만 재전송, 그래도 그대로면 spawn-failures.md로. §3 스폰도 동일하게 적용한다.
+# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43, positive-confirmation
+# 방식으로 issue #58에서 교체): 15초 뒤 재-read해서 $spec_text 앞부분이 tail에서 확인 안 되면 Enter만
+# 재전송, 그래도 확인 안 되면 spawn-failures.md로. §3 스폰도 동일하게 적용한다.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. §3 스폰도 동일한 형태(§2 agent-e2e는
 # assign만 — term 로그 대상 아님).
 #  logging.md §1 assign 이벤트: role="contract-review", issue=<issue-num>, task_id=<task_id>,
 #    provider/model/effort=resolved 값, terminal=<contract-handle>, worktree=<worktree 경로>
 #  logging.md §2 term 로그: skill="orca-evaluate", role="contract-review", terminal=<contract-handle>,
 #    meta 기록 후 sent.content=$spec_text. 이 터미널에 대한 유일한 read는 위 dispatch-verify.md의
-#    liveness probe(불투명 tail 동치 비교)뿐이며, 이는 의도적으로 recv로 기록하지 않는다(판정 결과는
+#    liveness probe(불투명 payload-echo 확인 — issue #58)뿐이며, 이는 의도적으로 recv로 기록하지 않는다(판정 결과는
 #    relay로 받는다 — 위 §1 본문 참고).
 ```
 
@@ -156,15 +157,16 @@ orca_call_with_retry "orca-evaluate" "code-review" -- \
   orca orchestration task-create --spec "$spec_text" --json
 orca_call_with_retry "orca-evaluate" "code-review" -- \
   orca orchestration dispatch --task <task_id> --to <review-handle> --inject --json
-# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43): 15초 뒤 재-read해서
-# tail이 그대로면 Enter만 재전송, 그래도 그대로면 spawn-failures.md로.
+# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43, positive-confirmation
+# 방식으로 issue #58에서 교체): 15초 뒤 재-read해서 $spec_text 앞부분이 tail에서 확인 안 되면 Enter만
+# 재전송, 그래도 확인 안 되면 spawn-failures.md로.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로.
 #  logging.md §1 assign 이벤트: role="code-review", issue=<issue-num>, task_id=<task_id>, provider=$reviewer_provider,
 #    model=$reviewer_model, effort=$reviewer_effort, advisor=${reviewer_advisor:-}, terminal=<review-handle>,
 #    worktree=<worktree 경로>
 #  logging.md §2 term 로그: skill="orca-evaluate", role="code-review", terminal=<review-handle>, meta 기록 후
 #    sent.content=$spec_text. 이 터미널에 대한 유일한 read는 위 dispatch-verify.md의 liveness probe
-#    (불투명 tail 동치 비교)뿐이며, 이는 의도적으로 recv로 기록하지 않는다(§1 contract-review와 같은
+#    (불투명 payload-echo 확인 — issue #58)뿐이며, 이는 의도적으로 recv로 기록하지 않는다(§1 contract-review와 같은
 #    이유 — report는 이 세션이 별도로 직접 읽는다, §3 본문 마지막 문단 참고).
 ```
 

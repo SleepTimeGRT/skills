@@ -17,20 +17,35 @@ with no shared primitive to keep them in sync).
 
 ## Procedure — run immediately after every `dispatch --inject`
 
+**This is a positive-confirmation check, not a tail-changed check.** An earlier version treated "tail
+changed" as proof of submission — the contrapositive of "tail unchanged ⇒ unsent" — without ever confirming
+submission actually happened. That contrapositive doesn't hold: `.result.terminal.tail` includes provider
+TUI chrome (spinner frames, elapsed-time counters, token-usage footers) that changes on its own, submitted
+or not, and an MCP auth modal rendering between `tail_0` and `tail_1` changes the tail while leaving the
+prompt sitting unsubmitted in the input box. Both produced an observed false-OK in practice — the pipeline
+reported "sent" while a human had to press Enter manually (issue #58). The fix: confirm the injected text
+itself is echoed back as a submitted turn, not merely that *something* in the tail moved.
+
 ```bash
-tail_0="$(orca terminal read --terminal <handle> --json | jq -r '.result.terminal.tail | join("\n")')"
+spec_prefix="$(printf '%s' "$spec_text" | head -c 80)"   # first ~80 chars of the exact string passed to
+                                                            # `task-create --spec` — enough to be a
+                                                            # distinctive fragment, not a content read
 sleep 15
 tail_1="$(orca terminal read --terminal <handle> --json | jq -r '.result.terminal.tail | join("\n")')"
-if [ "$tail_0" = "$tail_1" ]; then
-  # Unsent — resend Enter only, never resend the original text (avoids a duplicate prompt if the
-  # first attempt actually landed a moment after tail_0 was captured). `orca terminal send` with
-  # `--enter` and no `--text` sends Enter alone and does not touch the terminal's existing input —
-  # confirmed against a live scratch terminal.
+if printf '%s' "$tail_1" | grep -qF "$spec_prefix"; then
+  :   # confirmed — the payload we injected is echoed back as a submitted turn
+else
+  # Not confirmed. This covers both the old "tail unchanged" case and the false-OK case (tail moved for
+  # an unrelated reason, e.g. chrome or an auth modal, but the prompt never actually submitted).
+  # Resend Enter only, never resend the original text (avoids a duplicate prompt if the first attempt
+  # actually landed and the echo simply scrolled out of the tail window before this check ran).
+  # `orca terminal send` with `--enter` and no `--text` sends Enter alone and does not touch the
+  # terminal's existing input — confirmed against a live scratch terminal.
   orca terminal send --terminal <handle> --enter --json
   sleep 15
   tail_2="$(orca terminal read --terminal <handle> --json | jq -r '.result.terminal.tail | join("\n")')"
-  if [ "$tail_1" = "$tail_2" ]; then
-    # Still static — hand off to ~/.agents/orca-workflows/spawn-failures.md (grep known
+  if ! printf '%s' "$tail_2" | grep -qF "$spec_prefix"; then
+    # Still not confirmed — hand off to ~/.agents/orca-workflows/spawn-failures.md (grep known
     # signatures first, diagnose if no match) rather than looping this retry indefinitely.
     :
   fi
@@ -38,24 +53,31 @@ fi
 ```
 
 15s is a starting default, not a validated constant — tune it if a provider's typical first-token latency
-needs more headroom. A false positive (retry fires on a merely slow turn) costs one harmless extra Enter (a
-no-op on an already-submitted prompt) plus one more 15s wait, not a corrupted session.
+needs more headroom. A false negative (the echo has already scrolled out of the tail window by the time
+this check runs, on an already-submitted prompt) costs one harmless extra Enter (a no-op on an
+already-submitted prompt) plus one more 15s wait, not a corrupted session — the same asymmetry the old
+check relied on, just applied to the opposite failure direction. A false positive (this check confirms
+submission that didn't happen) is not possible by construction: `$spec_prefix` only appears in the tail if
+that exact string was actually written there.
 
 When dispatching a parallel wave (multiple handles at once — e.g. `orca-task-runner`'s wave loop), the wait
-is shared, not per-handle: capture `tail_0` for every handle first, `sleep 15` once, then re-read all
-handles for `tail_1`. Waiting 15s per handle serially is unnecessary. The same sharing applies to the retry
-round: send the Enter-only retry to every handle that came back static, then `sleep 15` once and re-read
-all of them for `tail_2` — not a per-handle serial retry wait.
+is shared, not per-handle: compute `spec_prefix` for every handle first (each from that handle's own
+`$spec_text`), `sleep 15` once, then re-read all handles for `tail_1` and check each against its own prefix.
+Waiting 15s per handle serially is unnecessary. The same sharing applies to the retry round: send the
+Enter-only retry to every handle that came back unconfirmed, then `sleep 15` once and re-read all of them
+for `tail_2` — not a per-handle serial retry wait.
 
-These reads never pass `--limit`, so `tail_0` and `tail_1` both use the same (unspecified) default retained
-tail window — this doesn't affect the equality comparison's correctness, since both reads share that
-default, but a very long streaming response could in principle scroll the differing region out of the
-window between reads; worth revisiting if that's ever observed.
+These reads never pass `--limit`, so `tail_1` and `tail_2` both use the same (unspecified) default retained
+tail window — a very long streaming response could in principle scroll the echoed prompt out of the window
+before either read runs, which is exactly the false-negative case already priced in above (costs one
+harmless extra Enter, not a corrupted session).
 
-This check compares tail content for equality only — it never parses or acts on what the content says.
-Skills whose stated principle is not reading a terminal's output directly for judgment (e.g.
-`orca-workflow`, "diff/report 본문을 직접 읽지 않는다") are not violating that principle by running this
-check — opaque equality comparison is not content interpretation.
+**This check does not violate a skill's "don't read terminal output for judgment" principle** (e.g.
+`orca-workflow`, "diff/report 본문을 직접 읽지 않는다"). It only tests whether a literal, known-in-advance
+substring — the exact bytes this procedure itself injected — is present in the tail. It never inspects,
+interprets, or acts on anything the *target* produced; a byte-for-byte membership test against your own
+payload is not content interpretation, the same distinction the prior equality-only version relied on,
+just applied to a substring match instead of a whole-string comparison.
 
 ## Escalation
 
