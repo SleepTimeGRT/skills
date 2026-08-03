@@ -112,12 +112,19 @@ install -d -m 700 ~/.local/state/orca-workflows/logs
 
 ### `meta` — write once, first line in the file, right before or right after the first `dispatch --inject` to this handle
 
+**Idempotent by construction** — a dispatch retry against the same handle (spawn-failure retry, manual
+`worker_done`-loss recovery) can re-enter the same code block and re-run this write. Guard on line 1 already
+existing before appending, so retries never produce a second `meta` line (observed in practice without this
+guard: issue #59):
+
 ```bash
-jq -cn --arg issue "<issue-num>" --arg skill "<skill>" --arg role "<role>" --arg terminal "<handle>" \
-  --arg created_at "$(date -u +%FT%TZ)" \
-  '{type:"meta", issue:$issue, skill:$skill, role:$role, terminal:$terminal, created_at:$created_at}' \
-  >> "$term_log"
-chmod 600 "$term_log"
+if [ ! -s "$term_log" ] || ! head -1 "$term_log" | jq -e '.type == "meta"' >/dev/null 2>&1; then
+  jq -cn --arg issue "<issue-num>" --arg skill "<skill>" --arg role "<role>" --arg terminal "<handle>" \
+    --arg created_at "$(date -u +%FT%TZ)" \
+    '{type:"meta", issue:$issue, skill:$skill, role:$role, terminal:$terminal, created_at:$created_at}' \
+    >> "$term_log"
+  chmod 600 "$term_log"
+fi
 ```
 
 ### `sent` — write right after `dispatch --inject`, reusing the exact text already passed to that task's `task-create --spec` (do not re-fetch it via `task-list`)
