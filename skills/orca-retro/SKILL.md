@@ -27,7 +27,12 @@ sleeptimegrt-skills 이슈(또는 기존 이슈의 재발 코멘트)뿐이며, �
 ```bash
 logs="$HOME/.local/state/orca-workflows/logs"
 # issue 집합(epic+children)으로 필터한 assignments/waves 레코드
-find "$logs" -name 'assignments*.jsonl' 2>/dev/null | sort | xargs cat 2>/dev/null \
+# assignments.jsonl(미날짜 레거시)은 항상 dated 파일보다 오래된 레코드만 담고 있는데,
+# 단순 `-name 'assignments*.jsonl' | sort`는 ASCII상 '.'(0x2e) > '-'(0x2d)라 레거시 파일을
+# 맨 뒤로 보낸다 — 그래서 명시적으로 먼저 읽는다(logging.md §1 "Reading across dates" 참고, issue #55).
+{ [ -f "$logs/assignments.jsonl" ] && cat "$logs/assignments.jsonl"; \
+  find "$logs" -name 'assignments-*.jsonl' 2>/dev/null | sort | xargs cat 2>/dev/null; \
+} 2>/dev/null \
   | jq -c --argjson set '["<epic-num>","<child-1>","<child-2>"]' 'select(.issue as $i | $set | index($i))'
 find "$logs" -name 'waves*.jsonl' 2>/dev/null | sort | xargs cat 2>/dev/null \
   | jq -c --argjson set '["<epic-num>","<child-1>","<child-2>"]' 'select(.issue as $i | $set | index($i))'

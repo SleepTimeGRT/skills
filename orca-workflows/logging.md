@@ -74,6 +74,25 @@ expansion, before `2>/dev/null` can suppress it. `find | sort | xargs cat` is po
 the `sort` keeps dated files in chronological order, which matters wherever the caller does `tail -1` to
 find the most recent matching record.)
 
+**`assignments*.jsonl` has one extra wrinkle `waves*.jsonl` doesn't**: a pre-date-partition
+`assignments.jsonl` (no date suffix) exists from before this scheme, holds only records older than every
+dated file, and is kept around on purpose — old records live only there. Plain `find -name 'assignments*.jsonl'
+| sort` puts it **last**, not first: ASCII `.` (0x2e) sorts after `-` (0x2d), so `assignments.jsonl` sorts
+after `assignments-2026-08-02.jsonl`. A `tail -1` over that output picks the newest line from the *oldest*
+file whenever the query's real most-recent match happens to be undated-vs-dated adjacent — a timestamp
+inversion, not just a cosmetic ordering issue (observed in practice: issue #55). Read the legacy file first,
+explicitly, then the sorted dated files — do not rely on `sort` to place it correctly:
+
+```bash
+{ [ -f "$HOME/.local/state/orca-workflows/logs/assignments.jsonl" ] && \
+    cat "$HOME/.local/state/orca-workflows/logs/assignments.jsonl"; \
+  find "$HOME/.local/state/orca-workflows/logs" -name 'assignments-*.jsonl' 2>/dev/null | sort | xargs cat 2>/dev/null; \
+} 2>/dev/null | jq -s '...'
+```
+
+`waves*.jsonl` has no undated legacy file (it was introduced already date-partitioned), so the plain
+glob+sort above remains correct for it unchanged.
+
 Retention: unbounded. No automatic deletion of old dated files.
 
 ## §2. `term-<handle>.jsonl` — per-terminal prompt/response transcript
