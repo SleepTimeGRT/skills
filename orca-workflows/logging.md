@@ -42,12 +42,20 @@ chmod 600 "$target"
 Extra fields (`wave_index`, `subtask_type`, `advisor`, ...) are added per call site exactly as each
 `SKILL.md` already does — only the target path changes.
 
+**`task-create`가 새 task를 만들지 않은 relay dispatch** (예: `orca-workflow` §2a 계약 협상의 2라운드
+이후 — 어떤 orca 명령으로 라운드 2+를 relay할지는 아직 미해결 설계 질문이다, issue #64): 이런 dispatch에는
+진짜 `task_id`가 없는 경우가 있다. `task_id` 필드는 기존 `<task_id-or-omit>` 규칙대로 그대로 생략한다 — 빈
+문자열(`""`)이나 `"terminal-send-fallback"` 같은 즉석 placeholder를 넣지 않는다. 대신 extra field로
+`"relay":true`를 추가해 "몰라서 생략"과 "relay라서 없음"을 로그에서 구분한다(observed in practice: issue
+#62). issue #64가 라운드 2+ 전송을 기존 task 재사용 방식으로 확정하면 그 경로엔 진짜 `task_id`가 생겨 이
+규칙 자체가 적용되지 않게 될 수 있다 — 이 규칙은 task_id가 실제로 없는 dispatch에만 적용된다.
+
 **`outcome`** (`orca-workflow` only — routing result for a task):
 
 ```bash
 install -d -m 700 ~/.local/state/orca-workflows/logs
 target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
-printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|PREMERGE_FAIL|NO_ACCEPTANCE_CRITERIA|NO_DONE_TRANSITION|RETRO_DONE|RETRO_FAIL>","retry":<n>}\n' \
+printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|PREMERGE_FAIL|NO_ACCEPTANCE_CRITERIA|NO_DONE_TRANSITION|CONTRACT_FINALIZED_BY_GENERATOR|RETRO_DONE|RETRO_FAIL>","retry":<n>}\n' \
   "$(date -u +%FT%TZ)" >> "$target"
 chmod 600 "$target"
 ```
@@ -55,6 +63,13 @@ chmod 600 "$target"
 `RETRO_DONE`/`RETRO_FAIL`은 task 라우팅이 아니라 epic retro 결과다 — `orca-workflow` §1d(epic close 직후의
 retro 사이트)만 쓴다. `RETRO_DONE` 라인은 per-call-site 추가 필드 규칙에 따라 `filed`/`commented`/`discarded`
 정수 카운트를 더해 남기고, `RETRO_FAIL` 라인은 카운트 필드를 생략한다.
+
+`CONTRACT_FINALIZED_BY_GENERATOR`는 계약 협상(orca-task-runner ↔ orca-evaluate) 라운드 한도에 도달해
+task-runner(generator) 쪽 결정이 그대로 확정된 경우다 — PASS/FAIL/ESCALATE 어느 것도 아닌 정상 분기이므로,
+이 결과에 도달했을 때 outcome 이벤트 자체를 생략하지 말고 반드시 이 값으로 남긴다(observed in practice:
+issue #62). 이 라인은 per-call-site 추가 필드 규칙에 따라 `round`(도달한 계약 협상 라운드 수)를 더해
+남긴다 — `retry`는 §2 하단의 task-level FAIL 재-dispatch 횟수를 세는 별개 필드이므로, 라운드 수를 `retry`에
+넣지 않는다.
 
 **`wave_start`/`wave_end`** (`orca-task-runner` only): same jq schema as today, written to
 `waves-$(date -u +%F).jsonl` instead of the fixed `waves.jsonl`.
