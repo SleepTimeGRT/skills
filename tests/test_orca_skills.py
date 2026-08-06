@@ -1038,9 +1038,30 @@ def test_spawn_failures_has_round2_relay_rejection_rows():
     prior row in this table. Pins both signatures, the issue link, and the scoping note distinguishing
     their detection channel from the table's default convention."""
     text = _read_workflows_file("spawn-failures.md")
-    assert "is dispatched; only ready tasks can be dispatched" in text
-    assert "already has an active dispatch" in text
-    assert text.count("#64") >= 2, "both new rows must link issue #64"
+    sig1 = "is dispatched; only ready tasks can be dispatched"
+    sig2 = "already has an active dispatch"
+    assert sig1 in text
+    assert sig2 in text
+
+    # Verify each signature's row ends with | #64 | (not just any #64 in the file)
+    sig1_pos = text.find(sig1)
+    assert sig1_pos >= 0, f"signature '{sig1}' not found"
+    sig1_row_end = text.find("\n", sig1_pos)
+    assert sig1_row_end > 0, "row terminator not found after sig1"
+    sig1_row = text[sig1_pos:sig1_row_end]
+    assert sig1_row.endswith("| #64 |"), (
+        f"sig1 row must end with '| #64 |', but ends with: {sig1_row[-20:]}"
+    )
+
+    sig2_pos = text.find(sig2)
+    assert sig2_pos >= 0, f"signature '{sig2}' not found"
+    sig2_row_end = text.find("\n", sig2_pos)
+    assert sig2_row_end > 0, "row terminator not found after sig2"
+    sig2_row = text[sig2_pos:sig2_row_end]
+    assert sig2_row.endswith("| #64 |"), (
+        f"sig2 row must end with '| #64 |', but ends with: {sig2_row[-20:]}"
+    )
+
     assert "calling command's own" in text or "호출 자신의" in text, (
         "must scope-note that these two signatures appear in dispatch/task-create's own --json response, "
         "not a spawned terminal's `terminal read` output (every other row in this table is the latter)"
