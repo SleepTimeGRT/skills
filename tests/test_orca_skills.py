@@ -726,6 +726,16 @@ def test_orca_task_runner_states_contract_round_is_a_new_dispatch_not_a_wait():
     )
 
 
+def test_orca_evaluate_states_contract_round_is_a_new_dispatch_not_a_wait():
+    """Mirrors test_orca_task_runner_states_contract_round_is_a_new_dispatch_not_a_wait for the
+    evaluator side of the same round."""
+    text = _read_skill("orca-evaluate")
+    assert "이번 턴을 끝낸다" in text, (
+        "orca-evaluate §1 must clarify that relaying the verdict ends the current turn "
+        "(worker_done, per the injected preamble) rather than waiting/polling in-turn for the next round"
+    )
+
+
 # Scoped to the skills that actually invoke the wrapper, not the whole NEW_SKILLS family —
 # orca-retro makes no `orca` CLI calls, so a `source` line there would be dead prose. Per-block
 # enforcement lives in test_every_retry_invocation_block_sources_the_wrapper (correctly conditional).
