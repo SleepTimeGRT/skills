@@ -1030,3 +1030,22 @@ def test_orca_task_runner_spawn_template_verbatim_rule():
     assert "fallback shell" in text, (
         "orca-task-runner must forbid the bare-fallback-shell + retype spawn path"
     )
+
+
+def test_spawn_failures_has_round2_relay_rejection_rows():
+    """Issue #64's live investigation produced two verified `runtime_error` JSON responses from
+    `dispatch`/`task-create` themselves — not a spawned terminal's `terminal read` output, unlike every
+    prior row in this table. Pins both signatures, the issue link, and the scoping note distinguishing
+    their detection channel from the table's default convention."""
+    text = _read_workflows_file("spawn-failures.md")
+    assert "is dispatched; only ready tasks can be dispatched" in text
+    assert "already has an active dispatch" in text
+    assert text.count("#64") >= 2, "both new rows must link issue #64"
+    assert "calling command's own" in text or "호출 자신의" in text, (
+        "must scope-note that these two signatures appear in dispatch/task-create's own --json response, "
+        "not a spawned terminal's `terminal read` output (every other row in this table is the latter)"
+    )
+    header_count = text.count("| `failure_signature` (grep substring) |")
+    assert header_count == 1, (
+        f"expected exactly one 'Known signatures' table (one header line), found {header_count}"
+    )
