@@ -702,7 +702,7 @@ def test_orca_workflow_documents_round2_relay_protocol():
     )
     assert "task-list" in text, "round-2+ completion check must poll task-list, not terminal read"
     assert "reportPath" in text, "must name the path-only relay channel (task-list result.reportPath)"
-    no_deps_idx = text.find("--deps는 걸지")
+    no_deps_idx = text.find("`--deps`는 걸지")
     assert no_deps_idx != -1, "must explicitly instruct against --deps between round tasks"
 
 
