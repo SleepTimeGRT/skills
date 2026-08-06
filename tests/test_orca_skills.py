@@ -713,6 +713,16 @@ def test_orca_workflow_round2_relay_has_no_deploy_placeholder():
     assert "terminal-send-fallback" not in text
 
 
+def test_logging_no_longer_flags_round2_relay_as_unresolved():
+    """Issue #64 is resolved as of this plan — logging.md must not keep pointing a future reader at it
+    as an open design question, nor keep the disproven "task 재사용" prediction, nor the ad hoc
+    'terminal-send-fallback' placeholder the unresolved state produced in production."""
+    text = (WORKFLOWS_DIR / "logging.md").read_text()
+    assert "아직 미해결 설계 질문" not in text
+    assert "terminal-send-fallback" not in text
+    assert "기존 task 재사용 방식으로 확정하면" not in text
+
+
 def test_orca_task_runner_states_contract_round_is_a_new_dispatch_not_a_wait():
     """Issue #64: §1's "반려되면 수정해서 다시 제안한다" narrates the whole multi-dispatch protocol in one
     sentence — a fresh dispatched worker could misread it as "wait/poll in this same turn" instead of "end
