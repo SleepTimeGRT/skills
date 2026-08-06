@@ -103,10 +103,23 @@ For each contract-negotiation round after the first, on both the task-runner and
    already specifies (issue #63 — unchanged by this design).
 
 This requires the **worker side** (task-runner's proposal-writing step, evaluator's contract-review step) to
-call `worker_done` after producing each round's artifact — not just "relay" in prose. This is the one place
-this design's scope necessarily extends past `orca-workflow` §2a itself: without a concrete `worker_done`
-call on the worker side, `orca-workflow`'s round-2 dispatch always fails with "already has an active
-dispatch," confirmed by the empirical test above (the same failure reproduced twice, once by omission).
+call `worker_done` after producing each round's artifact. **This does not require new bash in either
+`SKILL.md`, and it is already true today.** Every `dispatch --inject` — confirmed both in the `--dry-run
+--return-preamble` output and in the real live-session terminal read — auto-injects a full preamble
+*before* the `=== TASK ===` block, containing the complete `worker_done` syntax verbatim (including
+`--report-path`), plus explicit instructions to stop after sending it and await re-engagement rather than
+loop or poll. This is why none of the three `SKILL.md` files contain a single literal `orchestration send`
+call anywhere today, including at `orca-task-runner`'s own §7 final-diff handoff — transport mechanics are
+Orca's job via the injected preamble, not something these instruction files re-document. Adding an explicit
+`worker_done` call to `orca-task-runner`/`orca-evaluate` would duplicate text Orca already injects and would
+be the first literal `orchestration send` line in this file family, breaking that established convention.
+
+The one real risk on the worker side is prose ambiguity, not a missing command: `orca-task-runner` §1's
+"반려되면 수정해서 다시 제안한다" and `orca-evaluate` §1's mirrored wording narrate the *overall*
+multi-dispatch protocol in a single unbroken sentence, read by an agent that receives it fresh at every
+dispatch. A worker could misread it as "wait/poll within this same turn for the other side's response"
+rather than "this sentence describes what happens across separate dispatches; end your turn after this
+round's artifact, per the injected preamble." See §4b/§4c for the one-sentence fix.
 
 ## 4. Changes required
 
@@ -120,21 +133,15 @@ twice.
 
 ### 4b. `skills/orca-task-runner/SKILL.md` §1 (Contract 제안)
 
-Currently entirely prose — "반려되면 수정해서 다시 제안한다" names no orca command. Add: after writing (or
-revising) the proposal file, call `orca orchestration send --from <own-handle> --dispatch-capability
-<current-preamble's dcap> --type worker_done --task-id <task_id> --dispatch-id <dispatch_id> --outcome
-succeeded --report-path <proposal file path> --body "<one-line: proposal ready for round N review>"`, then
-stay idle per the injected preamble's own instructions (already documents this — no new prose needed there).
-Use the dcap value from the **current** round's injected preamble, never a cached one from an earlier round
-— unverified whether it rotates per dispatch, so this is defensive guidance rather than a confirmed
-requirement (see §5).
+No new orca command — see §3's note on why not. One clarifying sentence after "반려되면 수정해서 다시
+제안한다": this exchange spans separate dispatches, not a single turn — write the round's proposal, then end
+the turn (the injected preamble's own `worker_done` instructions already cover the how); the next round
+arrives as a fresh dispatch, not something this turn waits or polls for.
 
 ### 4c. `skills/orca-evaluate/SKILL.md` §1 (Contract 검토)
 
-Same addition, mirrored: after the spawned contract-review sub-terminal returns its verdict (승인/반려+사유)
-to the evaluator session, the evaluator session itself — the terminal `orca-workflow` dispatched and will
-re-engage — calls `worker_done` with `--report-path` pointing at the verdict file, before going idle to await
-round-2 re-engagement.
+Same one-sentence clarification, mirrored, after the paragraph describing the relay of the verdict back to
+`orca-task-runner`.
 
 ### 4d. `orca-workflows/logging.md` lines 45-51
 
@@ -147,21 +154,24 @@ predicted (a real `task_id` at this call site, making the rule moot here specifi
 
 ### 4e. `orca-workflows/spawn-failures.md`
 
-Add two rows to the Known signatures table, both observed directly in this investigation:
+Add two rows to the Known signatures table, both observed directly in this investigation. The table's
+contract requires a literal, grep-able substring — neither raw message contains one verbatim across every
+occurrence (`<id>`/`<handle>` vary), so each signature uses the message's invariant literal portion, with
+the full templated message described in the root-cause column:
 
-| `failure_signature` | root cause | fix | known_issue |
+| `failure_signature` (grep substring) | root cause | fix | known_issue |
 |---|---|---|---|
-| `Task <id> is dispatched; only ready tasks can be dispatched` | attempting to re-`dispatch --task` a task that is already in `dispatched`/`completed` status — `dispatch` requires `status: ready` and carries no content-override argument | do not reuse a task_id across rounds; `task-create` a new task per round instead (`orca-workflow` §2a round-2+ protocol) | #64 |
-| `Terminal <handle> already has an active dispatch (ctx_... for task <id>)` | a terminal can hold at most one active (non-completed) dispatch at a time; dispatching a new task to it before the current one reaches `completed` is rejected outright | the worker side must send `orchestration send --type worker_done` for the current round before the coordinator dispatches the next round — poll `task-list` for `completed`, don't assume | #64 |
+| `is dispatched; only ready tasks can be dispatched` (full message: `Task <id> is dispatched; only ready tasks can be dispatched`) | attempting to re-`dispatch --task` a task that is already in `dispatched`/`completed` status — `dispatch` requires `status: ready` and carries no content-override argument | do not reuse a task_id across rounds; `task-create` a new task per round instead (`orca-workflow` §2a round-2+ protocol) | #64 |
+| `already has an active dispatch` (full message: `Terminal <handle> already has an active dispatch (ctx_... for task <id>)`) | a terminal can hold at most one active (non-completed) dispatch at a time; dispatching a new task to it before the current one reaches `completed` is rejected outright | poll `task-list` for the prior round's task reaching `completed` (the worker's own injected-preamble `worker_done` call drives that transition automatically) before dispatching the next round — don't assume completion | #64 |
 
 ## 5. Edge cases / open items
 
-- **`dispatch-capability` rotation per round is unverified.** The live test captured round 1's `dcap_...`
-  value from the injected preamble but the round-2 preamble text was not captured before the terminal
-  transitioned away from a readable state (a real agent consumed it faster than the read cadence used).
-  Guidance in §4b/§4c is written defensively (always use the current round's preamble dcap) rather than
-  asserting rotation is confirmed. If a future session confirms actual behavior, tighten this note —
-  "not verified" per this repo's zero-fabrication convention, don't upgrade the claim without evidence.
+- **`dispatch-capability` rotation per round is unverified, and moot for this design.** The live test
+  captured round 1's `dcap_...` value from the injected preamble but not round 2's (a real agent consumed it
+  faster than the read cadence used). This does not block the design: neither `orca-task-runner` nor
+  `orca-evaluate` constructs a `worker_done` call by hand (§3/§4b/§4c), so there is no call site in this
+  repo's files that would need to know which dcap to use — Orca's own injected preamble carries whichever
+  dcap is current, and the worker copies it from there, not from anything this repo's prose tells it.
 - **This design's scope crosses three `SKILL.md` files, not one.** `skills/` deploys via
   `scripts/deploy-skills.sh` after commit; `orca-workflows/` goes live on merge to main with no separate
   deploy step (symlink-tracks-main convention). A PR touching both propagates on two different schedules —
@@ -177,9 +187,9 @@ Add two rows to the Known signatures table, both observed directly in this inves
 1. Re-grep `skills/orca-workflow/SKILL.md` §2a after editing to confirm both round-1 dispatch blocks
    (task-runner, evaluator) point to the same shared round-2+ subsection rather than each re-deriving the
    polling snippet.
-2. Confirm `skills/orca-task-runner/SKILL.md` §1 and `skills/orca-evaluate/SKILL.md` §1 both name the exact
-   `orchestration send --type worker_done --report-path` invocation, using the shared phrasing style already
-   used for `logging.md`/`spawn-failures.md` pointers elsewhere in these files.
+2. Confirm `skills/orca-task-runner/SKILL.md` §1 and `skills/orca-evaluate/SKILL.md` §1 each gained exactly
+   one clarifying sentence (turn boundary, not a new orca command) and that neither file's count of literal
+   `orchestration send`/`orca terminal read` occurrences changed from zero.
 3. Confirm the two new `spawn-failures.md` rows don't collide with existing rows `#37`/`#43` (both involve
    `dispatch --inject` and a terminal that looks blocked) — the distinguishing detail is that `#37`/`#43`
    involve a terminal in an unexpected *shell* state, while these two are structured `runtime_error` JSON
@@ -187,9 +197,11 @@ Add two rows to the Known signatures table, both observed directly in this inves
 4. Before closing issue #64, run one real `orca-workflow` task end-to-end through at least a round-2
    negotiation (a task designed to trigger one evaluator rejection) and confirm the round-2 dispatch
    succeeds without falling back to any `terminal-send-fallback`-style placeholder in the assignment log.
-5. If a future session captures the round-2 `dispatch-capability` value before the terminal moves on, update
-   §5's "unverified" note with the confirmed answer (matches or rotates) and adjust §4b/§4c wording
-   accordingly.
+5. Recount every test in `tests/test_orca_skills.py` whose expectation is a function of literal text in
+   these files (`test_dispatch_site_count_and_section0_exception_shape`, `test_orca_call_with_retry_count_per_skill`,
+   `test_orca_terminal_read_counts_per_skill_file`) against the actual edited text, not a number predicted in
+   advance — several of that suite's assertions are anchored to exact line-start patterns
+   (`_RETRY_INVOCATION_LINE_RE`) that a differently-indented but equivalent snippet could silently miss.
 
 No skill deployment step applies to the `orca-workflows/` edits (symlink-tracks-main convention — live on
 merge). The `skills/orca-workflow`, `skills/orca-task-runner`, `skills/orca-evaluate` edits require `bash
