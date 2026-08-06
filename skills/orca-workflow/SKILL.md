@@ -159,6 +159,35 @@ orca_call_with_retry "orca-workflow" "evaluator" -- \
 #    같은 이유(실제 결과는 relay 또는 report 파일 직접 읽기로 도착).
 ```
 
+**Contract 협상 relay — 라운드 2+ (반려된 경우만; 승인이면 곧장 2b)**: 라운드 1과 같은 task_id를 재사용하지
+않는다 — `dispatch`는 이미 `dispatched`/`completed` 상태인 task를 거부하고(`"Task ... is dispatched; only ready tasks can be dispatched"`, 실측), 애초에 텍스트를 override하는 인자가 없어 재사용해도 라운드 1과 같은
+spec만 재전송된다. 대신 매 라운드 새 task를 만들어 같은 터미널(재-engage 대상은 task-runner면
+`<run-handle>`, evaluator면 `<evaluate-handle>`)에 재-dispatch한다 — 단 그 터미널의 직전 dispatch가
+`completed` 상태여야 한다(그렇지 않으면 `"Terminal ... already has an active dispatch"`로 거부됨, 실측).
+`--deps`는 걸지 않는다 — 걸어도 `dispatch` 자체가 이미 같은 선후관계를 강제하므로 stall 경로만 하나 늘어난다.
+
+```bash
+source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
+orca_call_with_retry "orca-workflow" "contract-round" -- \
+  orca orchestration task-list --status completed --json
+# 위 결과에서 직전 라운드 task_id의 .status가 "completed"인지 확인하고, .result(JSON 문자열)를 파싱해
+# .reportPath를 읽는다 — 본문은 읽지 않고 경로만 중계한다는 원칙은 여기서도 유지된다.
+spec_text="<round 번호 + 위에서 읽은 reportPath + (evaluator→task-runner 방향이면) 반려 사유 요약>"
+orca_call_with_retry "orca-workflow" "contract-round" -- \
+  orca orchestration task-create --spec "$spec_text" --json
+orca_call_with_retry "orca-workflow" "contract-round" -- \
+  orca orchestration dispatch --task <방금 만든 task_id> --to <재-engage 대상 handle> --inject --json
+# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로.
+# 로그 — ~/.agents/orca-workflows/logging.md 절차대로. task_id가 실제 존재하므로 §1의 relay:true/omit
+# 규칙은 이 사이트엔 적용되지 않는다(issue #64로 해소).
+```
+
+- `task-list --json` 폴링(20-30s 간격)으로 직전 라운드가 `completed`인지 확인한다 — `check --wait`을 1차
+  수단으로 쓰지 않는다(coordinator가 Orca 터미널 세션이면 `worker_done`이 check 큐에서 누락될 수 있다, task
+  상태는 정상 갱신됨 — `orca-task-runner` §5와 같은 이유).
+- 오래(예: 30분) `completed`가 안 되면 체크포인트 — 재진단하지 않고
+  `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차로.
+
 **2b. Generate** — `orca-task-runner` 호출, 결과로 **task 전체 diff 경로** 또는 **`GATE_FAIL`**을 받는다(`orca-task-runner`가 자기 task-레벨 게이트를 재시도 한도(2회) 안에 못 넘긴 경우 — `skills/orca-task-runner/SKILL.md` §6).
 
 **2b-1. GATE_FAIL 라우팅** — `orca-evaluate`를 호출하지 않고 바로 **3. Inspecting**으로 간다. `orca-task-runner`가 이미 자기 재시도 예산을 다 썼으므로 여기서 추가 재시도를 걸지 않는다(이중 카운팅 방지). Inspecting 보고에 "evaluate 호출 안 됨(GATE_FAIL) — 기계적 게이트 실패"를 명시해 아래 FAIL/ESCALATE와 구분한다. 이때도 §2d의 outcome 로그 라인을 `outcome:"GATE_FAIL"`로 남긴다(§2d를 거치지 않으므로 여기서 직접).

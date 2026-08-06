@@ -568,9 +568,10 @@ def test_dispatch_site_count_and_section0_exception_shape():
         if name == "orca-evaluate":
             start, end = _evaluate_section0_span(text)
             excluded += sum(1 for pos in positions if start <= pos < end)
-    assert total == 7, (
-        f"expected 7 `dispatch --task ... --inject` sites across the NEW_SKILLS family's "
-        f"SKILL.md files combined, found {total}"
+    assert total == 8, (
+        f"expected 8 `dispatch --task ... --inject` sites across the NEW_SKILLS family's "
+        f"SKILL.md files combined (7 pre-#64 + 1 new round-2+ relay site in orca-workflow §2a), "
+        f"found {total}"
     )
     assert excluded == 1, (
         f"expected exactly 1 dispatch site inside orca-evaluate's §0 (the documented exception "
@@ -672,7 +673,7 @@ def test_no_bare_wrapped_call_sites(name):
 
 
 EXPECTED_RETRY_WRAP_COUNTS = {
-    "orca-workflow": 9,
+    "orca-workflow": 12,  # +3 for issue #64's round-2+ relay: task-list poll, task-create, dispatch
     "orca-task-runner": 6,
     "orca-evaluate": 10,
 }
@@ -685,6 +686,63 @@ _RETRY_INVOCATION_LINE_RE = re.compile(r'^orca_call_with_retry "', re.M)
 def test_orca_call_with_retry_count_per_skill(name, expected):
     actual = len(_RETRY_INVOCATION_LINE_RE.findall(_read_skill(name)))
     assert actual == expected, f"{name}: expected {expected} orca_call_with_retry invocations, found {actual}"
+
+
+def test_orca_workflow_documents_round2_relay_protocol():
+    """Issue #64: §2a must name the actual mechanism (new task-create per round, gated on a task-list
+    poll for the prior round's completion, dispatched to the same terminal handle) rather than leaving
+    round 2+ undocumented. Pins the load-bearing phrases so a future rewrite can't silently drop the
+    poll-before-dispatch gate or reintroduce task_id reuse."""
+    text = _read_skill("orca-workflow")
+    assert "already has an active dispatch" in text, (
+        "must document the verified error a premature round-2 dispatch produces"
+    )
+    assert "is dispatched; only ready tasks can be dispatched" in text, (
+        "must document why reusing the round-1 task_id is impossible"
+    )
+    assert "task-list" in text, "round-2+ completion check must poll task-list, not terminal read"
+    assert "reportPath" in text, "must name the path-only relay channel (task-list result.reportPath)"
+    assert "`--deps`는 걸지" in text, "must explicitly instruct against --deps between round tasks"
+
+
+def test_orca_workflow_round2_relay_has_no_deploy_placeholder():
+    """The production incident this issue traces to used a `terminal-send-fallback` task_id placeholder
+    — the fixed procedure must never reintroduce it."""
+    text = _read_skill("orca-workflow")
+    assert "terminal-send-fallback" not in text
+
+
+def test_logging_no_longer_flags_round2_relay_as_unresolved():
+    """Issue #64 is resolved as of this plan — logging.md must not keep pointing a future reader at it
+    as an open design question, nor keep the disproven "task 재사용" prediction, nor the ad hoc
+    'terminal-send-fallback' placeholder the unresolved state produced in production."""
+    text = (WORKFLOWS_DIR / "logging.md").read_text()
+    assert "아직 미해결 설계 질문" not in text
+    assert "terminal-send-fallback" not in text
+    assert "기존 task 재사용 방식으로 확정하면" not in text
+
+
+def test_orca_task_runner_states_contract_round_is_a_new_dispatch_not_a_wait():
+    """Issue #64: §1's "반려되면 수정해서 다시 제안한다" narrates the whole multi-dispatch protocol in one
+    sentence — a fresh dispatched worker could misread it as "wait/poll in this same turn" instead of "end
+    the turn; the next round arrives as a new dispatch." No new orca command is needed here (dispatch
+    --inject already auto-injects the full worker_done protocol on every call) — only this one sentence
+    of turn-boundary prose."""
+    text = _read_skill("orca-task-runner")
+    assert "이번 턴을 끝낸다" in text, (
+        "orca-task-runner §1 must clarify that each contract round ends the current turn "
+        "(worker_done, per the injected preamble) rather than waiting/polling in-turn for the next round"
+    )
+
+
+def test_orca_evaluate_states_contract_round_is_a_new_dispatch_not_a_wait():
+    """Mirrors test_orca_task_runner_states_contract_round_is_a_new_dispatch_not_a_wait for the
+    evaluator side of the same round."""
+    text = _read_skill("orca-evaluate")
+    assert "이번 턴을 끝낸다" in text, (
+        "orca-evaluate §1 must clarify that relaying the verdict ends the current turn "
+        "(worker_done, per the injected preamble) rather than waiting/polling in-turn for the next round"
+    )
 
 
 # Scoped to the skills that actually invoke the wrapper, not the whole NEW_SKILLS family —
@@ -970,4 +1028,63 @@ def test_orca_task_runner_spawn_template_verbatim_rule():
     )
     assert "fallback shell" in text, (
         "orca-task-runner must forbid the bare-fallback-shell + retype spawn path"
+    )
+
+
+def test_spawn_failures_has_round2_relay_rejection_rows():
+    """Issue #64's live investigation produced two verified `runtime_error` JSON responses from
+    `dispatch`/`task-create` themselves — not a spawned terminal's `terminal read` output, unlike every
+    prior row in this table. Pins both signatures, the issue link, and the scoping note distinguishing
+    their detection channel from the table's default convention."""
+    text = _read_workflows_file("spawn-failures.md")
+    sig1 = "is dispatched; only ready tasks can be dispatched"
+    sig2 = "already has an active dispatch"
+    assert sig1 in text
+    assert sig2 in text
+
+    # Verify each signature's row ends with | #64 | (not just any #64 in the file)
+    sig1_pos = text.find(sig1)
+    assert sig1_pos >= 0, f"signature '{sig1}' not found"
+    sig1_row_end = text.find("\n", sig1_pos)
+    assert sig1_row_end > 0, "row terminator not found after sig1"
+    sig1_row = text[sig1_pos:sig1_row_end]
+    assert sig1_row.endswith("| #64 |"), (
+        f"sig1 row must end with '| #64 |', but ends with: {sig1_row[-20:]}"
+    )
+
+    sig2_pos = text.find(sig2)
+    assert sig2_pos >= 0, f"signature '{sig2}' not found"
+    sig2_row_end = text.find("\n", sig2_pos)
+    assert sig2_row_end > 0, "row terminator not found after sig2"
+    sig2_row = text[sig2_pos:sig2_row_end]
+    assert sig2_row.endswith("| #64 |"), (
+        f"sig2 row must end with '| #64 |', but ends with: {sig2_row[-20:]}"
+    )
+
+    assert "calling command's own" in text or "호출 자신의" in text, (
+        "must scope-note that these two signatures appear in dispatch/task-create's own --json response, "
+        "not a spawned terminal's `terminal read` output (every other row in this table is the latter)"
+    )
+    header_count = text.count("| `failure_signature` (grep substring) |")
+    assert header_count == 1, (
+        f"expected exactly one 'Known signatures' table (one header line), found {header_count}"
+    )
+
+
+def test_spawn_failures_known_signatures_table_has_no_internal_blank_lines():
+    """Task 5's fix round found and fixed a real GFM table break: a blank line between two rows
+    made every row after it render as plain text, not part of the table. Nothing guarded against
+    a recurrence — this does."""
+    text = _read_workflows_file("spawn-failures.md")
+    start = text.index("| `failure_signature` (grep substring) |")
+    end = text.index("## Adding a new row")
+    lines = text[start:end].splitlines()
+    # Trim trailing non-table lines (e.g. the blank line before the next heading) so the span
+    # covers exactly the header row through the table's last row — not any later prose.
+    while lines and not lines[-1].startswith("|"):
+        lines.pop()
+    table_span = "\n".join(lines)
+    assert "\n\n" not in table_span, (
+        "blank line found inside the Known signatures table — this breaks GFM table rendering "
+        "for every row after it (issue #64's Task 5 fix round found exactly this bug)"
     )

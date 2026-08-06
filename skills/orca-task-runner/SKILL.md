@@ -56,7 +56,7 @@ description: Use when generating the implementation for one task (issue) — pro
   "검증 방법" 불릿은 새로 추가할 검증만 묻는다 — 기존에 green이던 단언 중 이 변경으로 red가 될 것은
   별도로 열거해야 한다(정확 일치 단언, 게이트 자체를 막는 회귀를 특히 놓치기 쉽다).
 
-`orca-evaluate`가 이 제안을 issue의 원본 acceptance criteria에 대조해 검토한다. 반려되면 수정해서 다시 제안한다. **최대 2 라운드.** 2라운드 안에 합의가 안 되면 이 스킬(generator)이 결정권을 가지고 그 제안대로 진행한다 — evaluator의 이견은 기록에 남기되 진행을 막지 않는다.
+`orca-evaluate`가 이 제안을 issue의 원본 acceptance criteria에 대조해 검토한다. 반려되면 수정해서 다시 제안한다 — 각 라운드는 별도 dispatch로 도착한다: 제안서를 쓰고 나면 이번 턴을 끝낸다(주입된 preamble의 worker_done 지시대로), 같은 턴 안에서 반려 여부를 기다리거나 폴링하지 않는다. **최대 2 라운드.** 2라운드 안에 합의가 안 되면 이 스킬(generator)이 결정권을 가지고 그 제안대로 진행한다 — evaluator의 이견은 기록에 남기되 진행을 막지 않는다.
 
 ## 2. Subtask DAG 구성
 
