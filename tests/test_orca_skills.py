@@ -568,9 +568,10 @@ def test_dispatch_site_count_and_section0_exception_shape():
         if name == "orca-evaluate":
             start, end = _evaluate_section0_span(text)
             excluded += sum(1 for pos in positions if start <= pos < end)
-    assert total == 7, (
-        f"expected 7 `dispatch --task ... --inject` sites across the NEW_SKILLS family's "
-        f"SKILL.md files combined, found {total}"
+    assert total == 8, (
+        f"expected 8 `dispatch --task ... --inject` sites across the NEW_SKILLS family's "
+        f"SKILL.md files combined (7 pre-#64 + 1 new round-2+ relay site in orca-workflow §2a), "
+        f"found {total}"
     )
     assert excluded == 1, (
         f"expected exactly 1 dispatch site inside orca-evaluate's §0 (the documented exception "
@@ -672,7 +673,7 @@ def test_no_bare_wrapped_call_sites(name):
 
 
 EXPECTED_RETRY_WRAP_COUNTS = {
-    "orca-workflow": 9,
+    "orca-workflow": 12,  # +3 for issue #64's round-2+ relay: task-list poll, task-create, dispatch
     "orca-task-runner": 6,
     "orca-evaluate": 10,
 }
@@ -685,6 +686,31 @@ _RETRY_INVOCATION_LINE_RE = re.compile(r'^orca_call_with_retry "', re.M)
 def test_orca_call_with_retry_count_per_skill(name, expected):
     actual = len(_RETRY_INVOCATION_LINE_RE.findall(_read_skill(name)))
     assert actual == expected, f"{name}: expected {expected} orca_call_with_retry invocations, found {actual}"
+
+
+def test_orca_workflow_documents_round2_relay_protocol():
+    """Issue #64: §2a must name the actual mechanism (new task-create per round, gated on a task-list
+    poll for the prior round's completion, dispatched to the same terminal handle) rather than leaving
+    round 2+ undocumented. Pins the load-bearing phrases so a future rewrite can't silently drop the
+    poll-before-dispatch gate or reintroduce task_id reuse."""
+    text = _read_skill("orca-workflow")
+    assert "already has an active dispatch" in text, (
+        "must document the verified error a premature round-2 dispatch produces"
+    )
+    assert "is dispatched; only ready tasks can be dispatched" in text, (
+        "must document why reusing the round-1 task_id is impossible"
+    )
+    assert "task-list" in text, "round-2+ completion check must poll task-list, not terminal read"
+    assert "reportPath" in text, "must name the path-only relay channel (task-list result.reportPath)"
+    no_deps_idx = text.find("--deps는 걸지")
+    assert no_deps_idx != -1, "must explicitly instruct against --deps between round tasks"
+
+
+def test_orca_workflow_round2_relay_has_no_deploy_placeholder():
+    """The production incident this issue traces to used a `terminal-send-fallback` task_id placeholder
+    — the fixed procedure must never reintroduce it."""
+    text = _read_skill("orca-workflow")
+    assert "terminal-send-fallback" not in text
 
 
 # Scoped to the skills that actually invoke the wrapper, not the whole NEW_SKILLS family —
