@@ -713,6 +713,19 @@ def test_orca_workflow_round2_relay_has_no_deploy_placeholder():
     assert "terminal-send-fallback" not in text
 
 
+def test_orca_task_runner_states_contract_round_is_a_new_dispatch_not_a_wait():
+    """Issue #64: §1's "반려되면 수정해서 다시 제안한다" narrates the whole multi-dispatch protocol in one
+    sentence — a fresh dispatched worker could misread it as "wait/poll in this same turn" instead of "end
+    the turn; the next round arrives as a new dispatch." No new orca command is needed here (dispatch
+    --inject already auto-injects the full worker_done protocol on every call) — only this one sentence
+    of turn-boundary prose."""
+    text = _read_skill("orca-task-runner")
+    assert "이번 턴을 끝낸다" in text, (
+        "orca-task-runner §1 must clarify that each contract round ends the current turn "
+        "(worker_done, per the injected preamble) rather than waiting/polling in-turn for the next round"
+    )
+
+
 # Scoped to the skills that actually invoke the wrapper, not the whole NEW_SKILLS family —
 # orca-retro makes no `orca` CLI calls, so a `source` line there would be dead prose. Per-block
 # enforcement lives in test_every_retry_invocation_block_sources_the_wrapper (correctly conditional).
