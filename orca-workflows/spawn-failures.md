@@ -88,8 +88,8 @@ modal is actually observed, unlike #43's row which has no substring to capture e
 signature-less row like this only when a failure genuinely has neither a literal substring nor a reliable
 retrospective log check; default to the literal-substring form whenever one exists.
 
-**Exception (caller-side signature, not terminal-read):** the two `#64` rows below are the one case in this
-table where `failure_signature` does not appear in a spawned terminal's `terminal read` output — every other
+**Exception (caller-side signature, not terminal-read):** the two `#64` rows in the table above are the one
+case in this table where `failure_signature` does not appear in a spawned terminal's `terminal read` output — every other
 row is from reading a target terminal that `orca-workflow`/`orca-task-runner`/`orca-evaluate` spawned.
 These two are `runtime_error` JSON responses returned directly by `orca orchestration dispatch`/`task-create`
 themselves, visible in the calling command's own `--json` stdout at the moment it is issued — grep that

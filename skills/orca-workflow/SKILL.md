@@ -169,14 +169,14 @@ spec만 재전송된다. 대신 매 라운드 새 task를 만들어 같은 터�
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 orca_call_with_retry "orca-workflow" "contract-round" -- \
-  orca orchestration task-list --json
+  orca orchestration task-list --status completed --json
 # 위 결과에서 직전 라운드 task_id의 .status가 "completed"인지 확인하고, .result(JSON 문자열)를 파싱해
 # .reportPath를 읽는다 — 본문은 읽지 않고 경로만 중계한다는 원칙은 여기서도 유지된다.
 spec_text="<round 번호 + 위에서 읽은 reportPath + (evaluator→task-runner 방향이면) 반려 사유 요약>"
 orca_call_with_retry "orca-workflow" "contract-round" -- \
   orca orchestration task-create --spec "$spec_text" --json
 orca_call_with_retry "orca-workflow" "contract-round" -- \
-  orca orchestration dispatch --task <round N task_id> --to <재-engage 대상 handle> --inject --json
+  orca orchestration dispatch --task <방금 만든 task_id> --to <재-engage 대상 handle> --inject --json
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. task_id가 실제 존재하므로 §1의 relay:true/omit
 # 규칙은 이 사이트엔 적용되지 않는다(issue #64로 해소).

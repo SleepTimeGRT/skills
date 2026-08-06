@@ -702,8 +702,7 @@ def test_orca_workflow_documents_round2_relay_protocol():
     )
     assert "task-list" in text, "round-2+ completion check must poll task-list, not terminal read"
     assert "reportPath" in text, "must name the path-only relay channel (task-list result.reportPath)"
-    no_deps_idx = text.find("`--deps`는 걸지")
-    assert no_deps_idx != -1, "must explicitly instruct against --deps between round tasks"
+    assert "`--deps`는 걸지" in text, "must explicitly instruct against --deps between round tasks"
 
 
 def test_orca_workflow_round2_relay_has_no_deploy_placeholder():
@@ -1069,4 +1068,23 @@ def test_spawn_failures_has_round2_relay_rejection_rows():
     header_count = text.count("| `failure_signature` (grep substring) |")
     assert header_count == 1, (
         f"expected exactly one 'Known signatures' table (one header line), found {header_count}"
+    )
+
+
+def test_spawn_failures_known_signatures_table_has_no_internal_blank_lines():
+    """Task 5's fix round found and fixed a real GFM table break: a blank line between two rows
+    made every row after it render as plain text, not part of the table. Nothing guarded against
+    a recurrence — this does."""
+    text = _read_workflows_file("spawn-failures.md")
+    start = text.index("| `failure_signature` (grep substring) |")
+    end = text.index("## Adding a new row")
+    lines = text[start:end].splitlines()
+    # Trim trailing non-table lines (e.g. the blank line before the next heading) so the span
+    # covers exactly the header row through the table's last row — not any later prose.
+    while lines and not lines[-1].startswith("|"):
+        lines.pop()
+    table_span = "\n".join(lines)
+    assert "\n\n" not in table_span, (
+        "blank line found inside the Known signatures table — this breaks GFM table rendering "
+        "for every row after it (issue #64's Task 5 fix round found exactly this bug)"
     )

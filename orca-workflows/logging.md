@@ -42,6 +42,14 @@ chmod 600 "$target"
 Extra fields (`wave_index`, `subtask_type`, `advisor`, ...) are added per call site exactly as each
 `SKILL.md` already does — only the target path changes.
 
+**`task-create`가 새 task를 만들지 않은 relay dispatch**: 이런 dispatch에는 진짜 `task_id`가 없는 경우가
+있다. `task_id` 필드는 기존 `<task_id-or-omit>` 규칙대로 그대로 생략한다 — 빈 문자열(`""`)이나 issue
+#62에서 실제로 관찰된 것 같은 즉석 placeholder 문자열을 넣지 않는다. 대신 extra field로 `"relay":true`를
+추가해 "몰라서 생략"과 "relay라서 없음"을 로그에서 구분한다.
+`orca-workflow` §2a의 라운드 2+ relay(issue #64로 해소)는 매 라운드 `task-create`로 새 task를 만들므로
+현재 이 사이트엔 이 규칙이 적용되지 않는다 — 다만 진짜 task_id가 없는 다른 relay dispatch에는 이 규칙이
+그대로 적용된다.
+
 **`outcome`** (`orca-workflow` only — routing result for a task):
 
 ```bash
