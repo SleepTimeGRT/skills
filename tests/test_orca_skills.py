@@ -650,6 +650,20 @@ def test_spawn_failures_has_orca_restart_retry_row():
     assert "#42" in text
 
 
+def test_spawn_failures_has_broadened_regex_pointer_row():
+    """orca-evaluate final review (issue #42 retry): the #42 row's two literals no longer reflect
+    the wrapper's full match set after the regex was broadened to 4 keywords, so a pointer row
+    must exist directing readers to the script's header comment instead of leaving the table to
+    silently under-represent the real match set."""
+    text = (WORKFLOWS_DIR / "spawn-failures.md").read_text()
+    assert "pointer row" in text
+    assert "_ORCA_RETRY_SIGNATURE_RE" in text
+    header_count = text.count("| `failure_signature` (grep substring) |")
+    assert header_count == 1, (
+        f"expected exactly one 'Known signatures' table (one header line), found {header_count}"
+    )
+
+
 _BASH_FENCE_RE = re.compile(r"^[ \t]*```bash\n(.*?)^[ \t]*```", re.M | re.S)
 
 

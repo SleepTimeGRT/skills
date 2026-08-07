@@ -36,6 +36,14 @@
 # coincidentally match wrapped-command output that has nothing to do with Orca transport itself,
 # producing a spawn-failures.jsonl row mislabeled `known_issue: 42`. Post-broadening, that field
 # means "issue #42-class failure" (a class label), not "confirmed root cause."
+#
+# Idempotency scope note (out of scope for #42, tracked separately): this function also wraps
+# mutating calls (`task-create`/`dispatch`/`worker-start`/`terminal create`). If one of those
+# succeeds server-side but the client observes a non-zero exit whose output happens to contain one
+# of the broadened keywords, a retry can duplicate the task/dispatch — a pre-existing risk (it
+# already existed for the two original literals) that this broadening widens the surface of,
+# without introducing it. No idempotency safeguard (client-request-id, dedupe) was found for these
+# calls in this repo. Auditing and fixing that is issue #73, deliberately not addressed here.
 
 _ORCA_RETRY_SIGNATURE_RE='Could not connect to the running Orca app|Orca is not running\. Run .orca open. first|not running|could not connect|reconnect|bootstrap'
 
