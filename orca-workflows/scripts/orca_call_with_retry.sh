@@ -10,8 +10,42 @@
 # failure: log one spawn-failures.jsonl occurrence, poll `orca status --json` for `.state ==
 # "ready"` (bounded), and retry the identical command once ready — up to ORCA_RETRY_MAX_CYCLES
 # cycles before giving up and returning the last failure to the caller.
+#
+# Signature broadened 2026-08-07 (issue #42 reopened): the two original literals missed a real
+# recurrence at MediCount#502/child#496 — 3 occurrences across that pair where the actual error
+# text matched neither literal, so the call went unretried AND unlogged (no spawn-failures.jsonl
+# row at all, since the log-occurrence path only fires on a signature match). Keyword
+# alternatives (`not running`, `could not connect`, `reconnect`, `bootstrap`) were added
+# case-insensitively (`-i`) to catch that class without requiring every future error string to be
+# enumerated as a new literal.
+#
+# leftmost-longest assumption: both original literals are longer than any of the new keyword
+# alternatives, so under POSIX ERE leftmost-longest matching, `grep -oE` still prefers the
+# original literals wherever they're present — `matched_signature` extraction is unchanged for
+# the two pre-existing cases (this is what
+# `test_logged_failure_signature_is_matched_substring_not_full_output` in
+# tests/test_orca_call_with_retry.py asserts exactly).
+#
+# Fallback contract: if a real worker's `grep` build is observed to violate leftmost-longest (that
+# test goes red), switch to two-stage matching instead of trying to fix it in one pattern: decide
+# retry-or-not with the broad `grep -qiE` as today, but derive `matched_signature` by trying the
+# original narrow 2-literal pattern first and falling back to the broad pattern's match only if
+# the narrow one finds nothing.
+#
+# Log-pollution tradeoff: `not running` (and to a lesser extent the other keywords) can
+# coincidentally match wrapped-command output that has nothing to do with Orca transport itself,
+# producing a spawn-failures.jsonl row mislabeled `known_issue: 42`. Post-broadening, that field
+# means "issue #42-class failure" (a class label), not "confirmed root cause."
+#
+# Idempotency scope note (out of scope for #42, tracked separately): this function also wraps
+# mutating calls (`task-create`/`dispatch`/`worker-start`/`terminal create`). If one of those
+# succeeds server-side but the client observes a non-zero exit whose output happens to contain one
+# of the broadened keywords, a retry can duplicate the task/dispatch — a pre-existing risk (it
+# already existed for the two original literals) that this broadening widens the surface of,
+# without introducing it. No idempotency safeguard (client-request-id, dedupe) was found for these
+# calls in this repo. Auditing and fixing that is issue #73, deliberately not addressed here.
 
-_ORCA_RETRY_SIGNATURE_RE='Could not connect to the running Orca app|Orca is not running\. Run .orca open. first'
+_ORCA_RETRY_SIGNATURE_RE='Could not connect to the running Orca app|Orca is not running\. Run .orca open. first|not running|could not connect|reconnect|bootstrap'
 
 orca_call_with_retry() {
   local skill="$1" role="$2"
@@ -30,7 +64,7 @@ orca_call_with_retry() {
     code=$?
     combined="$(cat "$out" "$err")"
 
-    if [ "$code" -eq 0 ] || ! printf '%s' "$combined" | grep -qE "$_ORCA_RETRY_SIGNATURE_RE"; then
+    if [ "$code" -eq 0 ] || ! printf '%s' "$combined" | grep -qiE "$_ORCA_RETRY_SIGNATURE_RE"; then
       cat "$out"
       cat "$err" >&2
       rm -f "$out" "$err"
@@ -41,7 +75,7 @@ orca_call_with_retry() {
     local outcome="retrying"
     [ "$cycle" -ge "$max_cycles" ] && outcome="exhausted"
     local matched_signature
-    matched_signature="$(printf '%s' "$combined" | grep -oE "$_ORCA_RETRY_SIGNATURE_RE" | head -1)"
+    matched_signature="$(printf '%s' "$combined" | grep -oiE "$_ORCA_RETRY_SIGNATURE_RE" | head -1)"
     _orca_retry_log_occurrence "$skill" "$role" "$matched_signature" "$outcome" "$cycle"
 
     if [ "$cycle" -ge "$max_cycles" ]; then

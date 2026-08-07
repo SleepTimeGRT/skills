@@ -128,7 +128,7 @@ source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 orca_call_with_retry "orca-workflow" "task-runner" -- \
   orca terminal create --worktree active --title task-run-<n> \
   --command "<provider의 launch 문법 — provider 문서에서 resolve>" --json
-spec_text="<issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 제안서/구현 모드>"
+spec_text="<issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 제안서/구현 모드 + worker_done을 포함해 네가 보내는 orca orchestration/orca terminal 호출은 항상 orca_call_with_retry로 감싸고(issue #42), wrapper가 exhausted를 반환하면 ask를 포함한 추가 orchestration 호출을 시도하지 말고(같은 죽은 transport) 즉시 사람에게 알리지 말고 .orca-orphaned-result-<task_id>.json에 결과를 저장(커밋 금지)한 뒤 터미널에 ORPHANED_RESULT <task_id> <파일 절대경로> 한 줄을 출력하고 멈추라는 지시(orca-task-runner SKILL.md subtask spec 항목 ⑦과 동일 계약)>"
 orca_call_with_retry "orca-workflow" "task-runner" -- \
   orca orchestration task-create --spec "$spec_text" --json
 orca_call_with_retry "orca-workflow" "task-runner" -- \
@@ -159,7 +159,7 @@ orca_call_with_retry "orca-workflow" "evaluator" -- \
 orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json
 # 해당 provider가 최초 launch 시 신뢰/승인류 재프롬프트를 요구하면 그 provider 문서가 정의하는
 # 절차를 따른다(agy 전용 시퀀스를 여기서 가정하지 않는다).
-spec_text="<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문 + issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 요청 모드>"
+spec_text="<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문 + issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 요청 모드 + worker_done을 포함해 네가 보내는 orca orchestration/orca terminal 호출은 항상 orca_call_with_retry로 감싸고(issue #42), wrapper가 exhausted를 반환하면 ask를 포함한 추가 orchestration 호출을 시도하지 말고(같은 죽은 transport) 즉시 사람에게 알리지 말고 .orca-orphaned-result-<task_id>.json에 결과를 저장(커밋 금지)한 뒤 터미널에 ORPHANED_RESULT <task_id> <파일 절대경로> 한 줄을 출력하고 멈추라는 지시(orca-task-runner SKILL.md subtask spec 항목 ⑦과 동일 계약)>"
 orca_call_with_retry "orca-workflow" "evaluator" -- \
   orca orchestration task-create --spec "$spec_text" --json
 orca_call_with_retry "orca-workflow" "evaluator" -- \
@@ -198,7 +198,7 @@ orca_call_with_retry "orca-workflow" "contract-round" -- \
   orca orchestration task-list --run "$RUN_ID" --json
 # 위 결과에서 직전 라운드 task_id를 찾아 .result(JSON 문자열)를 파싱해 .reportPath를 읽는다 —
 # 본문은 읽지 않고 경로만 중계한다는 원칙은 여기서도 유지된다.
-spec_text="<round 번호 + 위에서 읽은 reportPath + (evaluator→task-runner 방향이면) 반려 사유 요약>"
+spec_text="<round 번호 + 위에서 읽은 reportPath + (evaluator→task-runner 방향이면) 반려 사유 요약 + worker_done을 포함해 네가 보내는 orca orchestration/orca terminal 호출은 항상 orca_call_with_retry로 감싸고(issue #42), wrapper가 exhausted를 반환하면 ask를 포함한 추가 orchestration 호출을 시도하지 말고(같은 죽은 transport) 즉시 사람에게 알리지 말고 .orca-orphaned-result-<task_id>.json에 결과를 저장(커밋 금지)한 뒤 터미널에 ORPHANED_RESULT <task_id> <파일 절대경로> 한 줄을 출력하고 멈추라는 지시(orca-task-runner SKILL.md subtask spec 항목 ⑦과 동일 계약)>"
 orca_call_with_retry "orca-workflow" "contract-round" -- \
   orca orchestration task-create --spec "$spec_text" --json
 orca_call_with_retry "orca-workflow" "contract-round" -- \
