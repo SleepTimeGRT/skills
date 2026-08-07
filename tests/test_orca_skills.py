@@ -775,6 +775,29 @@ def test_orca_workflow_round2_uses_worker_start_not_raw_dispatch():
     )
 
 
+def test_orca_workflow_round2_relay_worker_start_uses_worktree_current():
+    """Issue #75: `worker-start --terminal <handle>` re-engaging an already-existing terminal fails
+    with selector_not_found when --worktree is `active` -- only `current` works (verified live, 2x
+    reproduction: one orca-task-runner re-engage, one orca-evaluate re-engage). The three
+    `terminal create --worktree active` sites elsewhere in this file spawn a brand-new terminal in
+    the same call and are unaffected (confirmed by the issue's own repro) -- this assertion is
+    scoped to the round-2+ worker-start call only, not a file-wide ban on `--worktree active`.
+    """
+    text = _read_skill("orca-workflow")
+    round2_idx = text.index("**Contract 협상 relay — 라운드 2+")
+    round2_end = text.index("## 3.", round2_idx)
+    round2_section = text[round2_idx:round2_end]
+    ws_idx = round2_section.index("orca orchestration worker-start --task")
+    ws_call = round2_section[ws_idx : round2_section.index("--json", ws_idx) + len("--json")]
+    assert "--worktree active" not in ws_call, (
+        "round-2+ relay worker-start must not use --worktree active against a re-engaged "
+        "terminal -- selector_not_found (issue #75)"
+    )
+    assert "--worktree current" in ws_call, (
+        "round-2+ relay worker-start must use --worktree current against the re-engaged terminal"
+    )
+
+
 def test_orca_workflow_creates_own_run_in_section0():
     text = _read_skill("orca-workflow")
     section0_start = text.index("## 0.")
