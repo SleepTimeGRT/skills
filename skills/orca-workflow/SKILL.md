@@ -202,7 +202,7 @@ spec_text="<round 번호 + 위에서 읽은 reportPath + (evaluator→task-runne
 orca_call_with_retry "orca-workflow" "contract-round" -- \
   orca orchestration task-create --spec "$spec_text" --json
 orca_call_with_retry "orca-workflow" "contract-round" -- \
-  orca orchestration worker-start --task <방금 만든 task_id> --worktree active \
+  orca orchestration worker-start --task <방금 만든 task_id> --worktree current \
   --terminal <재-engage 대상 handle> --run "$RUN_ID" --from <자기 handle> --json
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(worker-start에도 동일하게 필요).
 # 로그 — logging.md §1 assign + §2 meta/sent를 log_dispatch()가 한 호출로 원자적으로 기록한다(issue #68).
