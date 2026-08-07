@@ -22,6 +22,9 @@ If uncertain, choose the higher tier.
 
 ## 2. Pin model and effort
 
+Before pinning a provider, run the "Quota check before pinning" step below — it can exclude or deprioritize
+a candidate before you commit to it.
+
 Orca workers must launch with an explicit model and effort and must not change either mid-task without
 reclassifying the task. This is an Orca workflow invariant, not a claim that every provider runtime makes
 the setting immutable.
@@ -89,6 +92,29 @@ Simple:
 3. Gemini flash-low
 
 Escalate immediately for architecture, security, migration, production incidents, and final review.
+
+## Quota check before pinning
+
+Before pinning a provider from the default mapping or the preference order above, confirm it has room via
+`usage-check.md`'s `orca account list --json` procedure, for whichever window(s) its `rateLimits` object
+actually carries (session/weekly/buckets — see `usage-check.md` for the per-provider shape; a missing
+window is not the same as 0% used, don't treat absence as available room). Two different states, two
+different responses — don't collapse them into one exclusion bucket:
+
+**Hard-exclude** (never pin, regardless of what else is available): `status != "ok"`, or a present window's
+`usedPercent >= 100`, or `rateLimitResetCredits.availableCount == 0`. At this point the provider either
+can't run at all, or keeps accepting dispatches while billing past its included quota — the exact outcome
+to avoid, not something to accept as a last resort.
+
+**Prefer-avoid** (pick another candidate first, but still usable): a present window's `usedPercent` in
+`[90, 100)`. This is margin against several parallel workers pushing the same window over 100% between
+checks, not a sign the provider is already costing extra — don't stop a wave just because the remaining
+candidate is only prefer-avoid.
+
+Resolution: try candidates in order (preference list, then any other tier-appropriate provider), skipping
+hard-excluded ones outright and only falling back to a prefer-avoid one if no clean candidate remains. If
+every candidate for the tier is hard-excluded, stop and report the earliest `resetsAt` among them instead of
+pinning — don't silently drop to a lower tier just to find something available.
 
 ## Provider documents
 

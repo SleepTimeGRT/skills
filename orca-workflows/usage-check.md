@@ -5,8 +5,11 @@
 Shared procedure for checking provider (Claude/Codex/Antigravity/Gemini/...) rate-limit usage and reset
 time — for a coordinator deciding whether to keep dispatching to a provider or avoid it because it's close
 to quota (same precedent as `logging.md`/`spawn-failures.md`/`dispatch-verify.md`: split out here instead of
-each `SKILL.md` repeating it). Not currently wired into any of the three skills' dispatch flow — this is a
-reference a coordinator consults on demand, not an automated gate.
+each `SKILL.md` repeating it). Wired into `model-selection.md`'s pinning step (see its "Quota check before
+pinning" section) — every provider choice that goes through that file's tables or preference order runs
+this check first. `orca-evaluate` §3's `codex_available` flag is a separate, narrower mechanism (session-known
+information, not a live call to this procedure) scoped only to that section's reviewer-selection script; the
+two can disagree until unified.
 
 ## `orca account list --json`
 

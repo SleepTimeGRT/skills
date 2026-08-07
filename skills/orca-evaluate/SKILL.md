@@ -132,9 +132,11 @@ fresh-context code-reviewer terminal을 하나 스폰한다(이 evaluator 세션
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 diff_shortstat="$(git diff --shortstat "$(git merge-base origin/main HEAD)"...HEAD)"
-# codex_available: 1차 근거는 이번 세션에서 사용자가 알려준 정보. 그 정보가 없을 때만
-# `command -v codex`로 바이너리 존재를 보조 확인한다(토큰/쿼터까지는 증명하지 못한다).
-codex_available=true   # 세션에서 알려진 가용성으로 덮어쓸 것
+# codex_available: `~/.agents/orca-workflows/model-selection.md`의 "Quota check before pinning"
+# 절차(orca account list --json 기준)로 codex를 먼저 판정한다 — hard-exclude면 false, 아니면 true.
+# 이번 세션에서 더 최신 정보를 알고 있으면(예: 방금 quota 소진을 직접 확인) 그 값으로 덮어쓴다.
+# 정보가 전혀 없을 때만 `command -v codex`로 바이너리 존재를 보조 확인한다(토큰/쿼터까지는 증명 못함).
+codex_available=false   # quota check로 hard-exclude 아님을 확인하면 true로 바꿀 것
 # migration_files_present: 위에서 이미 계산해 둔 것을 그대로 넘긴다 — churn이 작아도 migration
 # 파일이 있으면 최저 tier로 떨어지지 않는다(round1 Finding 2 수정).
 reviewer_json="$(python3 <skill-dir>/scripts/select_reviewer.py --shortstat "$diff_shortstat" \
