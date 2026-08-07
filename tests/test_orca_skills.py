@@ -1304,6 +1304,90 @@ def test_orca_workflow_premerge_exit_semantics_not_replicated():
     )
 
 
+def test_orca_workflow_premerge_block_captures_exit_code_before_branching():
+    text = _read_skill("orca-workflow")
+    start = text.index("if [ -f scripts/premerge.sh ]; then")
+    end = text.index("## 3. Inspecting")
+    block = text[start:end]
+    assert "if ! bash scripts/premerge.sh" not in block, (
+        "premerge block must not branch on `if ! cmd; then premerge_exit=$?` — $? there captures "
+        "the negated `!` pipeline's status, which is always 0 (issue #72, verified live in both "
+        "bash and zsh)"
+    )
+    assert 'premerge_exit="$(' in block, (
+        "premerge block must capture premerge.sh's exit code from the detached job's own "
+        "EXIT: line, not from a live $? on a foreground negated command"
+    )
+
+
+def test_orca_workflow_premerge_block_specifies_execution_mode():
+    text = _read_skill("orca-workflow")
+    start = text.index("if [ -f scripts/premerge.sh ]; then")
+    end = text.index("## 3. Inspecting")
+    block = text[start:end]
+    assert "harness" in block and "타임아웃" in block, (
+        "premerge block must state that the gate command's runtime can exceed the coordinator "
+        "harness's single-command timeout (issue #72)"
+    )
+    assert "nohup" in block, (
+        "premerge block must specify a concrete detached-execution pattern for gate commands "
+        "that can outrun the harness single-command timeout"
+    )
+
+
+def test_orca_workflow_premerge_fail_requires_verdict_line():
+    text = _read_skill("orca-workflow")
+    start = text.index("if [ -f scripts/premerge.sh ]; then")
+    end = text.index("## 3. Inspecting")
+    block = text[start:end]
+    assert r"\[premerge\] " in block, (
+        "premerge block must check for premerge.sh's own verdict-line prefix before recording "
+        "PREMERGE_FAIL — a nonzero exit with no verdict line is an infra kill, not a gate verdict"
+    )
+    assert "PREMERGE_TIMEOUT" in block, (
+        "premerge block must route the no-verdict-line/budget-exceeded case to a distinct "
+        "outcome, not PREMERGE_FAIL"
+    )
+
+
+def test_logging_outcome_enum_includes_premerge_timeout():
+    text = (WORKFLOWS_DIR / "logging.md").read_text()
+    m = re.search(r'"outcome":"<([^>]+)>"', text)
+    assert m, "outcome enum line missing in logging.md"
+    assert "PREMERGE_TIMEOUT" in m.group(1), (
+        "outcome enum must document PREMERGE_TIMEOUT (issue #72) — an infra kill with no "
+        "premerge.sh verdict line must not be logged as PREMERGE_FAIL"
+    )
+
+
+def test_orca_workflow_premerge_poll_loop_emits_heartbeat_output():
+    text = _read_skill("orca-workflow")
+    start = text.index("if [ -f scripts/premerge.sh ]; then")
+    end = text.index("## 3. Inspecting")
+    block = text[start:end]
+    while_start = block.index("while true")
+    while_end = block.index("done", while_start)
+    loop_body = block[while_start:while_end]
+    assert "printf 'premerge poll:" in loop_body, (
+        "the poll loop must print progress output every iteration before sleeping — round-1 "
+        "rejection (#72): a silent multi-minute single call risks self-triggering the exact "
+        "harness no-output kill this design exists to detect"
+    )
+
+
+def test_orca_workflow_premerge_poll_survives_interrupted_retry():
+    text = _read_skill("orca-workflow")
+    start = text.index("if [ -f scripts/premerge.sh ]; then")
+    end = text.index("## 3. Inspecting")
+    block = text[start:end]
+    assert ".started" in block, (
+        "poll budget must be tracked via a wall-clock start-time file, not a shell-local "
+        "counter, so a coordinator that re-issues the poll block after an interrupted call "
+        "resumes with a correct elapsed time instead of restarting the budget at zero "
+        "(round-1 rejection #72: no documented recovery path when the poll block itself dies)"
+    )
+
+
 def test_sweep_stale_dispatched_script_is_report_only():
     script = WORKFLOWS_DIR / "scripts" / "sweep_stale_dispatched.sh"
     assert script.is_file(), "orca-workflows/scripts/sweep_stale_dispatched.sh missing (#41 janitor)"
