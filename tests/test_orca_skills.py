@@ -769,6 +769,7 @@ def test_sources_retry_wrapper_script(name):
 
 
 DISPATCH_VERIFY_FILE = "dispatch-verify.md"
+SELF_RECOVERY_FILE = "self-recovery.md"
 
 
 def _read_workflows_file(name: str) -> str:
@@ -789,6 +790,36 @@ def test_dispatch_verify_file_documents_bounded_tail_diff_and_escalation():
     assert "❯" not in text and "⏺" not in text, (
         "must stay provider-agnostic — no Claude-Code-specific UI markers"
     )
+
+
+def test_self_recovery_file_documents_principle_and_loop():
+    """docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md: pins the load-bearing
+    content of the new shared self-recovery reference so a future edit can't silently drop the
+    native-primitives principle, the retry budget, the --ack requirement, or the worker-release
+    rejection note."""
+    text = _read_workflows_file(SELF_RECOVERY_FILE)
+    assert "worker-abandon" in text and "--retry-of" in text, (
+        "must document the fence-then-retry recovery mechanism"
+    )
+    assert "check --wait" in text and "--ack" in text, (
+        "must document the event-driven wait and the mandatory ack"
+    )
+    assert "Retry budget: 2" in text or "재시도 예산" in text, (
+        "must state a concrete retry budget, not leave it open"
+    )
+    assert "worker-release" in text and "external_terminal" in text, (
+        "must record why worker-release was rejected for this repo's dispatch shape"
+    )
+    assert "last_heartbeat_at" in text, (
+        "must record that heartbeat was observed null and is not relied on as a liveness signal"
+    )
+
+
+def test_self_recovery_file_states_no_process_action_for_abandon():
+    """worker-abandon's whole value proposition is that it is non-destructive — pin the exact
+    observed evidence so a future edit can't quietly turn this into a claim we didn't verify."""
+    text = _read_workflows_file(SELF_RECOVERY_FILE)
+    assert "processAction" in text and "none" in text
 
 
 @pytest.mark.parametrize("name", NEW_SKILLS)
