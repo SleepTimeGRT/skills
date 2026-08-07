@@ -94,7 +94,18 @@ printf '%s' "$spec_text" > "$HOME/.local/state/orca-workflows/logs/spec-<task_id
 chmod 600 "$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"
 ```
 
-subtask spec 필수 항목: ①구체적 작업 내용(코드 블록 포함 그대로) ②커밋 대상 브랜치·worktree 명시 ③resolved provider/model/effort 기록 ④"막히면 ask로 blocking 질문" ⑤"완료 시 preamble 지시대로 worker_done(payload에 filesModified)" ⑥**병렬 커밋 안전 규칙**(같은 worktree를 공유하는 병렬 워커가 서로의 미완성 변경을 덮어쓰지 않도록): `git add` 명시 경로만·`git commit -m "<msg>" -- <files>` pathspec 필수·index.lock 재시도. ⑦**연결 실패 자동 재시도 + orphan 폴백**: worker_done을 포함해 네가 보내는 `orca orchestration`/`orca terminal` 호출은 항상 `source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh` 후 `orca_call_with_retry`로 감싸고(issue #42), wrapper가 exhausted를 반환하면 ask를 포함한 추가 orchestration 호출을 시도하지 않는다 — 같은 죽은 transport를 타므로 똑같이 실패한다(issue #41). 대신 보내려던 결과 전문(worker_done payload, 없으면 현재 상태 요약)을 worktree 루트에 `.orca-orphaned-result-<task_id>.json`으로 저장하고(커밋 금지 — ⑥의 명시 경로 규칙이 이미 이를 배제한다), 터미널에 `ORPHANED_RESULT <task_id> <파일 절대경로>` 한 줄을 출력한 뒤 명확히 멈춘다(이후 도착하는 무관한 프롬프트를 집어삼키지 말 것).
+subtask spec 필수 항목: ①구체적 작업 내용(코드 블록 포함 그대로) ②커밋 대상 브랜치·worktree 명시(**provider=codex는 예외 — 아래 참고**) ③resolved provider/model/effort 기록 ④"막히면 ask로 blocking 질문" ⑤"완료 시 preamble 지시대로 worker_done(payload에 filesModified)" ⑥**병렬 커밋 안전 규칙**(같은 worktree를 공유하는 병렬 워커가 서로의 미완성 변경을 덮어쓰지 않도록, **provider=codex는 예외 — 아래 참고**): `git add` 명시 경로만·`git commit -m "<msg>" -- <files>` pathspec 필수·index.lock 재시도. ⑦**연결 실패 자동 재시도 + orphan 폴백**: worker_done을 포함해 네가 보내는 `orca orchestration`/`orca terminal` 호출은 항상 `source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh` 후 `orca_call_with_retry`로 감싸고(issue #42), wrapper가 exhausted를 반환하면 ask를 포함한 추가 orchestration 호출을 시도하지 않는다 — 같은 죽은 transport를 타므로 똑같이 실패한다(issue #41). 대신 보내려던 결과 전문(worker_done payload, 없으면 현재 상태 요약)을 worktree 루트에 `.orca-orphaned-result-<task_id>.json`으로 저장하고(커밋 금지 — ⑥의 명시 경로 규칙이 이미 이를 배제한다), 터미널에 `ORPHANED_RESULT <task_id> <파일 절대경로>` 한 줄을 출력한 뒤 명확히 멈춘다(이후 도착하는 무관한 프롬프트를 집어삼키지 말 것).
+
+**provider=codex 예외(②/⑥ 대체 — issue #70):** linked worktree(`~/worktrees/...`)에서 `-s workspace-write`
+샌드박스는 `.git/worktrees/<name>` 경로 바깥이라 codex 워커는 `git add`/`git commit`을 실행할 수 없다
+(`~/.agents/orca-workflows/models/codex.md`의 linked worktree exception 문단 참고). provider가 codex인
+subtask spec에는 ②/⑥ 대신 다음을 계약으로 명시한다: "커밋하지 마라 — 변경사항을 워킹트리에 남긴 채
+preamble 지시대로 worker_done만 보내라(payload의 filesModified에 실제로 건드린 경로를 정확히, 빠짐없이
+나열해라 — 이 목록이 §5에서 너를 대신 커밋할 pathspec의 근거가 된다). 커밋은 너를 스폰한 쪽
+(`orca-task-runner`)이 worker_done 수신 후, **자신의 셸이 아니라 별도의 codex 아닌 헬퍼 터미널을 통해**
+대신 수행한다(§5 참고 — 코디네이터 자신도 codex로 resolve됐을 수 있어, 같은 worktree에서 같은 샌드박스
+거부에 걸리는 것을 피하기 위함)." **claude/agy provider로 스폰하는 subtask spec에는 ②/⑥ 문구가 수정 없이
+그대로 적용된다 — 이 예외는 codex에만 해당하고 다른 provider의 커밋 계약을 바꾸지 않는다.**
 
 ## 3. Wave 준비
 
@@ -173,6 +184,93 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
 - **완료 대기와 self-recovery**: `~/.agents/orca-workflows/self-recovery.md`의 wait/recovery 루프를 그대로 따른다 — 이 wave의 각 subtask `task_id`를 pending set에 넣고, `check --wait`(+`--ack`)로 기다리다 타임아웃되면 그 파일의 alive/stuck_draft/dead 분기(`worker-abandon`→`worker-start --retry-of`)로 복구한다. `dead` 판정 후 재시도할 때는 새 worker 터미널을 §3의 launch 템플릿으로 다시 띄운다(모델·effort는 같은 subtask이므로 재-resolve 없이 그대로 재사용).
 - decision_gate(워커 ask) → 판단 가능하면 `reply`, 불가하면 `orca-workflow`에 에스컬레이션.
 - **`orca_call_with_retry` exhausted로 인한 worker_done 유실**(위 self-recovery와는 다른 시나리오 — Orca 오케스트레이션 API 자체에 닿을 수 없는 경우, issue #41/#42): 커밋/산출물/worktree 루트의 `.orca-orphaned-result-<task_id>.json`(⑦의 exhausted 폴백 산출물) 확인 + `task-update --status completed` 수동 복구, 기록. orphan 파일은 복구 반영 후 삭제한다.
+- **provider=codex subtask는 여기서 commit-helper 터미널이 대신 커밋한다(issue #70, AC4)** — 2절 예외
+  조항에 따라 codex 워커는 커밋하지 않고 worker_done만 보냈으므로 worktree에는 커밋되지 않은 변경사항이
+  남아 있다. 이 단계는 provider가 codex인 subtask에 한해서만 실행한다(claude/agy subtask는 이미 자기
+  커밋을 마치고 worker_done을 보냈으므로 건너뛴다 — provider는 §3에서 이미 resolve해 알고 있다).
+
+  `filesModified`는 바로 위 self-recovery 대기 루프가 이 subtask의 `worker_done`을 수신하며 이미 받아둔
+  `check --wait` 응답(`$result`, `~/.agents/orca-workflows/self-recovery.md`의 wait loop 변수)에서
+  꺼낸다 — 아래 `read_json`(터미널 스크롤백)에서 꺼내지 **않는다**: `read_json`은 recv 로깅 전용이고,
+  이 시점엔 worker_done의 실제 payload가 아니다. **워커 preamble이 채우는 값은 배열이 아니라
+  `--files-modified "path/a,path/b"` 콤마 구분 단일 문자열**이다(경로 자체에 콤마가 들어 있으면 분할이
+  깨진다 — 알려진 한계로 남긴다, filesModified에 콤마 포함 경로가 관측되면 그때 구분자를 바꾼다):
+
+  ```bash
+  files_modified_csv="$(printf '%s' "$result" | jq -r \
+    '.result.messages[] | select(.type=="worker_done" and .taskId=="<task_id>") | .payload.filesModified // empty')"
+  # jq 경로는 이 레포의 기존 camelCase 필드 관례(taskId/dispatchId/deliveryId)에서 유추한 최선 추정 —
+  # self-recovery.md에 worker_done payload의 고정 스키마가 아직 문서화돼 있지 않으므로, 이 subtask
+  # provider의 첫 실제 codex 디스패치에서 실제 $result로 재확인하고 다르면 이 줄만 고친다.
+  ```
+
+  이 커밋은 `orca-task-runner` 코디네이터 자신의 셸에서 실행하지 않는다 — 코디네이터 자신이 codex로
+  resolve된 세션일 수 있고(High Risk tier에서 실제로 일어난다, `codex.md:25`), 그 경우 코디네이터의 셸도
+  같은 worktree에서 워커와 동일한 `.git/worktrees/<name>` 거부에 걸린다(§0 "코디네이터와 워커는 같은
+  worktree를 공유"). 대신 `codex`/`claude`/`agy` 어떤 launch 문법도 쓰지 않는 plain 셸 one-shot 터미널을
+  새로 만들어 그 안에서 커밋한다 — 이 터미널은 애초에 어떤 에이전트 샌드박스도 씌워지지 않으므로, 이슈가
+  기각한 sandbox 경계 확장(수정 방향 (b))이 아니라 처음부터 그 경계 밖에 있는 별도 프로세스를 쓰는 것이다.
+
+  pathspec은 셸 인자로 넘기지 않고 파일로 넘긴다(`--pathspec-from-file`, git 2.25+ — 이 머신 git 2.50.1로
+  `git add -h`/`git commit -h` 실측 확인). 파일 목록을 터미널 경계 너머로 문자열 직렬화할 때 생기는
+  unquoted 확장 위험(zsh는 파일 2개 이상이면 인자 1개로 뭉개지고, bash/sh는 공백 있는 경로가 쪼개진다 —
+  `orca-evaluate` SKILL.md §3 `migration_files`와 같은 문제) 자체를 없애기 위함이다. 콤마 문자열을 파일로
+  쓰는 단계는 `orca_call_with_retry.sh`/`log_dispatch.sh`와 같은 디렉터리의
+  `~/.agents/orca-workflows/scripts/write_pathspec_from_csv.sh`를 `source`해 쓴다 — **bash 배열로 먼저
+  split하지 않는다.** 이전 초안은 `IFS=',' read -r -a files_modified <<< "$files_modified_csv"`로 배열을
+  만든 뒤 `${#files_modified[@]} -gt 0`으로 "커밋할 게 있는지" 판정했는데, `read -a`는 bash 전용이라 이
+  블록이 실제로 돌아가는 셸(zsh, `ZSH_VERSION=5.9`, 이 머신에서 실측)에서는 `read:1: bad option: -a`로
+  실패하면서도 종료 코드는 0을 내 배열이 조용히 빈 채로 남는다 — 그 결과 길이 가드가 항상 거짓이 되어
+  codex 워커의 변경사항이 에러도 escalation도 없이 영원히 커밋되지 않는 fail-open이 된다(실측: bash에서
+  2개 경로 CSV → 배열 원소 2개, zsh에서 같은 CSV → 배열 원소 0개). `write_pathspec_from_csv`는 배열도
+  간접 확장(`${!name}`)도 `[[ ]]`도 쓰지 않는다 — "커밋할 게 있는지"는 배열 길이가 아니라 **CSV 문자열
+  자체가 비어 있는지**(`[ -z "$csv" ]`)로만 판정하므로, 셸에 따라 없어질 수 있는 중간 상태가 아예 없다.
+  완료 판정에는 `--for exit`를 쓰지 않는다 — `~/.agents/orca-workflows/models/agy.md`의 `--command`
+  종료 후에도 셸이 프롬프트로 복귀할 뿐 프로세스가 끝나지 않는다는 기록과 동일 이유로, 이 plain 셸도
+  커맨드 종료 후 종료하지 않는다(`--for exit`는 타임아웃될 뿐 신호가 되지 못한다). 대신 `--for tui-idle`로
+  대기한 뒤 `COMMIT_EXIT:` 문자열을 bounded read로 확인한다:
+
+  ```bash
+  # provider가 codex인 subtask에 한해서만 실행.
+  source ~/.agents/orca-workflows/scripts/write_pathspec_from_csv.sh
+  pathspec_file="$HOME/.local/state/orca-workflows/logs/commit-pathspec-<task_id>.txt"
+  install -d -m 700 ~/.local/state/orca-workflows/logs
+  if write_pathspec_from_csv "$files_modified_csv" "$pathspec_file"; then
+    chmod 600 "$pathspec_file"
+
+    orca_call_with_retry "orca-task-runner" "commit-helper" -- \
+      orca terminal create --worktree active --title task-commit-<task_id> \
+      --command "git -C '<worktree 경로>' add --pathspec-from-file='$pathspec_file' && git -C '<worktree 경로>' commit -m '<task_id> (codex, commit-helper per orca-workflows#70)' --pathspec-from-file='$pathspec_file'; echo COMMIT_EXIT:\$?" --json
+    orca terminal wait --terminal <commit_helper_handle> --for tui-idle --timeout-ms 30000 --json
+    commit_read="$(orca terminal read --terminal <commit_helper_handle> --json)"
+    commit_exit="$(printf '%s' "$commit_read" | grep -oE 'COMMIT_EXIT:[0-9]+' | tail -1 | cut -d: -f2)"
+
+    case "$commit_exit" in
+      0)
+        : ;;   # 정상 커밋 완료
+      1)
+        if printf '%s' "$commit_read" | grep -qi "nothing to commit\|nothing added to commit"; then
+          : # 정상 no-op — 워커의 변경이 이미 반영돼 있었거나 델타가 없었다는 뜻일 뿐, 실패가 아니다.
+            # escalation으로 보내지 않는다(그러면 lens-3 결함을 다른 입구로 다시 만드는 것과 같다).
+        else
+          : # 그 외 rc=1 — 진짜 실패. 재진단 없이 spawn-failures.md known-signature부터 확인하고,
+            # 그래도 안 풀리면 escalation.
+        fi
+        ;;
+      *)
+        : # rc=128(빈 pathspec 등) 포함 그 외 코드 — 진짜 실패. 위와 같은 순서로 대응.
+        ;;
+    esac
+    orca terminal close --terminal <commit_helper_handle> --tab --json
+    rm -f "$pathspec_file"
+  fi   # write_pathspec_from_csv가 rc=3(filesModified CSV가 비어 있음 — 워커가 아무것도 못 고치고
+       # worker_done만 보낸 정상 경로)을 반환하면 이 단계 전체를 건너뛴다 — §6 task 레벨 게이트가 그
+       # 결과를 그대로 평가한다.
+  ```
+
+  git 2.25+ 전제(`--pathspec-from-file` 지원) — 구현 착수 시(이미 이 머신에서는 git 2.50.1로 확인됨)
+  실행 환경의 `git --version`으로 재확인한다.
+
 - **완료 확인된 subtask 터미널은 즉시 닫는다** — wave 전체를 기다리지 않고, 그 subtask의 `worker_done` 수신(taskId+dispatchId 일치) 또는 위 유실 복구가 끝나는 즉시:
 
   ```bash

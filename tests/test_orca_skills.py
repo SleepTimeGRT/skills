@@ -632,14 +632,33 @@ def test_orca_terminal_read_counts_per_skill_file():
     """Per-file counts, not a combined total — a combined "exactly one across all three files"
     would already be satisfied by orca-evaluate's pre-existing §2 agent-e2e completion read alone,
     so it wouldn't actually catch C1 (task-runner's read being silently dropped). Counting per
-    file, and requiring task-runner's count to be exactly 1, is what would have caught it."""
-    expected = {"orca-task-runner": 1, "orca-evaluate": 1, "orca-workflow": 0}
-    for name, count in expected.items():
+    file, and requiring task-runner's count to be exactly 1, is what would have caught it.
+
+    orca-task-runner's total is 2 as of issue #70: one is the original C1 read (subtask impl
+    terminal, before close, for recv logging) and the other is the new commit-helper terminal's
+    read (checking COMMIT_EXIT status, unrelated to recv logging — a different terminal role
+    entirely). Scoping by `--terminal <handle>` placeholder keeps both invariants distinct instead
+    of collapsing them into one magic total."""
+    expected_by_handle = {
+        "orca-task-runner": {"<impl_handle>": 1, "<commit_helper_handle>": 1},
+        "orca-evaluate": {"<agent-e2e-handle>": 1},
+        "orca-workflow": {},
+    }
+    expected_total = {"orca-task-runner": 2, "orca-evaluate": 1, "orca-workflow": 0}
+    for name, count in expected_total.items():
         text = _read_skill(name)
         actual = len(re.findall(r"orca terminal read\b", text))
         assert actual == count, (
             f"{name}: expected {count} 'orca terminal read' occurrence(s), found {actual}"
         )
+    for name, by_handle in expected_by_handle.items():
+        text = _read_skill(name)
+        for handle, count in by_handle.items():
+            actual = text.count(f"orca terminal read --terminal {handle}")
+            assert actual == count, (
+                f"{name}: expected {count} 'orca terminal read --terminal {handle}' "
+                f"occurrence(s), found {actual}"
+            )
 
 
 def test_spawn_failures_has_orca_restart_retry_row():
@@ -1586,3 +1605,174 @@ def test_orca_workflow_section0_recovery_references_orphan_result_path():
     section0_end = text.index("## 1.")
     section0 = text[section0_start:section0_end]
     assert ".orca-orphaned-result-<task_id>.json" in section0
+
+
+def test_codex_md_documents_linked_worktree_sandbox_exception():
+    """AC1 (issue #70): codex.md's sandbox paragraph must document the linked-worktree commit
+    exception exactly once (a duplicated sandbox paragraph must not silently pass)."""
+    text = (WORKFLOWS_DIR / "models" / "codex.md").read_text()
+    assert text.count("permits reads and writes inside the") == 1
+    sandbox_idx = text.index("permits reads and writes inside the")
+    exception_idx = text.index("Linked worktree exception", sandbox_idx)
+    assert sandbox_idx < exception_idx
+    para_end = text.index("\n\n", exception_idx)
+    segment = text[exception_idx:para_end]
+    assert ".git/worktrees/" in segment
+    assert "git add" in segment and "git commit" in segment
+
+
+def test_orca_task_runner_subtask_spec_branches_commit_instruction_by_provider():
+    """AC2/AC3 (issue #70): the required-items list must flag ②/⑥ as codex exceptions, and the
+    exception paragraph must instruct codex workers not to commit while leaving claude/agy
+    unaffected."""
+    text = _read_skill("orca-task-runner")
+    checklist_idx = text.index("subtask spec 필수 항목")
+    second_idx = text.index("②", checklist_idx)
+    sixth_idx = text.index("⑥", checklist_idx)
+    assert "provider=codex는 예외" in text[second_idx:text.index("③", second_idx)]
+    assert "provider=codex는 예외" in text[sixth_idx:text.index("⑦", sixth_idx)]
+
+    exception_idx = text.index("provider=codex 예외", checklist_idx)
+    para_end = text.index("\n\n", exception_idx)
+    segment = text[exception_idx:para_end]
+    assert "커밋하지 마라" in segment
+    assert "worker_done" in segment
+    assert "filesModified" in segment
+    assert "claude/agy" in segment and "그대로 적용된다" in segment
+
+
+def test_orca_task_runner_subtask_spec_required_items_preserve_commit_text_for_non_codex():
+    """AC3 (issue #70): the original ②/⑥ commit-instruction wording must survive verbatim inside
+    the required-items list itself — not just be *claimed* unchanged by the exception prose. If
+    ⑥'s pathspec rule text is ever deleted (even while the codex-exception paragraph still says
+    'claude/agy unaffected'), this must go red."""
+    text = _read_skill("orca-task-runner")
+    checklist_idx = text.index("subtask spec 필수 항목")
+    second_idx = text.index("②", checklist_idx)
+    third_idx = text.index("③", second_idx)
+    sixth_idx = text.index("⑥", checklist_idx)
+    seventh_idx = text.index("⑦", sixth_idx)
+    second_segment = text[second_idx:third_idx]
+    sixth_segment = text[sixth_idx:seventh_idx]
+    assert "커밋 대상 브랜치·worktree 명시" in second_segment
+    assert '`git commit -m "<msg>" -- <files>`' in sixth_segment
+    assert "`git add` 명시 경로만" in sixth_segment
+    assert "index.lock 재시도" in sixth_segment
+
+
+def test_orca_task_runner_section5_codex_commit_uses_separate_unsandboxed_terminal():
+    """AC4 (issue #70): commit-on-behalf of a codex subtask must run in a separate plain terminal
+    (no codex/claude/agy launch wrapper), never the coordinator's own shell — the coordinator's own
+    shell may itself be a codex process under -s workspace-write in the same worktree (High-Risk
+    tier can resolve orca-task-runner's own provider to codex), which would hit the identical
+    .git/worktrees sandbox denial the subtask worker hit."""
+    text = _read_skill("orca-task-runner")
+    section5_start = text.index("## 5.")
+    section6_start = text.index("## 6.")
+    section5 = text[section5_start:section6_start]
+    commit_idx = section5.index("commit-helper")
+    close_idx = section5.index("orca terminal close --terminal <impl_handle>", commit_idx)
+    assert commit_idx < close_idx, (
+        "the commit-helper step must appear before the existing close-loop bullet, as a new "
+        "bullet/fence inserted ahead of it — not spliced into the existing fenced block"
+    )
+    segment = section5[commit_idx:close_idx]
+    assert "코디네이터 자신의 셸에서 실행하지 않는다" in segment
+    assert "codex" in segment and "claude" in segment and "agy" in segment
+    assert "terminal create" in segment
+
+
+def test_orca_task_runner_section5_files_modified_sourced_from_check_wait_not_terminal_read():
+    """AC4 (issue #70): filesModified must be sourced from the check --wait worker_done response
+    (not read_json/terminal scrollback). The worker preamble fills it via --files-modified "a,b",
+    a comma-separated string, not an array (D3 in the round-2 contract review) — round 3 replaced
+    the bash-array split this test used to pin with a shared portable helper script (see
+    test_orca_task_runner_section5_uses_portable_csv_split_helper below); this test only checks
+    where the raw CSV comes from, not how it's later split."""
+    text = _read_skill("orca-task-runner")
+    section5_start = text.index("## 5.")
+    section6_start = text.index("## 6.")
+    section5 = text[section5_start:section6_start]
+    commit_idx = section5.index("commit-helper")
+    fence_idx = section5.index("```bash", commit_idx)
+    prose = section5[commit_idx:fence_idx]
+    assert "check --wait" in prose
+    assert "read_json" in prose
+    assert "꺼내지" in prose and "않는다" in prose
+    assert "콤마 구분" in prose
+
+    fetch_fence_end = section5.index("```", fence_idx + len("```bash"))
+    fetch_segment = section5[fence_idx:fetch_fence_end]
+    assert "files_modified_csv" in fetch_segment
+    assert "jq -r" in fetch_segment
+
+
+def test_orca_task_runner_section5_uses_portable_csv_split_helper():
+    """Round-3 fix (issue #70 contract review, retry 1/2): a bash-only `IFS=',' read -r -a
+    files_modified <<< "$csv"` split silently produced zero elements under zsh (this machine's
+    actual runtime shell, ZSH_VERSION=5.9) while working under bash — `read -a` errors in zsh
+    ("bad option: -a") but still exits 0, so the length guard that followed it treated every
+    codex subtask as "nothing to commit" with no error and no escalation (a worse fail-open than
+    issue #70's original defect). SKILL.md must delegate the CSV-to-pathspec-file step to the
+    shared, cross-shell-tested `write_pathspec_from_csv.sh` (same portability contract as
+    `orca_call_with_retry.sh`/`log_dispatch.sh` in the same directory — see
+    tests/test_write_pathspec_from_csv.py for the behavioral bash+zsh coverage this text-matching
+    check cannot provide on its own) and must never reintroduce a bash array, `IFS`-based split,
+    or `read -a` for this purpose."""
+    text = _read_skill("orca-task-runner")
+    section5_start = text.index("## 5.")
+    section6_start = text.index("## 6.")
+    section5 = text[section5_start:section6_start]
+    commit_idx = section5.index("commit-helper")
+    close_idx = section5.index("orca terminal close --terminal <impl_handle>", commit_idx)
+    segment = section5[commit_idx:close_idx]
+
+    assert "write_pathspec_from_csv.sh" in segment
+    assert "source ~/.agents/orca-workflows/scripts/write_pathspec_from_csv.sh" in segment
+    assert 'if write_pathspec_from_csv "$files_modified_csv" "$pathspec_file"; then' in segment
+
+    # Scope the negative checks to the executable fence itself, not the surrounding prose — the
+    # prose above legitimately quotes the rejected `IFS=',' read -r -a` snippet for context (same
+    # as log_dispatch.sh's own header does for its rejected `${!req}` draft), so a naive
+    # whole-segment "not in" check would trip on that explanatory text instead of the real code.
+    guard_start = segment.index('if write_pathspec_from_csv "$files_modified_csv" "$pathspec_file"; then')
+    guard_end = segment.index("```", guard_start)
+    guard_code = segment[guard_start:guard_end]
+    assert "IFS=" not in guard_code
+    assert "read -a" not in guard_code and "read -r -a" not in guard_code
+    assert "files_modified[@]" not in guard_code
+    assert "files_modified=()" not in guard_code
+
+
+def test_write_pathspec_from_csv_script_documents_the_ifs_read_a_regression():
+    """The shared script's own header must document the exact defect it exists to prevent (bash
+    `read -a` silently producing an empty split under zsh) — this is what makes the portability
+    contract legible to a future editor who might otherwise "simplify" it back to `read -a`."""
+    text = (REPO_ROOT / "orca-workflows" / "scripts" / "write_pathspec_from_csv.sh").read_text()
+    assert "read -a" in text
+    assert "zsh" in text.lower()
+    assert "bad option" in text
+
+
+def test_orca_task_runner_section5_commit_guard_handles_nothing_to_commit_and_uses_tui_idle():
+    """D1/D2 (issue #70 round-2 contract review): "nothing to commit" (git's rc=1) must be
+    branched as a normal outcome, not escalation, and completion must be detected via
+    --for tui-idle, not --for exit (D2 — the helper shell returns to its prompt instead of
+    exiting, per agy.md's documented mechanism). The array-length guard this test used to pin
+    (${#files_modified[@]}) was removed in round 3 — see
+    test_orca_task_runner_section5_uses_portable_csv_split_helper for its replacement."""
+    text = _read_skill("orca-task-runner")
+    section5_start = text.index("## 5.")
+    section6_start = text.index("## 6.")
+    section5 = text[section5_start:section6_start]
+    commit_idx = section5.index("commit-helper")
+    close_idx = section5.index("orca terminal close --terminal <impl_handle>", commit_idx)
+    segment = section5[commit_idx:close_idx]
+
+    guard_start = segment.index('if write_pathspec_from_csv "$files_modified_csv" "$pathspec_file"; then')
+    guard_end = segment.index("```", guard_start)
+    guard_code = segment[guard_start:guard_end]
+    assert "nothing to commit" in guard_code
+    assert "정상 no-op" in guard_code
+    assert "orca terminal wait --terminal <commit_helper_handle> --for tui-idle" in guard_code
+    assert "--terminal <commit_helper_handle> --for exit" not in segment

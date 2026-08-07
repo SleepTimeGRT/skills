@@ -18,6 +18,15 @@ Use `codex exec` for headless runs. `-s workspace-write -a never` permits reads 
 workspace without approval prompts; it is not read-only. Use `-s read-only -a never` when the reviewer
 must not write.
 
+**Linked worktree exception:** the writable boundary `-s workspace-write` grants is the worktree's own
+filesystem path, nothing more. In a linked worktree (`~/worktrees/...` — `orca-task-runner`'s standard
+per-task layout), `.git` is not a directory but a file that points at the parent repository's
+`.git/worktrees/<name>/`. That target path lives outside the worktree's own filesystem tree, so it is
+outside the sandbox boundary. A codex worker launched this way edits source files normally, but any
+`git add`/`git commit` it runs fails — the write lands on a path the sandbox denies. Do not have codex
+workers commit in this configuration; see `skills/orca-task-runner/SKILL.md` §2 (subtask spec, provider=codex
+branch) and §5 (commit-helper terminal) for the contract this exception drives.
+
 ## Mapping
 
 | Model | Use | Orca effort |
