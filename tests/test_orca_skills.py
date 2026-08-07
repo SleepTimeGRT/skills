@@ -467,9 +467,13 @@ def test_orca_evaluate_codex_availability_is_runtime_checked_not_a_permanent_ban
     assert "--no-codex-available" in text, (
         "orca-evaluate §3 must document the runtime retry/fallback mechanism for Codex spawn failure"
     )
-    assert "사용자가 알려준" in text, (
-        "orca-evaluate §3 must treat this session's user-provided information as the primary "
-        "signal for Codex availability, not just `command -v codex`"
+    assert "Quota check before pinning" in text, (
+        "orca-evaluate §3 must source codex_available from model-selection.md's live quota-check "
+        "procedure, not a hardcoded default"
+    )
+    assert "더 최신 정보를 알고 있으면" in text and "덮어쓴다" in text, (
+        "orca-evaluate §3 must still let this session's more current information override the "
+        "quota check, not just `command -v codex`"
     )
 
 
