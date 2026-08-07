@@ -42,6 +42,12 @@ chmod 600 "$target"
 Extra fields (`wave_index`, `subtask_type`, `advisor`, ...) are added per call site exactly as each
 `SKILL.md` already does — only the target path changes.
 
+`provider`의 허용값은 `~/.agents/orca-workflows/models/*.md`의 basename을 정본으로 못박는다 — 현재
+`claude-code`|`codex`|`agy` 3개(각각 `models/claude-code.md`/`models/codex.md`/`models/agy.md`). `claude`는
+**폐기된 별칭(deprecated alias)**이다 — `claude-code`와 같은 provider를 가리키는 값으로 실제 관측됐으나
+(issue #69 증거 3), 새로 로그를 남길 때는 항상 `claude-code`로 정규화해 기록한다. 새 provider 문서가
+`models/`에 추가되면 그 basename이 곧 새 허용값이다.
+
 **`task-create`가 새 task를 만들지 않은 relay dispatch**: 이런 dispatch에는 진짜 `task_id`가 없는 경우가
 있다. `task_id` 필드는 기존 `<task_id-or-omit>` 규칙대로 그대로 생략한다 — 빈 문자열(`""`)이나 issue
 #62에서 실제로 관찰된 것 같은 즉석 placeholder 문자열을 넣지 않는다. 대신 extra field로 `"relay":true`를
@@ -50,15 +56,25 @@ Extra fields (`wave_index`, `subtask_type`, `advisor`, ...) are added per call s
 현재 이 사이트엔 이 규칙이 적용되지 않는다 — 다만 진짜 task_id가 없는 다른 relay dispatch에는 이 규칙이
 그대로 적용된다.
 
-**`outcome`** (`orca-workflow` only — routing result for a task):
+**`outcome`** (`orca-workflow` only — routing result for a task). 값은 두 축으로 나뉜다 — 둘 다 같은
+`outcome` JSON 필드에 담기지만 의미가 다르므로 구분해서 읽는다:
+
+- **verdict 축** — task 라우팅 판정: `PASS`|`FAIL`|`ESCALATE`|`GATE_FAIL`|`PREMERGE_FAIL`
+- **진행-분기 축** — 판정이 아니라 정상적인 워크플로 상태 전이: `NO_ACCEPTANCE_CRITERIA`|
+  `NO_DONE_TRANSITION`|`CONTRACT_FINALIZED_BY_GENERATOR`|`CONTRACT_APPROVED_ROUND1`|
+  `MANUAL_RECOVERY_COMPLETED`|`RETRO_DONE`|`RETRO_FAIL`
 
 ```bash
 install -d -m 700 ~/.local/state/orca-workflows/logs
 target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
-printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|PREMERGE_FAIL|NO_ACCEPTANCE_CRITERIA|NO_DONE_TRANSITION|CONTRACT_FINALIZED_BY_GENERATOR|RETRO_DONE|RETRO_FAIL>","retry":<n>}\n' \
+printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|PREMERGE_FAIL|NO_ACCEPTANCE_CRITERIA|NO_DONE_TRANSITION|CONTRACT_FINALIZED_BY_GENERATOR|CONTRACT_APPROVED_ROUND1|MANUAL_RECOVERY_COMPLETED|RETRO_DONE|RETRO_FAIL>","retry":<n>}\n' \
   "$(date -u +%FT%TZ)" >> "$target"
 chmod 600 "$target"
 ```
+
+**목록에 없는 정상 분기를 만나면** 즉석 문자열을 발명하거나(issue #62에서 최초 관측된 패턴) outcome
+이벤트 자체를 생략하지 말고, `sleeptimegrt-skills`에 스키마 구멍 이슈를 연다 — 이 규칙 자체가 새 값이
+필요할 때마다 반복되는 드리프트(#62, #69)를 막는 대상이다.
 
 `RETRO_DONE`/`RETRO_FAIL`은 task 라우팅이 아니라 epic retro 결과다 — `orca-workflow` §1d(epic close 직후의
 retro 사이트)만 쓴다. `RETRO_DONE` 라인은 per-call-site 추가 필드 규칙에 따라 `filed`/`commented`/`discarded`
@@ -70,6 +86,23 @@ task-runner(generator) 쪽 결정이 그대로 확정된 경우다 — PASS/FAIL
 issue #62). 이 라인은 per-call-site 추가 필드 규칙에 따라 `round`(도달한 계약 협상 라운드 수)를 더해
 남긴다 — `retry`는 §2 하단의 task-level FAIL 재-dispatch 횟수를 세는 별개 필드이므로, 라운드 수를 `retry`에
 넣지 않는다.
+
+`CONTRACT_APPROVED_ROUND1`는 contract 협상이 라운드 1에서 곧장 승인되어 재협상 없이 2b(Generate)로
+넘어가는 정상 분기다 — PASS/FAIL/ESCALATE 어느 것도 아니므로 outcome 이벤트를 생략하지 말고 이 값으로
+남긴다(issue #69 — 이전엔 이 분기가 즉석 문자열을 발명하거나(#498) 이벤트 자체를 생략했다(#499~#501)).
+`skills/orca-workflow/SKILL.md` §2a가 이 분기(승인 시점, 2b로 넘어가기 전)에서 기록을 지시한다 — 위
+`CONTRACT_FINALIZED_BY_GENERATOR`(라운드 한도 도달) 지시와 대칭. 이 라인은 per-call-site 추가 필드
+규칙에 따라 `round=1`을 고정해 남긴다 — 라운드 한도 도달 케이스의 가변 `round`와 값 자체로 구분된다.
+
+`MANUAL_RECOVERY_COMPLETED`는 `worker_done`이 Orca 런타임 문제(재시작·연결 끊김 등)로 유실돼
+`self-recovery.md`의 자동 대기/재시도 루프로도 완료 확인이 안 될 때, 코디네이터가 산출물(커밋·아티팩트)을
+직접 확인해 수동으로 완료 처리한 **직후** 남긴다 — 복구 절차 도중이 아니라 성공적으로 끝난 시점(issue
+#69 증거 2). 이 값도 PASS/FAIL/ESCALATE가 아닌 정상(예외적이지만 처리됨) 분기이므로, 이 값을 기록하라는
+전용 지시가 특정 `SKILL.md` 사이트에 따로 없더라도 위 "목록에 없는 정상 분기" 규칙에 따라 생략해선 안
+된다 — 이 값 자체가 그 규칙이 커버하는 사례다. 이 라인은 per-call-site 추가 필드 규칙에 따라
+`detail`(무엇이 유실됐고 어떻게 확인했는지 한두 문장)을 더해 남긴다 — 이 필드가 없으면 사후에 "정말
+복구가 맞았는지" 재구성할 방법이 없다(#69 증거 2가 실제로 이 상세를 `detail`에 남긴 덕에 그 retro가
+판독 가능했다).
 
 **`wave_start`/`wave_end`** (`orca-task-runner` only): same jq schema as today, written to
 `waves-$(date -u +%F).jsonl` instead of the fixed `waves.jsonl`.

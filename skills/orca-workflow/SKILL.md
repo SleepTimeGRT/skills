@@ -118,7 +118,7 @@ acceptance-criteria 섹션명이 issue body에 실제로 있는지 먼저 확인
 보장하는 절차는 아직 없어서다(별도 후속 이슈; 임시로는 `/triage` 리다이렉트 대상으로 취급). 이 확인은 여기
 한 곳에서만 하고 `orca-task-runner`/`orca-evaluate`에 반복하지 않는다.
 
-**2a. Contract 협상 relay** — `orca-task-runner`를 "제안서 작성" 모드로 호출 → 나온 제안서 파일 경로를 `orca-evaluate`에 "검토" 모드로 전달 → 반려면 파일 경로를 다시 `orca-task-runner`에 전달. **파일 내용은 읽지 않고 경로만 중계**한다. 최대 2라운드, 그 이후는 `orca-task-runner`가 결정권을 가지고 진행(그대로 2b로 넘어감). **라운드 한도 도달 시점에** — 2b로 넘어가기 전에 — `~/.agents/orca-workflows/logging.md` §1 `outcome` 레시피대로 `outcome=CONTRACT_FINALIZED_BY_GENERATOR`, `round=<도달한 라운드 수>`를 남긴다(issue #63 — 이전엔 이 분기가 outcome 이벤트를 전혀 남기지 않아 세션마다 즉석 문자열을 만들거나 로그를 누락했다).
+**2a. Contract 협상 relay** — `orca-task-runner`를 "제안서 작성" 모드로 호출 → 나온 제안서 파일 경로를 `orca-evaluate`에 "검토" 모드로 전달 → 반려면 파일 경로를 다시 `orca-task-runner`에 전달. **파일 내용은 읽지 않고 경로만 중계**한다. 최대 2라운드, 그 이후는 `orca-task-runner`가 결정권을 가지고 진행(그대로 2b로 넘어감). **라운드 한도 도달 시점에** — 2b로 넘어가기 전에 — `~/.agents/orca-workflows/logging.md` §1 `outcome` 레시피대로 `outcome=CONTRACT_FINALIZED_BY_GENERATOR`, `round=<도달한 라운드 수>`를 남긴다(issue #63 — 이전엔 이 분기가 outcome 이벤트를 전혀 남기지 않아 세션마다 즉석 문자열을 만들거나 로그를 누락했다). **라운드 1에서 곧장 승인된 시점에도** — 마찬가지로 2b로 넘어가기 전에 — 같은 레시피대로 `outcome=CONTRACT_APPROVED_ROUND1`, `round=1`을 남긴다(issue #69 — 이전엔 이 분기가 outcome 이벤트를 생략하거나 즉석 문자열을 발명했다).
 
 **"호출"의 실체**: `orca-task-runner`/`orca-evaluate`는 이 스킬(orca-workflow)과 같은 세션에서 도는 게 아니라, 각각 orchestration으로 별도 터미널을 띄워서 넘기는 것이다 — 그래야 이 스킬이 "diff나 report 본문을 직접 읽지 않는다"는 원칙이 실제로 지켜진다.
 
