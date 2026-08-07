@@ -336,6 +336,14 @@ Enumerated so no assertion silently drifts out of sync with the edited prose:
 
 - **1-hour `check --wait` durability is unverified** (§4) — first real invocation after implementation should
   be watched for a dropped connection over a long wait, not assumed safe from the ≤180s tests here.
+  **Update (2026-08-07, Task 9 spot-check):** ran a live 10-minute `check --wait --timeout-ms 600000`
+  against a scratch Run with no matching messages. Returned cleanly after 600.25s elapsed:
+  `{"timedOut":true,"cancelled":false,"connectionLost":false,"count":0}` — no dropped connection, no
+  early return, no error. Observed `_heartbeat`/`_keepalive` frames every ~15s carrying
+  `elapsedMs`/`deadlineMs` throughout the wait (not previously seen in the ≤180s tests above — worth
+  noting for future debugging, since it means a long wait is not silent on the wire even before the
+  final response). This is 10x further than any prior test but still not the full hour — the 3600000ms
+  constant remains an unvalidated extrapolation from this data point, not a fully verified one.
 - **Run ownership across nested coordinators**: `orca-task-runner` and `orca-workflow` each create their own
   Run for their own fan-out; a `worker-start`/`check --wait` call must never accidentally reuse the *parent*
   coordinator's Run (e.g. `orca-workflow`'s), since that would mix an `orca-task-runner` wave's `worker_done`
