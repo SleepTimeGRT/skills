@@ -1138,6 +1138,21 @@ def test_spawn_failures_known_signatures_table_has_no_internal_blank_lines():
     )
 
 
+def test_spawn_failures_active_dispatch_row_points_to_check_wait():
+    """docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md supersedes this row's old
+    fix text ('poll task-list') -- the row must now describe the event-driven replacement, and must
+    not still tell a future reader to poll task-list for this specific failure."""
+    text = _read_workflows_file("spawn-failures.md")
+    assert "already has an active dispatch" in text
+    idx = text.index("already has an active dispatch")
+    row_end = text.index("\n", idx)
+    row = text[max(0, idx - 200):row_end]
+    assert "check --wait" in row, "fix column must now point at the check --wait mechanism"
+    assert "poll `task-list`" not in row, (
+        "must not still recommend the disproven task-list-polling workaround for this row"
+    )
+
+
 def test_logging_documents_self_recovery_event():
     """docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md: pins the self_recovery
     event schema so a future edit can't silently drop a field the self-recovery.md loop relies on."""
