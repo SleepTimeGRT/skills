@@ -784,6 +784,70 @@ def test_logging_no_longer_flags_round2_relay_as_unresolved():
     assert "기존 task 재사용 방식으로 확정하면" not in text
 
 
+def _workflow_section1d_span(text: str) -> tuple[int, int]:
+    start = text.index("**1d. Retro")
+    end = text.index("## 2. Task 경로")
+    return start, end
+
+
+def test_orca_workflow_dispatch_sites_call_log_dispatch_helper():
+    """AC2/AC3(issue #68): §2a 라운드-1의 두 사이트(task-runner/evaluator)와 라운드 2+ relay, 총 3곳
+    모두 log_dispatch 호출을 forward window 안에 가져야 한다. §1d(retro)는 이슈 스코프 밖이라 제외."""
+    text = _read_skill("orca-workflow")
+    section1d_start, section1d_end = _workflow_section1d_span(text)
+    positions = [p for p in _dispatch_positions(text) if not (section1d_start <= p < section1d_end)]
+    assert len(positions) == 3, f"expected 3 in-scope dispatch sites, found {len(positions)}"
+    call_re = re.compile(r'^log_dispatch --skill "orca-workflow"', re.M)
+    for pos in positions:
+        window = _forward_window(text, pos)
+        assert call_re.search(window), (
+            f"orca-workflow: dispatch site at {pos} does not call log_dispatch in its forward window"
+        )
+    assert len(call_re.findall(text)) == 3
+
+
+def test_orca_workflow_no_longer_has_prose_only_dual_log_instructions():
+    """구조적 회귀 방지: 프로즈만 있고 실행 블록이 없던 옛 이중 지시(issue #68이 지목한 정확한 문구)가
+    사라졌는지 — 단순 추가가 아니라 진짜 교체인지 확인."""
+    text = _read_skill("orca-workflow")
+    assert 'logging.md §1 assign 이벤트: role="task-runner"' not in text
+    assert 'logging.md §1 assign 이벤트: role="evaluator"' not in text
+    assert "logging.md §2 term 로그: skill=" not in text
+
+
+def test_orca_workflow_log_dispatch_blocks_source_the_helper():
+    """log_dispatch를 쓰는 각 fenced 블록이 자체 source 줄을 갖는지 —
+    test_every_retry_invocation_block_sources_the_wrapper와 대칭인 검사."""
+    text = _read_skill("orca-workflow")
+    log_dispatch_call_re = re.compile(r'^log_dispatch --skill "', re.M)
+    checked_any = False
+    for m in _BASH_FENCE_RE.finditer(text):
+        block = m.group(1)
+        if log_dispatch_call_re.search(block):
+            checked_any = True
+            assert "source ~/.agents/orca-workflows/scripts/log_dispatch.sh" in block, (
+                f"a fenced block using log_dispatch (near char offset {m.start()}) "
+                "is missing its own source line"
+            )
+    assert checked_any
+
+
+def test_orca_workflow_log_dispatch_sites_preserve_recv_exception_prose():
+    """AC4: 헬퍼 전환 후에도 recv 미기록 근거(liveness probe / check --wait)가 SKILL.md 프로즈에
+    남아 있는지 — 헬퍼가 recv를 안 쓴다는 코드 동작만으로는 사람이 왜 그런지 알 수 없으므로, 설명
+    프로즈 존속 자체를 AC로 요구한 것으로 해석."""
+    text = _read_skill("orca-workflow")
+    assert text.count("recv는 기록하지 않는다") >= 3
+
+
+def test_logging_md_points_to_log_dispatch_helper():
+    """라운드 1 잔여 리스크 2: logging.md §1/§2 레시피 안으로 log_dispatch.sh가 스키마를 그대로 복제해
+    가져갔는데 원본 문서에 상호참조가 없으면, 나중에 §1/§2를 고치는 세션이 스크립트 사본의 존재를 모른다
+    — test_spawn_failures_has_broadened_regex_pointer_row와 같은 선례의 대칭 검사."""
+    text = (WORKFLOWS_DIR / "logging.md").read_text()
+    assert "log_dispatch.sh" in text
+
+
 def test_orca_task_runner_states_contract_round_is_a_new_dispatch_not_a_wait():
     """Issue #64: §1's "반려되면 수정해서 다시 제안한다" narrates the whole multi-dispatch protocol in one
     sentence — a fresh dispatched worker could misread it as "wait/poll in this same turn" instead of "end

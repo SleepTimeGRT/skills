@@ -29,6 +29,10 @@ Append exactly the same jq/printf record shape used today, to `"$target"`, then 
 
 ### Event recipes (unchanged schemas, only the path changed)
 
+(`orca-workflow`'s three dispatch sites — §2a's task-runner/evaluator round-1 calls and the round-2+
+relay — write this event via `orca-workflows/scripts/log_dispatch.sh` rather than hand-copying the
+recipe below; issue #68. If you change this schema, update that script's jq call to match.)
+
 **`assign`** (who got dispatched what):
 
 ```bash
@@ -135,6 +139,11 @@ One file per Orca terminal handle, created the first time that terminal is dispa
 `orca orchestration dispatch --task <id> --to <handle> --inject`, appended to until the terminal closes.
 Line 1 is always the `meta` record; every line after that is one `sent` or `recv` event. This file fully
 replaces `orca-task-runner`'s old close-time `term-<handle>.json` single-snapshot file — do not write both.
+
+(`orca-workflow`'s three dispatch sites write `meta`+`sent` here via
+`orca-workflows/scripts/log_dispatch.sh` — the same recipe as the `meta`/`sent` sections below,
+folded into one function call alongside the §1 `assign` write; issue #68. `recv` is never written by
+that helper — see the recv carve-out below.)
 
 **Ownership**: the skill that spawns a terminal owns and is the sole writer of that terminal's
 `term-<handle>.jsonl` — a skill running *inside* a spawned terminal never writes its own handle's file.
