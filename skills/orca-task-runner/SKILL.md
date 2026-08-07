@@ -46,6 +46,7 @@ description: Use when generating the implementation for one task (issue) — pro
   별도 fenced block이라 셸 변수가 그대로 넘어가지 않는다 — 아래 `spec_sidecar`와 같은 이유):
 
   ```bash
+  install -d -m 700 ~/.local/state/orca-workflows/logs
   run_json="$(orca orchestration run-create --objective "<issue 번호> task implementation" --from <자기 handle> --json)"
   printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt"
   chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt"

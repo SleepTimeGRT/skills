@@ -38,6 +38,7 @@ description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-ma
   라운드 2+ relay 코드 블록은 별도 fenced block이라 셸 변수가 그대로 넘어가지 않는다):
 
   ```bash
+  install -d -m 700 ~/.local/state/orca-workflows/logs
   run_json="$(orca orchestration run-create --objective "<issue 번호> contract round relay" --from <자기 handle> --json)"
   printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt"
   chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt"
