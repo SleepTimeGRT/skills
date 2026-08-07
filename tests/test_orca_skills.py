@@ -790,6 +790,11 @@ def test_dispatch_verify_file_documents_bounded_tail_diff_and_escalation():
     assert "❯" not in text and "⏺" not in text, (
         "must stay provider-agnostic — no Claude-Code-specific UI markers"
     )
+    assert "worker-start" in text, (
+        "docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md: the same "
+        "unsubmitted-draft failure mode was confirmed live under worker-start, not only raw "
+        "dispatch --inject — the framing sentence must say so"
+    )
 
 
 def test_self_recovery_file_documents_principle_and_loop():
