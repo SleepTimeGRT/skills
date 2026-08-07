@@ -1166,3 +1166,26 @@ def test_logging_documents_self_recovery_event():
     assert "waves-<date>.jsonl" in text or "waves-" in text, (
         "must state orca-task-runner writes this event to its dated waves log"
     )
+
+
+def test_orca_task_runner_creates_own_run_in_section0():
+    text = _read_skill("orca-task-runner")
+    section0_start = text.index("## 0.")
+    section0_end = text.index("## 1.")
+    section0 = text[section0_start:section0_end]
+    assert "run-create" in section0, (
+        "orca-task-runner §0 must create and bind its own Run once per session, distinct from "
+        "whatever Run orca-workflow owns"
+    )
+
+
+def test_orca_task_runner_section5_points_to_self_recovery():
+    text = _read_skill("orca-task-runner")
+    section5_start = text.index("## 5.")
+    section5_end = text.index("## 6.")
+    section5 = text[section5_start:section5_end]
+    assert "self-recovery.md" in section5
+    assert "worker-start" in section5
+    assert "체크 큐로 안 잡힐 수 있다" not in text, (
+        "retired scheduler reasoning must be deleted outright, not annotated (no-history-in-skills)"
+    )

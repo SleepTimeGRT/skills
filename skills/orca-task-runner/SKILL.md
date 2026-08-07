@@ -42,6 +42,8 @@ description: Use when generating the implementation for one task (issue) — pro
 
   결과가 비어있지 않으면(orphan `wave_index` 존재) 이전 세션이 그 wave 도중 죽었다는 뜻이다. `orca orchestration task-list --json`/`orca terminal list --json`으로 그 wave의 subtask가 실제로 끝났는지 확인한 뒤, §5의 `wave_end` 포맷대로 `outcome:"crash_recovered"`로 채워 넣는다(retry_count는 알 수 없으면 `null`). 이 값 — "wave 크기 N에서 coordinator가 죽었다" — 이 바로 best-effort 로그가 놓칠 뻔한 가장 중요한 데이터 포인트이므로, 확인 없이 새 wave로 넘어가지 않는다.
 
+- **Run 생성**(세션 시작 시 1회): `orca orchestration run-create --objective "<issue 번호> task implementation" --from <자기 handle> --json`로 이 세션 전용 Run을 만들고 바인딩한다. 이후 §5의 모든 `worker-start`/`check --wait`/`--ack` 호출은 이 run_id를 쓴다 — `orca-workflow`가 이 세션을 스폰할 때 자기 Run을 갖고 있더라도 그건 재사용하지 않는다(Run이 섞이면 서로 다른 세션의 `worker_done`이 잘못된 mailbox로 전달된다 — `~/.agents/orca-workflows/self-recovery.md` 참고).
+
 ## 1. Contract 제안 (generator 역할)
 
 `orca-workflow`가 이 task를 넘기면, 코드를 쓰기 전에 **제안서**를 먼저 쓴다:
@@ -137,9 +139,10 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
 spec_sidecar="$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"   # §2에서 남긴 사이드카
 spec_text="$(cat "$spec_sidecar")"   # 지금 재구성하지 않는다 — §2에서 남긴 원문 그대로
 orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
-  orca orchestration dispatch --task <task_id> --to <impl_handle> --inject --json   # wave 크기만큼 병렬 — 상한 임시 해제, §3 참고
+  orca orchestration worker-start --task <task_id> --worktree active --terminal <impl_handle> --run "$RUN_ID" --from <자기 handle> --json   # wave 크기만큼 병렬 — 상한 임시 해제, §3 참고
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43, positive-confirmation
-# 방식으로 issue #58에서 교체): 15초 뒤 재-read해서 $spec_text 앞부분이 tail에서 확인 안 되면 Enter만
+# 방식으로 issue #58에서 교체 — worker-start에도 동일하게 필요: stage:"input_accepted"는 실제 제출을
+# 보장하지 않는다, 실측): 15초 뒤 재-read해서 $spec_text 앞부분이 tail에서 확인 안 되면 Enter만
 # 재전송, 그래도 확인 안 되면 spawn-failures.md로.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. dispatch와 같은 블록에서 즉시 실행(누락 방지).
 #  logging.md §1 assign 이벤트: role="subtask-impl", issue=<issue-num>, task_id=<task_id>, wave_index=<n>,
@@ -152,11 +155,9 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
 #    시점(§5 마지막 블록)으로 미룬다.
 ```
 
-- ⚠️ **`check --wait` 단독 대기 금지**: coordinator가 Orca 터미널 내부 세션이면 worker_done이 check 큐로 안 잡힐 수 있다(task 상태는 정상 갱신됨). 기본 대기 = `task-list --brief --json` 상태 폴링 또는 커밋/파일 존재 감시(20-30s 간격), `check --wait`는 보조.
-- timeout·`count:0` = 체크포인트. `terminal read`로 생사 확인, 활동 중이면 계속 대기. 생사가 아니라
-  셸 에러/no-output이면 스폰 실패 — `~/.agents/orca-workflows/spawn-failures.md` 절차로.
+- **완료 대기와 self-recovery**: `~/.agents/orca-workflows/self-recovery.md`의 wait/recovery 루프를 그대로 따른다 — 이 wave의 각 subtask `task_id`를 pending set에 넣고, `check --wait`(+`--ack`)로 기다리다 타임아웃되면 그 파일의 alive/stuck_draft/dead 분기(`worker-abandon`→`worker-start --retry-of`)로 복구한다. `dead` 판정 후 재시도할 때는 새 worker 터미널을 §3의 launch 템플릿으로 다시 띄운다(모델·effort는 같은 subtask이므로 재-resolve 없이 그대로 재사용).
 - decision_gate(워커 ask) → 판단 가능하면 `reply`, 불가하면 `orca-workflow`에 에스컬레이션.
-- worker_done 유실 복구: 커밋/산출물/worktree 루트의 `.orca-orphaned-result-<task_id>.json`(⑦의 exhausted 폴백 산출물) 확인 + `task-update --status completed` 수동 복구, 기록. orphan 파일은 복구 반영 후 삭제한다.
+- **`orca_call_with_retry` exhausted로 인한 worker_done 유실**(위 self-recovery와는 다른 시나리오 — Orca 오케스트레이션 API 자체에 닿을 수 없는 경우, issue #41/#42): 커밋/산출물/worktree 루트의 `.orca-orphaned-result-<task_id>.json`(⑦의 exhausted 폴백 산출물) 확인 + `task-update --status completed` 수동 복구, 기록. orphan 파일은 복구 반영 후 삭제한다.
 - **완료 확인된 subtask 터미널은 즉시 닫는다** — wave 전체를 기다리지 않고, 그 subtask의 `worker_done` 수신(taskId+dispatchId 일치) 또는 위 유실 복구가 끝나는 즉시:
 
   ```bash
