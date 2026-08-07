@@ -74,6 +74,25 @@ issue #62). 이 라인은 per-call-site 추가 필드 규칙에 따라 `round`(�
 **`wave_start`/`wave_end`** (`orca-task-runner` only): same jq schema as today, written to
 `waves-$(date -u +%F).jsonl` instead of the fixed `waves.jsonl`.
 
+**`self_recovery`** (`orca-task-runner`/`orca-workflow`, per `orca-workflows/self-recovery.md`'s
+wait/recovery loop):
+
+```bash
+install -d -m 700 ~/.local/state/orca-workflows/logs
+target="$HOME/.local/state/orca-workflows/logs/waves-$(date -u +%F).jsonl"   # orca-task-runner
+# or: target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"   # orca-workflow
+printf '{"ts":"%s","event":"self_recovery","skill":"<skill>","issue":"<issue-num>","task_id":"<task_id>","dispatch_id":"<dispatch_id>","terminal":"<handle>","waited_ms":<n>,"terminal_status":"<alive|dead|stuck_draft>","action_taken":"<resumed_wait|retried_enter|worker_abandon_retry|escalated_spawn_failure>","new_dispatch_id":"<new dispatch_id-or-omit, only when action_taken=worker_abandon_retry>"}\n' \
+  "$(date -u +%FT%TZ)" >> "$target"
+chmod 600 "$target"
+```
+
+`orca-task-runner` writes to `waves-<date>.jsonl` (add `wave_index` as an extra field, joinable with
+that wave's `wave_start`/`wave_end` records); `orca-workflow` writes to `assignments-<date>.jsonl` (no
+`wave_index`). Purpose: `self-recovery.md`'s 3600000ms timeout is an unvalidated starting guess — this
+log is what lets a future session re-derive a real distribution instead of guessing again, and lets
+`orca-retro`'s "repeated FAIL attributable to skill prose" lens notice if a particular signature
+recurs.
+
 ### Reading across dates
 
 Any read-back that might need history from before this run — most importantly `orca-task-runner`'s §0

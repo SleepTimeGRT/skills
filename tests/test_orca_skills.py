@@ -1136,3 +1136,18 @@ def test_spawn_failures_known_signatures_table_has_no_internal_blank_lines():
         "blank line found inside the Known signatures table — this breaks GFM table rendering "
         "for every row after it (issue #64's Task 5 fix round found exactly this bug)"
     )
+
+
+def test_logging_documents_self_recovery_event():
+    """docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md: pins the self_recovery
+    event schema so a future edit can't silently drop a field the self-recovery.md loop relies on."""
+    text = (WORKFLOWS_DIR / "logging.md").read_text()
+    assert '"event":"self_recovery"' in text
+    for field in ("task_id", "dispatch_id", "terminal", "waited_ms", "terminal_status", "action_taken"):
+        assert f'"{field}"' in text, f"self_recovery event must include the {field} field"
+    assert "resumed_wait" in text and "retried_enter" in text and "worker_abandon_retry" in text, (
+        "must enumerate the action_taken values self-recovery.md's loop can produce"
+    )
+    assert "waves-<date>.jsonl" in text or "waves-" in text, (
+        "must state orca-task-runner writes this event to its dated waves log"
+    )
