@@ -504,7 +504,13 @@ def test_select_reviewer_script_exists():
 # ---------------------------------------------------------------------------
 
 LOG_RESTRUCTURE_FILES = NEW_SKILLS + ["logging.md"]
-BARE_UNDATED_LOG_PATHS = ["logs/assignments.jsonl", "logs/waves.jsonl"]
+# Matches a *write* redirect (`>>` or `>`) targeting the old fixed, un-dated file name --
+# the actual bug this test guards against (a copy-pasted write silently un-partitioning the log).
+# Deliberately does not match bare substring occurrences: both logging.md's own "Reading across
+# dates" recipe (§1, issue #55) and orca-retro §1 correctly `cat`/`-f`-check
+# "$logs/assignments.jsonl" (the pre-date-partition legacy file, kept around on purpose) before
+# falling back to the dated files -- that read is required backward compatibility, not a bug.
+_UNDATED_LOG_WRITE_RE = re.compile(r">>?\s*\"[^\"]*\b(?:assignments|waves)\.jsonl\"")
 
 
 def _read_log_restructure_file(name: str) -> str:
@@ -515,19 +521,24 @@ def _read_log_restructure_file(name: str) -> str:
 
 @pytest.mark.parametrize("name", LOG_RESTRUCTURE_FILES)
 def test_no_bare_undated_assignments_or_waves_path(name):
-    # Bare "waves.jsonl"/"assignments.jsonl" (no "logs/" prefix) still appears legitimately in
-    # logging.md's own explanatory prose (e.g. "instead of the fixed `waves.jsonl`") — this
-    # assertion is scoped to the exact "logs/..." path a copy-pasted command would use, which must
-    # always carry a date suffix now.
     text = _read_log_restructure_file(name)
-    for term in BARE_UNDATED_LOG_PATHS:
-        assert term not in text, (
-            f"{name}: found un-dated log path '{term}' — assignments/waves logs must be "
-            "date-suffixed (assignments-<date>.jsonl / waves-<date>.jsonl), never the old fixed name"
-        )
+    matches = _UNDATED_LOG_WRITE_RE.findall(text)
+    assert not matches, (
+        f"{name}: found a write redirect into an un-dated log path {matches} — assignments/waves "
+        "log writes must be date-suffixed (assignments-<date>.jsonl / waves-<date>.jsonl), never "
+        "the old fixed name"
+    )
 
 
-_DISPATCH_INJECT_RE = re.compile(r"orca orchestration dispatch --task .*? --inject --json")
+# Matches either the low-level `dispatch --task ... --inject` verb (still used at sites with
+# no wait-loop problem: orca-workflow §1d retro, the initial §2a task-runner/evaluator dispatch)
+# or its supervised replacement `worker-start --task ...` (orca-task-runner §5's wave dispatch,
+# orca-workflow §2a's round-2+ relay dispatch — docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md).
+# [\s\S]*? spans the backslash-continued multi-line worker-start invocation; non-greedy so it
+# stops at the nearest following --json rather than swallowing later, unrelated blocks.
+_DISPATCH_INJECT_RE = re.compile(
+    r"orca orchestration (?:dispatch --task .*? --inject --json|worker-start --task[\s\S]*?--json)"
+)
 
 
 def _dispatch_positions(text: str) -> list[int]:
@@ -649,6 +660,7 @@ def _bare_wrapped_call_line_numbers(text: str) -> list[int]:
         "orca orchestration task-create --spec",
         "orca orchestration task-list",
         "orca orchestration dispatch --task",
+        "orca orchestration worker-start --task",
     )
     bare = []
     for m in _BASH_FENCE_RE.finditer(text):
@@ -673,7 +685,7 @@ def test_no_bare_wrapped_call_sites(name):
 
 
 EXPECTED_RETRY_WRAP_COUNTS = {
-    "orca-workflow": 12,  # +3 for issue #64's round-2+ relay: task-list poll, task-create, dispatch
+    "orca-workflow": 12,  # +3 for issue #64's round-2+ relay: task-list (reportPath lookup), task-create, worker-start
     "orca-task-runner": 6,
     "orca-evaluate": 10,
 }
@@ -689,10 +701,14 @@ def test_orca_call_with_retry_count_per_skill(name, expected):
 
 
 def test_orca_workflow_documents_round2_relay_protocol():
-    """Issue #64: §2a must name the actual mechanism (new task-create per round, gated on a task-list
-    poll for the prior round's completion, dispatched to the same terminal handle) rather than leaving
-    round 2+ undocumented. Pins the load-bearing phrases so a future rewrite can't silently drop the
-    poll-before-dispatch gate or reintroduce task_id reuse."""
+    """Issue #64: §2a must name the actual mechanism (new task-create per round, event-driven wait
+    via self-recovery.md, dispatched to the same terminal handle via worker-start) rather than
+    leaving round 2+ undocumented. Pins the load-bearing phrases so a future rewrite can't silently
+    reintroduce task-list polling as the primary wait mechanism or task_id reuse.
+
+    docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md supersedes this test's
+    original 'must poll task-list, not terminal read' assertion -- that assertion enforced the
+    now-disproven check-queue-miss claim."""
     text = _read_skill("orca-workflow")
     assert "already has an active dispatch" in text, (
         "must document the verified error a premature round-2 dispatch produces"
@@ -700,9 +716,37 @@ def test_orca_workflow_documents_round2_relay_protocol():
     assert "is dispatched; only ready tasks can be dispatched" in text, (
         "must document why reusing the round-1 task_id is impossible"
     )
-    assert "task-list" in text, "round-2+ completion check must poll task-list, not terminal read"
-    assert "reportPath" in text, "must name the path-only relay channel (task-list result.reportPath)"
+    assert "self-recovery.md" in text, "round-2+ completion wait must point at the shared event-driven loop"
+    assert "reportPath" in text, (
+        "must name the path-only relay channel (task-list result.reportPath) -- still needed as a "
+        "one-shot lookup after worker_done, since the event payload itself doesn't carry it"
+    )
     assert "`--deps`는 걸지" in text, "must explicitly instruct against --deps between round tasks"
+
+
+def test_orca_workflow_round2_uses_worker_start_not_raw_dispatch():
+    """docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md §3/§6b: only the
+    round-2+ dispatch site migrates to worker-start -- the initial §2a task-runner/evaluator
+    dispatch and §1d retro stay on raw dispatch --inject (no polling problem there)."""
+    text = _read_skill("orca-workflow")
+    round2_idx = text.index("**Contract 협상 relay — 라운드 2+")
+    round2_end = text.index("## 3.", round2_idx)
+    round2_section = text[round2_idx:round2_end]
+    assert "worker-start" in round2_section
+    assert "task-list --json` 폴링(20-30s" not in text, (
+        "the old 20-30s polling bullet must be gone, not merely superseded in prose"
+    )
+
+
+def test_orca_workflow_creates_own_run_in_section0():
+    text = _read_skill("orca-workflow")
+    section0_start = text.index("## 0.")
+    section0_end = text.index("## 1.")
+    section0 = text[section0_start:section0_end]
+    assert "run-create" in section0, (
+        "orca-workflow §0 must create and bind its own Run once per invocation, distinct from "
+        "whatever Run orca-task-runner/orca-evaluate create for their own internal fan-out"
+    )
 
 
 def test_orca_workflow_round2_relay_has_no_deploy_placeholder():
@@ -757,6 +801,7 @@ def test_sources_retry_wrapper_script(name):
 
 
 DISPATCH_VERIFY_FILE = "dispatch-verify.md"
+SELF_RECOVERY_FILE = "self-recovery.md"
 
 
 def _read_workflows_file(name: str) -> str:
@@ -776,6 +821,47 @@ def test_dispatch_verify_file_documents_bounded_tail_diff_and_escalation():
     assert "spawn-failures.md" in text, "must document escalation to the existing spawn-failure procedure"
     assert "❯" not in text and "⏺" not in text, (
         "must stay provider-agnostic — no Claude-Code-specific UI markers"
+    )
+    assert "worker-start" in text, (
+        "docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md: the same "
+        "unsubmitted-draft failure mode was confirmed live under worker-start, not only raw "
+        "dispatch --inject — the framing sentence must say so"
+    )
+
+
+def test_self_recovery_file_documents_principle_and_loop():
+    """docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md: pins the load-bearing
+    content of the new shared self-recovery reference so a future edit can't silently drop the
+    native-primitives principle, the retry budget, the --ack requirement, or the worker-release
+    rejection note."""
+    text = _read_workflows_file(SELF_RECOVERY_FILE)
+    assert "worker-abandon" in text and "--retry-of" in text, (
+        "must document the fence-then-retry recovery mechanism"
+    )
+    assert "check --wait" in text and "--ack" in text, (
+        "must document the event-driven wait and the mandatory ack"
+    )
+    assert "Retry budget: 2" in text or "재시도 예산" in text, (
+        "must state a concrete retry budget, not leave it open"
+    )
+    assert "worker-release" in text and "external_terminal" in text, (
+        "must record why worker-release was rejected for this repo's dispatch shape"
+    )
+    assert "last_heartbeat_at" in text, (
+        "must record that heartbeat was observed null and is not relied on as a liveness signal"
+    )
+    assert "3600000" in text, (
+        "must state the exact 1-hour timeout constant (3600000ms) the user specified, not a rounded "
+        "or prose-only restatement"
+    )
+
+
+def test_self_recovery_file_states_no_process_action_for_abandon():
+    """worker-abandon's whole value proposition is that it is non-destructive — pin the exact
+    observed evidence so a future edit can't quietly turn this into a claim we didn't verify."""
+    text = _read_workflows_file(SELF_RECOVERY_FILE)
+    assert 'processAction:"none"' in text, (
+        "must pin the exact live-observed field:value, not just the word 'none' anywhere in the file"
     )
 
 
@@ -1087,4 +1173,57 @@ def test_spawn_failures_known_signatures_table_has_no_internal_blank_lines():
     assert "\n\n" not in table_span, (
         "blank line found inside the Known signatures table — this breaks GFM table rendering "
         "for every row after it (issue #64's Task 5 fix round found exactly this bug)"
+    )
+
+
+def test_spawn_failures_active_dispatch_row_points_to_check_wait():
+    """docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md supersedes this row's old
+    fix text ('poll task-list') -- the row must now describe the event-driven replacement, and must
+    not still tell a future reader to poll task-list for this specific failure."""
+    text = _read_workflows_file("spawn-failures.md")
+    assert "already has an active dispatch" in text
+    idx = text.index("already has an active dispatch")
+    row_end = text.index("\n", idx)
+    row = text[max(0, idx - 200):row_end]
+    assert "check --wait" in row, "fix column must now point at the check --wait mechanism"
+    assert "poll `task-list`" not in row, (
+        "must not still recommend the disproven task-list-polling workaround for this row"
+    )
+
+
+def test_logging_documents_self_recovery_event():
+    """docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md: pins the self_recovery
+    event schema so a future edit can't silently drop a field the self-recovery.md loop relies on."""
+    text = (WORKFLOWS_DIR / "logging.md").read_text()
+    assert '"event":"self_recovery"' in text
+    for field in ("task_id", "dispatch_id", "terminal", "waited_ms", "terminal_status", "action_taken"):
+        assert f'"{field}"' in text, f"self_recovery event must include the {field} field"
+    assert "resumed_wait" in text and "retried_enter" in text and "worker_abandon_retry" in text, (
+        "must enumerate the action_taken values self-recovery.md's loop can produce"
+    )
+    assert "waves-<date>.jsonl" in text, (
+        "must state orca-task-runner writes this event to its dated waves log"
+    )
+
+
+def test_orca_task_runner_creates_own_run_in_section0():
+    text = _read_skill("orca-task-runner")
+    section0_start = text.index("## 0.")
+    section0_end = text.index("## 1.")
+    section0 = text[section0_start:section0_end]
+    assert "run-create" in section0, (
+        "orca-task-runner §0 must create and bind its own Run once per session, distinct from "
+        "whatever Run orca-workflow owns"
+    )
+
+
+def test_orca_task_runner_section5_points_to_self_recovery():
+    text = _read_skill("orca-task-runner")
+    section5_start = text.index("## 5.")
+    section5_end = text.index("## 6.")
+    section5 = text[section5_start:section5_end]
+    assert "self-recovery.md" in section5
+    assert "worker-start" in section5
+    assert "체크 큐로 안 잡힐 수 있다" not in text, (
+        "retired scheduler reasoning must be deleted outright, not annotated (no-history-in-skills)"
     )

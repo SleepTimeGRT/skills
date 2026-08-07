@@ -2,9 +2,12 @@
 
 > verified_at: 2026-07-30
 
-Shared post-`dispatch --inject` verification procedure for `orca-task-runner`/`orca-evaluate`/`orca-workflow`
-(issue #43) — split out so the three `SKILL.md` files point here instead of each repeating the same bash
-(same precedent as `logging.md`/`spawn-failures.md`).
+Shared post-`dispatch --inject`-or-`worker-start` verification procedure for
+`orca-task-runner`/`orca-evaluate`/`orca-workflow` (issue #43) — split out so the `SKILL.md` files point
+here instead of each repeating the same bash (same precedent as `logging.md`/`spawn-failures.md`). The
+same unsubmitted-draft failure mode reproduces identically under `worker-start`
+(`docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md`, Test 3) — the bash below is
+identical regardless of which command injected the text.
 
 ## Why
 
