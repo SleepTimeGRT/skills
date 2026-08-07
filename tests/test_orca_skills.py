@@ -1061,6 +1061,47 @@ def test_orca_retro_label_documented_as_general_convention():
     )
 
 
+def test_orca_retro_version_section_falls_through_on_null_fields():
+    text = _read_skill("orca-retro")
+    assert 'select(.type=="meta")' in text, (
+        "priority-1 term-log lookup must gate on the meta record type, not just file existence"
+    )
+    assert "전부 null이면" in text and "우선순위 2로 넘어간다" in text, (
+        "priority-1 must explicitly fall through to priority-2 when the term log predates the "
+        "version fields or line 1 isn't a meta record — not paste an all-null 환경/버전 section"
+    )
+
+
+def test_orca_retro_version_section_attributes_spawning_skill():
+    text = _read_skill("orca-retro")
+    assert "skill, terminal, skill_version" in text, (
+        "the term-log projection must include `skill` (spawning skill) alongside the version "
+        "fields, not just the bare version keys"
+    )
+    assert "스폰한" in text, (
+        "when meta.skill differs from the issue's target skill, the pasted version must be "
+        "labeled as belonging to the spawning skill, not silently attributed to the target"
+    )
+
+
+def test_orca_retro_term_log_path_is_bound_before_use():
+    text = _read_skill("orca-retro")
+    assert "`$term_log`에" in text and "바인딩" in text, (
+        "the skill must tell the executing agent how $term_log gets its value (from §1's "
+        "collection loop) before §4 reads it, instead of leaving it undefined"
+    )
+
+
+def test_orca_retro_recurrence_comment_also_carries_version_section():
+    text = _read_skill("orca-retro")
+    idx = text.index("재발 코멘트**를 단다")
+    window = text[idx : idx + 120]
+    assert "환경/버전" in window, (
+        "the gh issue comment (recurrence) path must reference the assembled 환경/버전 section "
+        "too, not just gh issue create — both paths are in scope per the design spec"
+    )
+
+
 def test_orca_retro_schema_lens_scans_unfiltered():
     text = _read_skill("orca-retro")
     assert "issue 필터를 거치지 않고" in text, (

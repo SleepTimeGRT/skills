@@ -79,36 +79,49 @@ done
 gh issue list --repo <skills-repo-slug> --state open --json number,title,labels --limit 100
 ```
 
+새 이슈를 만들든 기존 이슈에 재발 코멘트를 달든 공통으로, 먼저 "## 환경/버전" 섹션을 조립한다 —
+우선순위 2단계:
+
+1. 이 후보의 증거로 인용한 term 로그(`term-<handle>.jsonl`)가 있으면, 그 경로를 `$term_log`에
+   바인딩한다(§1에서 읽은 파일 경로). 1행에서 뽑되 `type=="meta"`이고 세 버전 필드가 전부 null/누락이
+   아닐 때만 유효하다 — 구 로그(Task 1 이전 배포분)는 meta에 버전 필드가 없거나, 1행이 애초에 meta가
+   아닐 수 있다:
+
+   ```bash
+   sv="$(head -1 "$term_log" \
+     | jq -c 'select(.type=="meta") | {skill, terminal, skill_version, orca_workflows_commit, orca_app_version}' \
+     2>/dev/null)"
+   # $sv가 비어 있거나 skill_version/orca_workflows_commit/orca_app_version이 전부 null이면
+   # (구 로그, 또는 1행이 meta가 아님) 아래 우선순위 2로 넘어간다 — null을 그대로 붙이지 않는다.
+   ```
+
+   `sv.skill`이 이 후보의 **대상 스킬**(`<대상 스킬>`)과 다르면 — term 로그의 meta는 그 터미널을
+   **스폰한** 스킬을 적기 때문에 흔히 벌어진다(예: `orca-workflow`가 `skill="orca-workflow",
+   role="task-runner"`로 `orca-task-runner` 터미널을 스폰) — 뽑은 값을 "스폰한 스킬(`sv.skill`)의
+   버전"이라고 명시하고, 대상 스킬 자체 버전은 아래 우선순위 2를 **추가로** 돌려 함께 싣는다.
+
+2. term 로그가 없거나(렌즈 1·4처럼 assignments/spawn-failures만으로 나온 경우) 위 1이 폴백 조건에
+   걸리면, 대상 스킬의 **현재** 배포 버전을 쓰고, 이슈/코멘트 본문에
+   "분석 시점 기준 — 실행 당시와 다를 수 있음"이라고 명시한다:
+
+   ```bash
+   version_file="$HOME/.agents/skills/<대상 스킬>/.installed-version.json"
+   [ -f "$version_file" ] && jq -c '{version, commit}' "$version_file"
+   ```
+
 - 기존 open 이슈가 같은 결함을 다루면 **새 이슈 대신 그 이슈에 재발 코멘트**를 단다(증거 인용 +
-  epic 번호): `gh issue comment <num> --repo <skills-repo-slug> --body "..."`. 재발 코멘트 횟수가
-  이 루프의 우선순위 신호다.
+  epic 번호 + 위에서 조립한 "## 환경/버전" 섹션): `gh issue comment <num> --repo <skills-repo-slug>
+  --body "..."`. 재발 코멘트 횟수가 이 루프의 우선순위 신호다.
 - spawn-failure 후보는 `~/.agents/orca-workflows/spawn-failures.md`가 이미 부여한 known_issue
   번호와도 대조한다.
-- 신규 결함이면, 먼저 "## 환경/버전" 섹션을 조립한다 — 우선순위 2단계:
-
-  1. 이 후보의 증거로 인용한 term 로그(`term-<handle>.jsonl`)가 있으면 그 파일 1행(`type=="meta"`)에서
-     그대로 뽑는다 — 버그가 실제로 관측된 시점의 버전이라 가장 정확하다:
-
-     ```bash
-     head -1 "$term_log" | jq -c '{skill_version, orca_workflows_commit, orca_app_version}'
-     ```
-
-  2. term 로그를 인용하지 않은 후보(렌즈 1·4처럼 assignments/spawn-failures만으로 나온 경우)는 대상 스킬의
-     **현재** 배포 버전을 폴백으로 쓰고, 이슈 본문에 "분석 시점 기준 — 실행 당시와 다를 수 있음"이라고
-     명시한다:
-
-     ```bash
-     version_file="$HOME/.agents/skills/<대상 스킬>/.installed-version.json"
-     [ -f "$version_file" ] && jq -c '{version, commit}' "$version_file"
-     ```
-
-  라벨은 `retro` 그대로 쓴다 — orca-retro 전용이 아니라 앞으로 다른 경로로 스킬 결함 이슈를 파일링할 때도
-  재사용하는 일반 컨벤션이다(다만 현재 `gh issue create`를 실제로 호출하는 스킬은 orca-retro뿐이다):
+- 신규 결함이면, 라벨은 `retro` 그대로 쓴다 — orca-retro 전용이 아니라 앞으로 다른 경로로 스킬 결함
+  이슈를 파일링할 때도 재사용하는 일반 컨벤션이다(다만 현재 `gh issue create`를 실제로 호출하는
+  스킬은 orca-retro뿐이다):
 
   ```bash
   gh issue create --repo <skills-repo-slug> --label retro \
     --title "<대상 스킬>: <결함 한 줄>" \
-    --body "<대상 스킬 파일 경로 / 증거 인용(로그 경로+레코드 라인) / epic 번호 / 참조한 로그 경로 / 수정 방향 1문단(diff 금지) / ## 환경/버전 섹션(위에서 조립)>"
+    --body "<대상 스킬 파일 경로 / 증거 인용(로그 경로+레코드 라인) / epic 번호 / 참조한 로그 경로 / 수정 방향 1문단(diff 금지) / 위에서 조립한 ## 환경/버전 섹션>"
   ```
 
 ## 5. 보고
