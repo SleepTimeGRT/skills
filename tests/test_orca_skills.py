@@ -1310,3 +1310,43 @@ def test_orca_task_runner_section5_points_to_self_recovery():
     assert "체크 큐로 안 잡힐 수 있다" not in text, (
         "retired scheduler reasoning must be deleted outright, not annotated (no-history-in-skills)"
     )
+
+
+def test_orca_workflow_task_runner_dispatch_spec_instructs_retry_wrapping():
+    text = _read_skill("orca-workflow")
+    marker = "제안서/구현 모드"
+    idx = text.index(marker)
+    end = text.index('>"', idx)
+    segment = text[idx:end]
+    assert "orca_call_with_retry" in segment
+    assert ".orca-orphaned-result-<task_id>.json" in segment
+
+
+def test_orca_workflow_evaluator_dispatch_spec_instructs_retry_wrapping():
+    text = _read_skill("orca-workflow")
+    marker = "요청 모드"
+    idx = text.index(marker)
+    end = text.index('>"', idx)
+    segment = text[idx:end]
+    assert "orca_call_with_retry" in segment
+    assert ".orca-orphaned-result-<task_id>.json" in segment
+
+
+def test_orca_workflow_round2_relay_dispatch_spec_instructs_retry_wrapping():
+    text = _read_skill("orca-workflow")
+    marker = "반려 사유 요약"
+    idx = text.index(marker)
+    end = text.index('>"', idx)
+    segment = text[idx:end]
+    assert "orca_call_with_retry" in segment
+    assert ".orca-orphaned-result-<task_id>.json" in segment
+
+
+def test_orca_workflow_section0_recovery_references_orphan_result_path():
+    """AC4(issue #42): 이미 PR #51(issue #41)에서 충족됨 — 회귀 방지 락(기능 변경 없음).
+    승인 조건 1 — 이 테스트를 생략하면 AC5가 깨진다(계약 검토 리포트 참고). 절대 빼지 말 것."""
+    text = _read_skill("orca-workflow")
+    section0_start = text.index("## 0.")
+    section0_end = text.index("## 1.")
+    section0 = text[section0_start:section0_end]
+    assert ".orca-orphaned-result-<task_id>.json" in section0

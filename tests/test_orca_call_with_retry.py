@@ -272,3 +272,95 @@ def test_logged_failure_signature_is_matched_substring_not_full_output(tmp_path)
     assert len(logs) == 1
     assert logs[0]["failure_signature"] == "Could not connect to the running Orca app"
     assert "UNRELATED-STDOUT-NOISE" not in logs[0]["failure_signature"]
+
+
+def test_broadened_signature_catches_stale_bootstrap_without_new_literal(tmp_path):
+    """issue #42 재발: 기존 리터럴 어느 쪽과도 매칭 안 되던 텍스트가 키워드 매칭으로 잡히는지."""
+    stubs = {
+        "orca": """
+            #!/usr/bin/env bash
+            [ "$1" = "status" ] && echo '{"state":"ready"}' && exit 0
+            exit 1
+        """,
+        "real-cmd": """
+            #!/usr/bin/env bash
+            count=0
+            [ -f "$COUNTER_FILE" ] && count="$(cat "$COUNTER_FILE")"
+            count=$((count + 1))
+            echo "$count" > "$COUNTER_FILE"
+            if [ "$count" -eq 1 ]; then
+              echo "runtime_error: stale_bootstrap detected, dropping connection" >&2
+              exit 1
+            fi
+            echo recovered-ok
+            exit 0
+        """,
+    }
+    counter_file = tmp_path / "counter"
+    result, home = _run(
+        tmp_path,
+        stubs,
+        'orca_call_with_retry "test-skill" "test-role" -- real-cmd',
+        extra_env={
+            "COUNTER_FILE": str(counter_file),
+            "ORCA_RETRY_POLL_INTERVAL": "0",
+            "ORCA_RETRY_POLL_MAX": "1",
+        },
+    )
+    assert result.returncode == 0
+    assert "recovered-ok" in result.stdout
+    logs = _log_lines(home)
+    assert len(logs) == 1
+    assert logs[0]["outcome"] == "retrying"
+    assert "bootstrap" in logs[0]["failure_signature"].lower()
+
+
+def test_broadened_signature_catches_generic_reconnect_message(tmp_path):
+    stubs = {
+        "orca": """
+            #!/usr/bin/env bash
+            [ "$1" = "status" ] && echo '{"state":"ready"}' && exit 0
+            exit 1
+        """,
+        "real-cmd": """
+            #!/usr/bin/env bash
+            echo "Orca client: reconnecting after unexpected disconnect" >&2
+            exit 1
+        """,
+    }
+    result, home = _run(
+        tmp_path,
+        stubs,
+        'orca_call_with_retry "test-skill" "test-role" -- real-cmd',
+        extra_env={"ORCA_RETRY_POLL_INTERVAL": "0", "ORCA_RETRY_POLL_MAX": "1", "ORCA_RETRY_MAX_CYCLES": "1"},
+    )
+    logs = _log_lines(home)
+    assert len(logs) == 1
+    assert logs[0]["outcome"] == "exhausted"
+    assert "reconnect" in logs[0]["failure_signature"].lower()
+
+
+def test_case_insensitive_match_does_not_alter_known_literal_extraction(tmp_path):
+    """-i 추가 + 키워드 대안 추가 후에도 기존 리터럴이 leftmost-longest로 여전히 승리하는지 —
+    test_logged_failure_signature_is_matched_substring_not_full_output의 정확 일치 단언과
+    같은 조건을 실제 diff에 대해 명시적으로 재확인(승인 조건 2와 직결)."""
+    stubs = {
+        "orca": """
+            #!/usr/bin/env bash
+            [ "$1" = "status" ] && echo '{"state":"ready"}' && exit 0
+            exit 1
+        """,
+        "real-cmd": """
+            #!/usr/bin/env bash
+            echo "Could not connect to the running Orca app. Restart Orca and try again." >&2
+            exit 1
+        """,
+    }
+    _, home = _run(
+        tmp_path,
+        stubs,
+        'orca_call_with_retry "test-skill" "test-role" -- real-cmd',
+        extra_env={"ORCA_RETRY_POLL_INTERVAL": "0", "ORCA_RETRY_POLL_MAX": "1", "ORCA_RETRY_MAX_CYCLES": "1"},
+    )
+    logs = _log_lines(home)
+    assert logs[0]["failure_signature"] == "Could not connect to the running Orca app"
