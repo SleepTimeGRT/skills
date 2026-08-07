@@ -1684,9 +1684,11 @@ def test_orca_task_runner_section5_codex_commit_uses_separate_unsandboxed_termin
 
 def test_orca_task_runner_section5_files_modified_sourced_from_check_wait_not_terminal_read():
     """AC4 (issue #70): filesModified must be sourced from the check --wait worker_done response
-    (not read_json/terminal scrollback), and it must be split from a comma-separated string into
-    an array before use — the worker preamble fills it via --files-modified "a,b", not an array
-    (D3 in the round-2 contract review)."""
+    (not read_json/terminal scrollback). The worker preamble fills it via --files-modified "a,b",
+    a comma-separated string, not an array (D3 in the round-2 contract review) — round 3 replaced
+    the bash-array split this test used to pin with a shared portable helper script (see
+    test_orca_task_runner_section5_uses_portable_csv_split_helper below); this test only checks
+    where the raw CSV comes from, not how it's later split."""
     text = _read_skill("orca-task-runner")
     section5_start = text.index("## 5.")
     section6_start = text.index("## 6.")
@@ -1699,20 +1701,24 @@ def test_orca_task_runner_section5_files_modified_sourced_from_check_wait_not_te
     assert "꺼내지" in prose and "않는다" in prose
     assert "콤마 구분" in prose
 
-    split_fence_end = section5.index("```", fence_idx + len("```bash"))
-    split_segment = section5[fence_idx:split_fence_end]
-    assert "IFS=','" in split_segment
-    assert "files_modified_csv" in split_segment
+    fetch_fence_end = section5.index("```", fence_idx + len("```bash"))
+    fetch_segment = section5[fence_idx:fetch_fence_end]
+    assert "files_modified_csv" in fetch_segment
+    assert "jq -r" in fetch_segment
 
 
-def test_orca_task_runner_section5_commit_guard_uses_array_length_not_file_size():
-    """D1 (issue #70 round-2 contract review): the "nothing to commit" guard must check array
-    length (${#files_modified[@]}), matching orca-evaluate §3's migration_files_present idiom —
-    not file size ([ -s ... ]), which is wrong because `printf '%s\\n' "${arr[@]}"` writes one
-    newline byte even for an empty array, making [ -s ] pass incorrectly. "nothing to commit"
-    (git's rc=1) must also be branched as a normal outcome, not escalation, and completion must be
-    detected via --for tui-idle, not --for exit (D2 — the helper shell returns to its prompt
-    instead of exiting, per agy.md's documented mechanism)."""
+def test_orca_task_runner_section5_uses_portable_csv_split_helper():
+    """Round-3 fix (issue #70 contract review, retry 1/2): a bash-only `IFS=',' read -r -a
+    files_modified <<< "$csv"` split silently produced zero elements under zsh (this machine's
+    actual runtime shell, ZSH_VERSION=5.9) while working under bash — `read -a` errors in zsh
+    ("bad option: -a") but still exits 0, so the length guard that followed it treated every
+    codex subtask as "nothing to commit" with no error and no escalation (a worse fail-open than
+    issue #70's original defect). SKILL.md must delegate the CSV-to-pathspec-file step to the
+    shared, cross-shell-tested `write_pathspec_from_csv.sh` (same portability contract as
+    `orca_call_with_retry.sh`/`log_dispatch.sh` in the same directory — see
+    tests/test_write_pathspec_from_csv.py for the behavioral bash+zsh coverage this text-matching
+    check cannot provide on its own) and must never reintroduce a bash array, `IFS`-based split,
+    or `read -a` for this purpose."""
     text = _read_skill("orca-task-runner")
     section5_start = text.index("## 5.")
     section6_start = text.index("## 6.")
@@ -1721,10 +1727,51 @@ def test_orca_task_runner_section5_commit_guard_uses_array_length_not_file_size(
     close_idx = section5.index("orca terminal close --terminal <impl_handle>", commit_idx)
     segment = section5[commit_idx:close_idx]
 
-    guard_start = segment.index("if [ ${#files_modified[@]} -gt 0 ]; then")
+    assert "write_pathspec_from_csv.sh" in segment
+    assert "source ~/.agents/orca-workflows/scripts/write_pathspec_from_csv.sh" in segment
+    assert 'if write_pathspec_from_csv "$files_modified_csv" "$pathspec_file"; then' in segment
+
+    # Scope the negative checks to the executable fence itself, not the surrounding prose — the
+    # prose above legitimately quotes the rejected `IFS=',' read -r -a` snippet for context (same
+    # as log_dispatch.sh's own header does for its rejected `${!req}` draft), so a naive
+    # whole-segment "not in" check would trip on that explanatory text instead of the real code.
+    guard_start = segment.index('if write_pathspec_from_csv "$files_modified_csv" "$pathspec_file"; then')
     guard_end = segment.index("```", guard_start)
     guard_code = segment[guard_start:guard_end]
-    assert "[ -s " not in guard_code
+    assert "IFS=" not in guard_code
+    assert "read -a" not in guard_code and "read -r -a" not in guard_code
+    assert "files_modified[@]" not in guard_code
+    assert "files_modified=()" not in guard_code
+
+
+def test_write_pathspec_from_csv_script_documents_the_ifs_read_a_regression():
+    """The shared script's own header must document the exact defect it exists to prevent (bash
+    `read -a` silently producing an empty split under zsh) — this is what makes the portability
+    contract legible to a future editor who might otherwise "simplify" it back to `read -a`."""
+    text = (REPO_ROOT / "orca-workflows" / "scripts" / "write_pathspec_from_csv.sh").read_text()
+    assert "read -a" in text
+    assert "zsh" in text.lower()
+    assert "bad option" in text
+
+
+def test_orca_task_runner_section5_commit_guard_handles_nothing_to_commit_and_uses_tui_idle():
+    """D1/D2 (issue #70 round-2 contract review): "nothing to commit" (git's rc=1) must be
+    branched as a normal outcome, not escalation, and completion must be detected via
+    --for tui-idle, not --for exit (D2 — the helper shell returns to its prompt instead of
+    exiting, per agy.md's documented mechanism). The array-length guard this test used to pin
+    (${#files_modified[@]}) was removed in round 3 — see
+    test_orca_task_runner_section5_uses_portable_csv_split_helper for its replacement."""
+    text = _read_skill("orca-task-runner")
+    section5_start = text.index("## 5.")
+    section6_start = text.index("## 6.")
+    section5 = text[section5_start:section6_start]
+    commit_idx = section5.index("commit-helper")
+    close_idx = section5.index("orca terminal close --terminal <impl_handle>", commit_idx)
+    segment = section5[commit_idx:close_idx]
+
+    guard_start = segment.index('if write_pathspec_from_csv "$files_modified_csv" "$pathspec_file"; then')
+    guard_end = segment.index("```", guard_start)
+    guard_code = segment[guard_start:guard_end]
     assert "nothing to commit" in guard_code
     assert "정상 no-op" in guard_code
     assert "orca terminal wait --terminal <commit_helper_handle> --for tui-idle" in guard_code

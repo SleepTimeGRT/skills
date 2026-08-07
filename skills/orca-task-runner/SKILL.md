@@ -193,9 +193,8 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
   `check --wait` 응답(`$result`, `~/.agents/orca-workflows/self-recovery.md`의 wait loop 변수)에서
   꺼낸다 — 아래 `read_json`(터미널 스크롤백)에서 꺼내지 **않는다**: `read_json`은 recv 로깅 전용이고,
   이 시점엔 worker_done의 실제 payload가 아니다. **워커 preamble이 채우는 값은 배열이 아니라
-  `--files-modified "path/a,path/b"` 콤마 구분 단일 문자열**이므로, 배열로 쓰기 전에 반드시 분할한다
-  (경로 자체에 콤마가 들어 있으면 이 분할이 깨진다 — 알려진 한계로 남긴다, filesModified에 콤마 포함
-  경로가 관측되면 그때 구분자를 바꾼다):
+  `--files-modified "path/a,path/b"` 콤마 구분 단일 문자열**이다(경로 자체에 콤마가 들어 있으면 분할이
+  깨진다 — 알려진 한계로 남긴다, filesModified에 콤마 포함 경로가 관측되면 그때 구분자를 바꾼다):
 
   ```bash
   files_modified_csv="$(printf '%s' "$result" | jq -r \
@@ -203,10 +202,6 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
   # jq 경로는 이 레포의 기존 camelCase 필드 관례(taskId/dispatchId/deliveryId)에서 유추한 최선 추정 —
   # self-recovery.md에 worker_done payload의 고정 스키마가 아직 문서화돼 있지 않으므로, 이 subtask
   # provider의 첫 실제 codex 디스패치에서 실제 $result로 재확인하고 다르면 이 줄만 고친다.
-  files_modified=()
-  if [ -n "$files_modified_csv" ]; then
-    IFS=',' read -r -a files_modified <<< "$files_modified_csv"
-  fi
   ```
 
   이 커밋은 `orca-task-runner` 코디네이터 자신의 셸에서 실행하지 않는다 — 코디네이터 자신이 codex로
@@ -219,25 +214,28 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
   pathspec은 셸 인자로 넘기지 않고 파일로 넘긴다(`--pathspec-from-file`, git 2.25+ — 이 머신 git 2.50.1로
   `git add -h`/`git commit -h` 실측 확인). 파일 목록을 터미널 경계 너머로 문자열 직렬화할 때 생기는
   unquoted 확장 위험(zsh는 파일 2개 이상이면 인자 1개로 뭉개지고, bash/sh는 공백 있는 경로가 쪼개진다 —
-  `orca-evaluate` SKILL.md §3 `migration_files`와 같은 문제) 자체를 없애기 위함이다. **배열이 비어 있는지는
-  `${#files_modified[@]}`로 판정한다(`orca-evaluate` SKILL.md §3의 `migration_files_present` 관용구와 동일)
-  — 파일 존재/크기(`[ -s ... ]`)로 판정하지 않는다: 빈 배열이어도 `printf '%s\n' "${files_modified[@]}"`가
-  개행 1바이트를 써서 그 파일은 "비어 있지 않은" 것으로 잘못 보인다(실측: `bash -c 'arr=(); printf "%s\n"
-  "${arr[@]}" > f; wc -c < f'` → `1`, zsh도 동일).** 커밋할 것이 없으면(빈 배열) 터미널을 아예 만들지
-  않는다 — `git add --pathspec-from-file`에 빈 pathspec을 넘기면 `fatal: empty string is not a valid
-  pathspec`(rc=128)로 죽는다(실측, git 2.50.1). 완료 판정에는 `--for exit`를 쓰지 않는다 —
-  `~/.agents/orca-workflows/models/agy.md`의 `--command` 종료 후에도 셸이 프롬프트로 복귀할 뿐 프로세스가
-  끝나지 않는다는 기록과 동일 이유로, 이 plain 셸도 커맨드 종료 후 종료하지 않는다(`--for exit`는
-  타임아웃될 뿐 신호가 되지 못한다). 대신 `--for tui-idle`로 대기한 뒤 `COMMIT_EXIT:` 문자열을
-  bounded read로 확인한다:
+  `orca-evaluate` SKILL.md §3 `migration_files`와 같은 문제) 자체를 없애기 위함이다. 콤마 문자열을 파일로
+  쓰는 단계는 `orca_call_with_retry.sh`/`log_dispatch.sh`와 같은 디렉터리의
+  `~/.agents/orca-workflows/scripts/write_pathspec_from_csv.sh`를 `source`해 쓴다 — **bash 배열로 먼저
+  split하지 않는다.** 이전 초안은 `IFS=',' read -r -a files_modified <<< "$files_modified_csv"`로 배열을
+  만든 뒤 `${#files_modified[@]} -gt 0`으로 "커밋할 게 있는지" 판정했는데, `read -a`는 bash 전용이라 이
+  블록이 실제로 돌아가는 셸(zsh, `ZSH_VERSION=5.9`, 이 머신에서 실측)에서는 `read:1: bad option: -a`로
+  실패하면서도 종료 코드는 0을 내 배열이 조용히 빈 채로 남는다 — 그 결과 길이 가드가 항상 거짓이 되어
+  codex 워커의 변경사항이 에러도 escalation도 없이 영원히 커밋되지 않는 fail-open이 된다(실측: bash에서
+  2개 경로 CSV → 배열 원소 2개, zsh에서 같은 CSV → 배열 원소 0개). `write_pathspec_from_csv`는 배열도
+  간접 확장(`${!name}`)도 `[[ ]]`도 쓰지 않는다 — "커밋할 게 있는지"는 배열 길이가 아니라 **CSV 문자열
+  자체가 비어 있는지**(`[ -z "$csv" ]`)로만 판정하므로, 셸에 따라 없어질 수 있는 중간 상태가 아예 없다.
+  완료 판정에는 `--for exit`를 쓰지 않는다 — `~/.agents/orca-workflows/models/agy.md`의 `--command`
+  종료 후에도 셸이 프롬프트로 복귀할 뿐 프로세스가 끝나지 않는다는 기록과 동일 이유로, 이 plain 셸도
+  커맨드 종료 후 종료하지 않는다(`--for exit`는 타임아웃될 뿐 신호가 되지 못한다). 대신 `--for tui-idle`로
+  대기한 뒤 `COMMIT_EXIT:` 문자열을 bounded read로 확인한다:
 
   ```bash
   # provider가 codex인 subtask에 한해서만 실행.
-  if [ ${#files_modified[@]} -gt 0 ]; then
-    pathspec_file="$HOME/.local/state/orca-workflows/logs/commit-pathspec-<task_id>.txt"
-    install -d -m 700 ~/.local/state/orca-workflows/logs
-    printf '%s\n' "${files_modified[@]}" > "$pathspec_file"   # 한 줄에 경로 하나. plain text라 셸
-    # 이스케이프 불필요 — 위 배열 길이 가드를 이미 통과했으므로 이 파일은 항상 비어 있지 않다.
+  source ~/.agents/orca-workflows/scripts/write_pathspec_from_csv.sh
+  pathspec_file="$HOME/.local/state/orca-workflows/logs/commit-pathspec-<task_id>.txt"
+  install -d -m 700 ~/.local/state/orca-workflows/logs
+  if write_pathspec_from_csv "$files_modified_csv" "$pathspec_file"; then
     chmod 600 "$pathspec_file"
 
     orca_call_with_retry "orca-task-runner" "commit-helper" -- \
@@ -265,8 +263,9 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
     esac
     orca terminal close --terminal <commit_helper_handle> --tab --json
     rm -f "$pathspec_file"
-  fi   # 배열이 비어 있으면(워커가 아무것도 못 고치고 worker_done만 보낸 실패 경로) 이 단계 전체를
-       # 건너뛴다 — §6 task 레벨 게이트가 그 결과를 그대로 평가한다.
+  fi   # write_pathspec_from_csv가 rc=3(filesModified CSV가 비어 있음 — 워커가 아무것도 못 고치고
+       # worker_done만 보낸 정상 경로)을 반환하면 이 단계 전체를 건너뛴다 — §6 task 레벨 게이트가 그
+       # 결과를 그대로 평가한다.
   ```
 
   git 2.25+ 전제(`--pathspec-from-file` 지원) — 구현 착수 시(이미 이 머신에서는 git 2.50.1로 확인됨)
