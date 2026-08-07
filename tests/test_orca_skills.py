@@ -504,7 +504,13 @@ def test_select_reviewer_script_exists():
 # ---------------------------------------------------------------------------
 
 LOG_RESTRUCTURE_FILES = NEW_SKILLS + ["logging.md"]
-BARE_UNDATED_LOG_PATHS = ["logs/assignments.jsonl", "logs/waves.jsonl"]
+# Matches a *write* redirect (`>>` or `>`) targeting the old fixed, un-dated file name --
+# the actual bug this test guards against (a copy-pasted write silently un-partitioning the log).
+# Deliberately does not match bare substring occurrences: both logging.md's own "Reading across
+# dates" recipe (§1, issue #55) and orca-retro §1 correctly `cat`/`-f`-check
+# "$logs/assignments.jsonl" (the pre-date-partition legacy file, kept around on purpose) before
+# falling back to the dated files -- that read is required backward compatibility, not a bug.
+_UNDATED_LOG_WRITE_RE = re.compile(r">>?\s*\"[^\"]*\b(?:assignments|waves)\.jsonl\"")
 
 
 def _read_log_restructure_file(name: str) -> str:
@@ -515,16 +521,13 @@ def _read_log_restructure_file(name: str) -> str:
 
 @pytest.mark.parametrize("name", LOG_RESTRUCTURE_FILES)
 def test_no_bare_undated_assignments_or_waves_path(name):
-    # Bare "waves.jsonl"/"assignments.jsonl" (no "logs/" prefix) still appears legitimately in
-    # logging.md's own explanatory prose (e.g. "instead of the fixed `waves.jsonl`") — this
-    # assertion is scoped to the exact "logs/..." path a copy-pasted command would use, which must
-    # always carry a date suffix now.
     text = _read_log_restructure_file(name)
-    for term in BARE_UNDATED_LOG_PATHS:
-        assert term not in text, (
-            f"{name}: found un-dated log path '{term}' — assignments/waves logs must be "
-            "date-suffixed (assignments-<date>.jsonl / waves-<date>.jsonl), never the old fixed name"
-        )
+    matches = _UNDATED_LOG_WRITE_RE.findall(text)
+    assert not matches, (
+        f"{name}: found a write redirect into an un-dated log path {matches} — assignments/waves "
+        "log writes must be date-suffixed (assignments-<date>.jsonl / waves-<date>.jsonl), never "
+        "the old fixed name"
+    )
 
 
 _DISPATCH_INJECT_RE = re.compile(r"orca orchestration dispatch --task .*? --inject --json")
