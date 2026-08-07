@@ -530,7 +530,15 @@ def test_no_bare_undated_assignments_or_waves_path(name):
     )
 
 
-_DISPATCH_INJECT_RE = re.compile(r"orca orchestration dispatch --task .*? --inject --json")
+# Matches either the low-level `dispatch --task ... --inject` verb (still used at sites with
+# no wait-loop problem: orca-workflow §1d retro, the initial §2a task-runner/evaluator dispatch)
+# or its supervised replacement `worker-start --task ...` (orca-task-runner §5's wave dispatch,
+# orca-workflow §2a's round-2+ relay dispatch — docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md).
+# [\s\S]*? spans the backslash-continued multi-line worker-start invocation; non-greedy so it
+# stops at the nearest following --json rather than swallowing later, unrelated blocks.
+_DISPATCH_INJECT_RE = re.compile(
+    r"orca orchestration (?:dispatch --task .*? --inject|worker-start --task[\s\S]*?)--json"
+)
 
 
 def _dispatch_positions(text: str) -> list[int]:
@@ -652,6 +660,7 @@ def _bare_wrapped_call_line_numbers(text: str) -> list[int]:
         "orca orchestration task-create --spec",
         "orca orchestration task-list",
         "orca orchestration dispatch --task",
+        "orca orchestration worker-start --task",
     )
     bare = []
     for m in _BASH_FENCE_RE.finditer(text):
