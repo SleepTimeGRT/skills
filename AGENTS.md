@@ -75,6 +75,26 @@ risk. Separately, edits made in a feature worktree are invisible at `~/.agents/o
 until merged to main, since the symlink always resolves to the main checkout, never the
 worktree currently in use.
 
+## Orca-\* skill design principle: diagnose + self-recover, don't bypass
+
+For `orca-workflow`/`orca-task-runner`/`orca-evaluate` (and any future skill wrapping Orca's CLI/features):
+use Orca's own features as fully as possible. When one of them misbehaves, the required fix order is:
+
+1. **Diagnose** — reproduce, capture the exact failure text/signature and where it fires (this is what
+   `spawn-failures.md`'s known-signature table and `logging.md`'s `self_recovery` event exist for).
+2. **Self-recover** — build recovery into the skill using Orca's own mechanisms as the primary fix: wait on
+   `orca status --json`/`check --wait`, retry via `orca_call_with_retry.sh`, resume via
+   `worker-start --retry-of` (see `self-recovery.md`, `scripts/orca_call_with_retry.sh`). This is the main
+   remedy, not a fallback tried after a manual workaround.
+3. **Bypass/disable, last resort only, with explicit user sign-off** — turning off the misbehaving Orca
+   feature entirely to make the symptom go away is not an acceptable substitute for 1-2 on its own.
+
+Reference precedent: issue #42 (Orca app auto-update breaking mid-session dispatch). The user explicitly
+rejected disabling auto-update and required self-recovery instead — "자동 업데이트는 켜둔 채로, 그로 인한
+일시적 실패가 스스로(self-recovery) 복구되길 원한다." That issue is still open (recurred against a signature
+`orca_call_with_retry.sh`'s regex didn't cover) — treat it as the running example of this principle, not a
+closed case to imitate blindly.
+
 ## Repository operations
 
 - Do not run deploy, release, migration, seed, wipe, or other external-write commands merely to measure output.
