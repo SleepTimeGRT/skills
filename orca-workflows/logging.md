@@ -155,14 +155,14 @@ guard: issue #59):
 if [ ! -s "$term_log" ] || ! head -1 "$term_log" | jq -e '.type == "meta"' >/dev/null 2>&1; then
   version_file="$HOME/.agents/skills/<skill>/.installed-version.json"
   sv_json="null"
-  [ -f "$version_file" ] && sv_json="$(jq -c '{version, commit}' "$version_file" 2>/dev/null)"
+  [ -f "$version_file" ] && sv_json="$(jq -c '{version, commit}' "$version_file" 2>/dev/null || true)"
   [ -z "$sv_json" ] && sv_json="null"
 
-  owc_raw="$(git -C "$HOME/.agents/orca-workflows" rev-parse HEAD 2>/dev/null)"
+  owc_raw="$(git -C "$HOME/.agents/orca-workflows" rev-parse HEAD 2>/dev/null || true)"
   owc_json="null"
   [ -n "$owc_raw" ] && owc_json="$(printf '%s' "$owc_raw" | jq -R .)"
 
-  oav_raw="$(orca status --json 2>/dev/null | jq -r '.result.runtime.appVersion // empty' 2>/dev/null)"
+  oav_raw="$(orca status --json 2>/dev/null | jq -r '.result.runtime.appVersion // empty' 2>/dev/null || true)"
   oav_json="null"
   [ -n "$oav_raw" ] && oav_json="$(printf '%s' "$oav_raw" | jq -R .)"
 
