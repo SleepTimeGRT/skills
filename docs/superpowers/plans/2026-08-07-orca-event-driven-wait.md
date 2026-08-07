@@ -301,7 +301,12 @@ either skill without first changing this constraint.
 Run: `python3 -m pytest tests/test_orca_skills.py -k self_recovery -v`
 Expected: PASS (both new tests).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run the full suite before committing (Global Constraints)**
+
+Run: `python3 -m pytest tests/test_orca_skills.py -v 2>&1 | tail -20`
+Expected: all tests pass, no regressions from the new file.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add orca-workflows/self-recovery.md tests/test_orca_skills.py
@@ -385,7 +390,12 @@ identical regardless of which command injected the text.
 Run: `python3 -m pytest tests/test_orca_skills.py -k dispatch_verify_file -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run the full suite before committing (Global Constraints)**
+
+Run: `python3 -m pytest tests/test_orca_skills.py -v 2>&1 | tail -20`
+Expected: all tests pass.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add orca-workflows/dispatch-verify.md tests/test_orca_skills.py
@@ -459,7 +469,12 @@ recurs.
 Run: `python3 -m pytest tests/test_orca_skills.py -k self_recovery_event -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run the full suite before committing (Global Constraints)**
+
+Run: `python3 -m pytest tests/test_orca_skills.py -v 2>&1 | tail -20`
+Expected: all tests pass.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add orca-workflows/logging.md tests/test_orca_skills.py
@@ -522,7 +537,12 @@ wait via `check --wait` (`orca-workflows/self-recovery.md`) for that dispatch's 
 Run: `python3 -m pytest tests/test_orca_skills.py -k active_dispatch_row -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run the full suite before committing (Global Constraints)**
+
+Run: `python3 -m pytest tests/test_orca_skills.py -v 2>&1 | tail -20`
+Expected: all tests pass.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add orca-workflows/spawn-failures.md tests/test_orca_skills.py
