@@ -11,14 +11,17 @@ wording), `tests/test_orca_skills.py` (enumerated below).
 
 When an `orca-workflow`-family skill needs to detect or recover from a worker that isn't responding as
 expected, the default approach is: **use Orca's own orchestration primitives for both detection and
-recovery, not a hand-rolled equivalent** (raw terminal-output scraping, ad hoc bookkeeping files, or falling
-back to polling as the primary mechanism just because the event path needs a bit more care). Concretely:
-detect via `check --wait` (event) and `worker-show`/`worker-read` (status/transcript), recover via
-`worker-abandon` (fence, non-destructive) then `worker-start --retry-of` (tracked retry) — not "read the
-terminal ourselves and decide." Polling survives only as the rare, explicitly-logged fallback for the one
-thing Orca's event system cannot tell you by construction (a worker that will never send anything because
-it's dead) — never as the default. This document is the first application of that principle; future
-`orca-workflow`-family design work should default to it rather than re-deriving it.
+recovery, not a hand-rolled equivalent** (ad hoc bookkeeping files, or falling back to polling as the primary
+mechanism just because the event path needs a bit more care). Concretely: detect completion via `check
+--wait` (verified, §2), diagnose a timeout using the narrowest-scope tool that's actually been confirmed to
+carry a signal (§4/§8 — `dispatch-verify.md`'s existing bounded `terminal read` probe is used here, not
+`worker-show`'s `last_heartbeat_at`, which this investigation observed `null` on every dispatch checked and
+so is not relied on until a future session confirms it's populated), then recover via `worker-abandon`
+(fence, non-destructive) followed by `worker-start --retry-of` (tracked retry) — not "read the terminal
+ourselves and decide the recovery action by hand." Polling survives only as the rare, explicitly-logged
+fallback for the one thing Orca's event system cannot tell you by construction (a worker that will never
+send anything because it's dead) — never as the default. This document is the first application of that
+principle; future `orca-workflow`-family design work should default to it rather than re-deriving it.
 
 ## 1. Purpose
 
@@ -342,6 +345,11 @@ Enumerated so no assertion silently drifts out of sync with the edited prose:
   exact number — reuse the existing convention elsewhere in these skills (2 retries: `orca-task-runner` §6's
   gate retries, `orca-workflow` §2d's FAIL retries) unless implementation finds a reason this site should
   differ. Resolve this explicitly in `self-recovery.md` (§6f), don't leave it unstated.
+- **`last_heartbeat_at` was `null` on every `dispatch-show`/`worker-list` observed in this investigation**,
+  active or completed — so it is not used as a liveness signal here (§0/§4 rely on the already-validated
+  `terminal read` probe instead). If a future session confirms heartbeats populate under some configuration,
+  `worker-show`'s `last_heartbeat_at` would be a strictly better first-line liveness check than a terminal
+  read (no content probe needed at all) and this design should be revisited to use it.
 - **Version floor:** `check --wait`/`--ack`, `worker-start` (including `--terminal`/`--retry-of`), and
   `worker-abandon` are all confirmed present and working at Orca `1.4.168` (Tests 1-7) — this design
   introduces no new minimum-version requirement beyond what was already installed. `worker-release` (1.4.169+)
