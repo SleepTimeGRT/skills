@@ -55,7 +55,7 @@ Extra fields (`wave_index`, `subtask_type`, `advisor`, ...) are added per call s
 ```bash
 install -d -m 700 ~/.local/state/orca-workflows/logs
 target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
-printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|PREMERGE_FAIL|NO_ACCEPTANCE_CRITERIA|NO_DONE_TRANSITION|CONTRACT_FINALIZED_BY_GENERATOR|RETRO_DONE|RETRO_FAIL>","retry":<n>}\n' \
+printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|PREMERGE_FAIL|PREMERGE_TIMEOUT|NO_ACCEPTANCE_CRITERIA|NO_DONE_TRANSITION|CONTRACT_FINALIZED_BY_GENERATOR|RETRO_DONE|RETRO_FAIL>","retry":<n>}\n' \
   "$(date -u +%FT%TZ)" >> "$target"
 chmod 600 "$target"
 ```
