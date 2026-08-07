@@ -537,7 +537,7 @@ def test_no_bare_undated_assignments_or_waves_path(name):
 # [\s\S]*? spans the backslash-continued multi-line worker-start invocation; non-greedy so it
 # stops at the nearest following --json rather than swallowing later, unrelated blocks.
 _DISPATCH_INJECT_RE = re.compile(
-    r"orca orchestration (?:dispatch --task .*? --inject|worker-start --task[\s\S]*?)--json"
+    r"orca orchestration (?:dispatch --task .*? --inject --json|worker-start --task[\s\S]*?--json)"
 )
 
 
