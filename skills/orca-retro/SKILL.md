@@ -84,13 +84,32 @@ gh issue list --repo <skills-repo-slug> --state open --json number,title,labels 
   이 루프의 우선순위 신호다.
 - spawn-failure 후보는 `~/.agents/orca-workflows/spawn-failures.md`가 이미 부여한 known_issue
   번호와도 대조한다.
-- 신규 결함이면:
+- 신규 결함이면, 먼저 "## 환경/버전" 섹션을 조립한다 — 우선순위 2단계:
 
-```bash
-gh issue create --repo <skills-repo-slug> --label retro \
-  --title "<대상 스킬>: <결함 한 줄>" \
-  --body "<대상 스킬 파일 경로 / 증거 인용(로그 경로+레코드 라인) / epic 번호 / 참조한 로그 경로 / 수정 방향 1문단(diff 금지)>"
-```
+  1. 이 후보의 증거로 인용한 term 로그(`term-<handle>.jsonl`)가 있으면 그 파일 1행(`type=="meta"`)에서
+     그대로 뽑는다 — 버그가 실제로 관측된 시점의 버전이라 가장 정확하다:
+
+     ```bash
+     head -1 "$term_log" | jq -c '{skill_version, orca_workflows_commit, orca_app_version}'
+     ```
+
+  2. term 로그를 인용하지 않은 후보(렌즈 1·4처럼 assignments/spawn-failures만으로 나온 경우)는 대상 스킬의
+     **현재** 배포 버전을 폴백으로 쓰고, 이슈 본문에 "분석 시점 기준 — 실행 당시와 다를 수 있음"이라고
+     명시한다:
+
+     ```bash
+     version_file="$HOME/.agents/skills/<대상 스킬>/.installed-version.json"
+     [ -f "$version_file" ] && jq -c '{version, commit}' "$version_file"
+     ```
+
+  라벨은 `retro` 그대로 쓴다 — orca-retro 전용이 아니라 앞으로 다른 경로로 스킬 결함 이슈를 파일링할 때도
+  재사용하는 일반 컨벤션이다(다만 현재 `gh issue create`를 실제로 호출하는 스킬은 orca-retro뿐이다):
+
+  ```bash
+  gh issue create --repo <skills-repo-slug> --label retro \
+    --title "<대상 스킬>: <결함 한 줄>" \
+    --body "<대상 스킬 파일 경로 / 증거 인용(로그 경로+레코드 라인) / epic 번호 / 참조한 로그 경로 / 수정 방향 1문단(diff 금지) / ## 환경/버전 섹션(위에서 조립)>"
+  ```
 
 ## 5. 보고
 

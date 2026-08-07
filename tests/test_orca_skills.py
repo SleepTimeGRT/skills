@@ -1042,6 +1042,25 @@ def test_orca_retro_dedup_against_open_issues():
     assert "재발 코멘트" in text, "recurrence must become a comment, not a duplicate issue"
 
 
+def test_orca_retro_issue_body_has_version_section():
+    text = _read_skill("orca-retro")
+    assert "환경/버전" in text, "issue body must carry a 환경/버전 section"
+    assert "skill_version" in text and "orca_workflows_commit" in text and "orca_app_version" in text, (
+        "orca-retro must pull the same three fields Task 1 added to the meta record"
+    )
+    assert "실행 당시와 다를 수 있음" in text, (
+        "the no-term-log fallback path must warn the version may not match when the bug occurred"
+    )
+
+
+def test_orca_retro_label_documented_as_general_convention():
+    text = _read_skill("orca-retro")
+    assert "orca-retro 전용이 아니라" in text, (
+        "retro label must be documented as a general skill-discovered-issue convention, "
+        "not orca-retro-exclusive, even though orca-retro is currently the only implementer"
+    )
+
+
 def test_orca_retro_schema_lens_scans_unfiltered():
     text = _read_skill("orca-retro")
     assert "issue 필터를 거치지 않고" in text, (
