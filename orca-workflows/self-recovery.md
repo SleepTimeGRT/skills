@@ -92,6 +92,9 @@ if [ "$timed_out" = "true" ]; then
   # taken. DISPATCH_ID here is still the dispatch that timed out; new_dispatch_id is only
   # non-empty when action_taken=worker_abandon_retry (logging.md's schema keeps both fields
   # distinct so a late completion from the old dispatch can't be confused with the retry).
+  # orca-task-runner adds "wave_index":<n> to the JSON object below as an extra field (same
+  # per-call-site extra-field convention logging.md §1 already uses for "assign" events) so it
+  # joins with that wave's wave_start/wave_end records; orca-workflow omits it (no wave concept).
   install -d -m 700 ~/.local/state/orca-workflows/logs
   target="$HOME/.local/state/orca-workflows/logs/waves-$(date -u +%F).jsonl"   # orca-task-runner
   # or: target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"   # orca-workflow
