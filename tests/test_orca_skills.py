@@ -1013,6 +1013,80 @@ def test_logging_outcome_enum_includes_retro_values():
     )
 
 
+# --- issue #69: outcome enum 2-axis split, CONTRACT_APPROVED_ROUND1/MANUAL_RECOVERY_COMPLETED,
+# provider canon (layer-3 retro follow-up to #62) ---
+
+
+def test_logging_outcome_enum_includes_progress_branch_values():
+    text = (WORKFLOWS_DIR / "logging.md").read_text()
+    assert text.count('"outcome":"<') == 1, (
+        "logging.md must keep exactly one outcome-enum placeholder line — a second occurrence "
+        "would make test_logging_outcome_enum_includes_retro_values's re.search silently check "
+        "the wrong line"
+    )
+    m = re.search(r'"outcome":"<([^>]+)>"', text)
+    assert m, "outcome enum line missing in logging.md"
+    values = m.group(1)
+    assert "CONTRACT_APPROVED_ROUND1" in values, (
+        "outcome enum must document round-1 contract approval (issue #69) — omitting or "
+        "inventing ad-hoc strings for this branch is exactly the drift #62/#69 hunt"
+    )
+    assert "MANUAL_RECOVERY_COMPLETED" in values, (
+        "outcome enum must document manual worker_done-loss recovery completion (issue #69)"
+    )
+
+
+def test_logging_documents_verdict_and_progress_branch_axes():
+    text = (WORKFLOWS_DIR / "logging.md").read_text()
+    start = text.index("**`outcome`**")
+    end = text.index("**`wave_start`/`wave_end`**")
+    outcome_section = text[start:end]
+    assert "verdict 축" in outcome_section and "진행-분기 축" in outcome_section, (
+        "logging.md's outcome section must split its documentation into a verdict axis and a "
+        "progress-branch axis (issue #69) so a future addition knows which list it belongs to"
+    )
+
+
+def test_logging_states_no_ad_hoc_outcome_values_rule():
+    text = (WORKFLOWS_DIR / "logging.md").read_text()
+    start = text.index("**`outcome`**")
+    end = text.index("**`wave_start`/`wave_end`**")
+    outcome_section = text[start:end]
+    assert "이슈를 연다" in outcome_section, (
+        "logging.md's outcome section must state that an unlisted normal branch gets a new "
+        "issue filed, not an invented ad-hoc string or a skipped event (issue #62/#69 recurrence)"
+    )
+
+
+def test_logging_documents_provider_value_source():
+    text = (WORKFLOWS_DIR / "logging.md").read_text()
+    start = text.index("**`assign`**")
+    end = text.index("**`outcome`**")
+    assign_section = text[start:end]
+    assert "models/*.md" in assign_section, (
+        "logging.md's assign recipe must pin provider's allowed values to the "
+        "orca-workflows/models/*.md basenames (issue #69 evidence 3 — claude vs claude-code drift), "
+        "documented next to the assign recipe itself, not just somewhere in the file"
+    )
+    for value in ("claude-code", "codex", "agy"):
+        assert f"`{value}`" in assign_section, (
+            f"logging.md's assign recipe section must enumerate `{value}` as a documented "
+            "provider value"
+        )
+
+
+def test_orca_workflow_records_outcome_on_round1_approval():
+    text = _read_skill("orca-workflow")
+    start = text.index("**2a.")
+    end = text.index("**2b.")
+    section_2a = text[start:end]
+    assert "CONTRACT_APPROVED_ROUND1" in section_2a, (
+        "orca-workflow §2a must instruct recording outcome=CONTRACT_APPROVED_ROUND1 when a "
+        "contract proposal is approved straight in round 1 (issue #69) — symmetric to the "
+        "existing CONTRACT_FINALIZED_BY_GENERATOR instruction for round-limit reached"
+    )
+
+
 def test_logging_meta_records_version_fields():
     text = (WORKFLOWS_DIR / "logging.md").read_text()
     meta_section = text[text.index('### `meta`') : text.index('### `sent`')]
