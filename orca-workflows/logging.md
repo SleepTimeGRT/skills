@@ -153,13 +153,35 @@ guard: issue #59):
 
 ```bash
 if [ ! -s "$term_log" ] || ! head -1 "$term_log" | jq -e '.type == "meta"' >/dev/null 2>&1; then
+  version_file="$HOME/.agents/skills/<skill>/.installed-version.json"
+  sv_json="null"
+  [ -f "$version_file" ] && sv_json="$(jq -c '{version, commit}' "$version_file" 2>/dev/null)"
+  [ -z "$sv_json" ] && sv_json="null"
+
+  owc_raw="$(git -C "$HOME/.agents/orca-workflows" rev-parse HEAD 2>/dev/null)"
+  owc_json="null"
+  [ -n "$owc_raw" ] && owc_json="$(printf '%s' "$owc_raw" | jq -R .)"
+
+  oav_raw="$(orca status --json 2>/dev/null | jq -r '.result.runtime.appVersion // empty' 2>/dev/null)"
+  oav_json="null"
+  [ -n "$oav_raw" ] && oav_json="$(printf '%s' "$oav_raw" | jq -R .)"
+
   jq -cn --arg issue "<issue-num>" --arg skill "<skill>" --arg role "<role>" --arg terminal "<handle>" \
     --arg created_at "$(date -u +%FT%TZ)" \
-    '{type:"meta", issue:$issue, skill:$skill, role:$role, terminal:$terminal, created_at:$created_at}' \
+    --argjson skill_version "$sv_json" --argjson orca_workflows_commit "$owc_json" \
+    --argjson orca_app_version "$oav_json" \
+    '{type:"meta", issue:$issue, skill:$skill, role:$role, terminal:$terminal, created_at:$created_at,
+      skill_version:$skill_version, orca_workflows_commit:$orca_workflows_commit,
+      orca_app_version:$orca_app_version}' \
     >> "$term_log"
   chmod 600 "$term_log"
 fi
 ```
+
+`skill_version`은 그 순간 실제 **배포(commit-pin)**된 버전(`~/.agents/skills/<skill>/.installed-version.json`),
+`orca_workflows_commit`은 orca-workflows가 symlink-tracks-main이라 항상 "그 순간의" 레포 HEAD, `orca_app_version`은
+Orca 앱 자체 버전(#42류 앱-기인 버그 추적용)이다. 셋 다 best-effort — 조회 실패는 `null`로만 남기고 meta
+기록 자체를 막지 않는다.
 
 ### `sent` — write right after `dispatch --inject`, reusing the exact text already passed to that task's `task-create --spec` (do not re-fetch it via `task-list`)
 

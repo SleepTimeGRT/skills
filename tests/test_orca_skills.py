@@ -995,6 +995,25 @@ def test_logging_outcome_enum_includes_retro_values():
     )
 
 
+def test_logging_meta_records_version_fields():
+    text = (WORKFLOWS_DIR / "logging.md").read_text()
+    meta_section = text[text.index('### `meta`') : text.index('### `sent`')]
+    for key in ("skill_version", "orca_workflows_commit", "orca_app_version"):
+        assert key in meta_section, (
+            f"logging.md meta recipe missing version field: {key} — issues filed "
+            "against a term log can't be pinned to the version that produced the bug"
+        )
+    assert ".installed-version.json" in meta_section, (
+        "meta recipe must source skill_version from the deployed commit-pin file"
+    )
+    assert "orca status --json" in meta_section, (
+        "meta recipe must source orca_app_version from a live orca status call"
+    )
+    assert "rev-parse HEAD" in meta_section, (
+        "meta recipe must source orca_workflows_commit from the live orca-workflows checkout"
+    )
+
+
 def test_orca_retro_files_issues_never_edits_skills():
     text = _read_skill("orca-retro")
     assert "gh issue create" in text, "output channel must be GitHub issues"
