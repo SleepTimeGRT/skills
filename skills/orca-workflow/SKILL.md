@@ -34,6 +34,7 @@ description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-ma
   보고에 그대로 포함한다. 복구는 이 스킬이 직접 하지 않는다 — worker_done 유실 복구는
   `orca-task-runner` §5 절차(worktree의 `.orca-orphaned-result-<task_id>.json` 확인 포함)를 해당
   run의 소유자가 수행한다(issue #41).
+- **Run 생성**(실행 시작 시 1회): `orca orchestration run-create --objective "<issue 번호> contract round relay" --from <자기 handle> --json`로 이 실행 전용 Run을 만들고 바인딩한다. §2a 라운드 2+ relay의 모든 `worker-start`/`check --wait`/`--ack` 호출은 이 run_id를 쓴다 — `orca-task-runner`/`orca-evaluate`가 각자 내부 fan-out에 쓰는 Run과는 별개다(섞이면 서로 다른 세션의 `worker_done`이 잘못된 mailbox로 전달된다 — `~/.agents/orca-workflows/self-recovery.md` 참고).
 
 ## 1. Epic 경로
 
@@ -166,27 +167,32 @@ spec만 재전송된다. 대신 매 라운드 새 task를 만들어 같은 터�
 `completed` 상태여야 한다(그렇지 않으면 `"Terminal ... already has an active dispatch"`로 거부됨, 실측).
 `--deps`는 걸지 않는다 — 걸어도 `dispatch` 자체가 이미 같은 선후관계를 강제하므로 stall 경로만 하나 늘어난다.
 
+직전 라운드가 `completed`인지 확인하는 대기는 `~/.agents/orca-workflows/self-recovery.md`의 wait/recovery
+루프를 그대로 따른다(`check --wait`+`--ack`, 타임아웃 시 alive/stuck_draft/dead 분기) — 이 dispatch에 대한
+`worker_done`을 `check`/`check --wait`로 수신하는 것 자체가 곧 `completed` 확정이다(실측: 완료 시각이
+메시지 타임스탬프와 정확히 일치). `worker_done` 수신 후, 그 결과의 `reportPath`를 읽기 위한 **1회성**
+조회만 한다(폴링 아님 — `worker_done` 메시지의 payload 자체엔 `reportPath`가 없어서, 이 조회는 "완료됐는지"
+확인용이 아니라 값을 얻기 위한 것뿐이다):
+
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 orca_call_with_retry "orca-workflow" "contract-round" -- \
-  orca orchestration task-list --status completed --json
-# 위 결과에서 직전 라운드 task_id의 .status가 "completed"인지 확인하고, .result(JSON 문자열)를 파싱해
-# .reportPath를 읽는다 — 본문은 읽지 않고 경로만 중계한다는 원칙은 여기서도 유지된다.
+  orca orchestration task-list --run "$RUN_ID" --json
+# 위 결과에서 직전 라운드 task_id를 찾아 .result(JSON 문자열)를 파싱해 .reportPath를 읽는다 —
+# 본문은 읽지 않고 경로만 중계한다는 원칙은 여기서도 유지된다.
 spec_text="<round 번호 + 위에서 읽은 reportPath + (evaluator→task-runner 방향이면) 반려 사유 요약>"
 orca_call_with_retry "orca-workflow" "contract-round" -- \
   orca orchestration task-create --spec "$spec_text" --json
 orca_call_with_retry "orca-workflow" "contract-round" -- \
-  orca orchestration dispatch --task <방금 만든 task_id> --to <재-engage 대상 handle> --inject --json
-# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로.
+  orca orchestration worker-start --task <방금 만든 task_id> --worktree active \
+  --terminal <재-engage 대상 handle> --run "$RUN_ID" --from <자기 handle> --json
+# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(worker-start에도 동일하게 필요).
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. task_id가 실제 존재하므로 §1의 relay:true/omit
 # 규칙은 이 사이트엔 적용되지 않는다(issue #64로 해소).
 ```
 
-- `task-list --json` 폴링(20-30s 간격)으로 직전 라운드가 `completed`인지 확인한다 — `check --wait`을 1차
-  수단으로 쓰지 않는다(coordinator가 Orca 터미널 세션이면 `worker_done`이 check 큐에서 누락될 수 있다, task
-  상태는 정상 갱신됨 — `orca-task-runner` §5와 같은 이유).
-- 오래(예: 30분) `completed`가 안 되면 체크포인트 — 재진단하지 않고
-  `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차로.
+- 오래(예: 30분) `completed`가 안 되면(= self-recovery.md의 재시도 예산까지 소진) 체크포인트 —
+  재진단하지 않고 `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차로.
 
 **2b. Generate** — `orca-task-runner` 호출, 결과로 **task 전체 diff 경로** 또는 **`GATE_FAIL`**을 받는다(`orca-task-runner`가 자기 task-레벨 게이트를 재시도 한도(2회) 안에 못 넘긴 경우 — `skills/orca-task-runner/SKILL.md` §6).
 

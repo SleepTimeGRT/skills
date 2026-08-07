@@ -685,7 +685,7 @@ def test_no_bare_wrapped_call_sites(name):
 
 
 EXPECTED_RETRY_WRAP_COUNTS = {
-    "orca-workflow": 12,  # +3 for issue #64's round-2+ relay: task-list poll, task-create, dispatch
+    "orca-workflow": 12,  # +3 for issue #64's round-2+ relay: task-list (reportPath lookup), task-create, worker-start
     "orca-task-runner": 6,
     "orca-evaluate": 10,
 }
@@ -701,10 +701,14 @@ def test_orca_call_with_retry_count_per_skill(name, expected):
 
 
 def test_orca_workflow_documents_round2_relay_protocol():
-    """Issue #64: §2a must name the actual mechanism (new task-create per round, gated on a task-list
-    poll for the prior round's completion, dispatched to the same terminal handle) rather than leaving
-    round 2+ undocumented. Pins the load-bearing phrases so a future rewrite can't silently drop the
-    poll-before-dispatch gate or reintroduce task_id reuse."""
+    """Issue #64: §2a must name the actual mechanism (new task-create per round, event-driven wait
+    via self-recovery.md, dispatched to the same terminal handle via worker-start) rather than
+    leaving round 2+ undocumented. Pins the load-bearing phrases so a future rewrite can't silently
+    reintroduce task-list polling as the primary wait mechanism or task_id reuse.
+
+    docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md supersedes this test's
+    original 'must poll task-list, not terminal read' assertion -- that assertion enforced the
+    now-disproven check-queue-miss claim."""
     text = _read_skill("orca-workflow")
     assert "already has an active dispatch" in text, (
         "must document the verified error a premature round-2 dispatch produces"
@@ -712,9 +716,37 @@ def test_orca_workflow_documents_round2_relay_protocol():
     assert "is dispatched; only ready tasks can be dispatched" in text, (
         "must document why reusing the round-1 task_id is impossible"
     )
-    assert "task-list" in text, "round-2+ completion check must poll task-list, not terminal read"
-    assert "reportPath" in text, "must name the path-only relay channel (task-list result.reportPath)"
+    assert "self-recovery.md" in text, "round-2+ completion wait must point at the shared event-driven loop"
+    assert "reportPath" in text, (
+        "must name the path-only relay channel (task-list result.reportPath) -- still needed as a "
+        "one-shot lookup after worker_done, since the event payload itself doesn't carry it"
+    )
     assert "`--deps`는 걸지" in text, "must explicitly instruct against --deps between round tasks"
+
+
+def test_orca_workflow_round2_uses_worker_start_not_raw_dispatch():
+    """docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md §3/§6b: only the
+    round-2+ dispatch site migrates to worker-start -- the initial §2a task-runner/evaluator
+    dispatch and §1d retro stay on raw dispatch --inject (no polling problem there)."""
+    text = _read_skill("orca-workflow")
+    round2_idx = text.index("라운드 2+")
+    round2_end = text.index("## 3.", round2_idx)
+    round2_section = text[round2_idx:round2_end]
+    assert "worker-start" in round2_section
+    assert "task-list --json` 폴링(20-30s" not in text, (
+        "the old 20-30s polling bullet must be gone, not merely superseded in prose"
+    )
+
+
+def test_orca_workflow_creates_own_run_in_section0():
+    text = _read_skill("orca-workflow")
+    section0_start = text.index("## 0.")
+    section0_end = text.index("## 1.")
+    section0 = text[section0_start:section0_end]
+    assert "run-create" in section0, (
+        "orca-workflow §0 must create and bind its own Run once per invocation, distinct from "
+        "whatever Run orca-task-runner/orca-evaluate create for their own internal fan-out"
+    )
 
 
 def test_orca_workflow_round2_relay_has_no_deploy_placeholder():
