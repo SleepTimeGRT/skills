@@ -42,7 +42,20 @@ description: Use when generating the implementation for one task (issue) — pro
 
   결과가 비어있지 않으면(orphan `wave_index` 존재) 이전 세션이 그 wave 도중 죽었다는 뜻이다. `orca orchestration task-list --json`/`orca terminal list --json`으로 그 wave의 subtask가 실제로 끝났는지 확인한 뒤, §5의 `wave_end` 포맷대로 `outcome:"crash_recovered"`로 채워 넣는다(retry_count는 알 수 없으면 `null`). 이 값 — "wave 크기 N에서 coordinator가 죽었다" — 이 바로 best-effort 로그가 놓칠 뻔한 가장 중요한 데이터 포인트이므로, 확인 없이 새 wave로 넘어가지 않는다.
 
-- **Run 생성**(세션 시작 시 1회): `orca orchestration run-create --objective "<issue 번호> task implementation" --from <자기 handle> --json`로 이 세션 전용 Run을 만들고 바인딩한다. 이후 §5의 모든 `worker-start`/`check --wait`/`--ack` 호출은 이 run_id를 쓴다 — `orca-workflow`가 이 세션을 스폰할 때 자기 Run을 갖고 있더라도 그건 재사용하지 않는다(Run이 섞이면 서로 다른 세션의 `worker_done`이 잘못된 mailbox로 전달된다 — `~/.agents/orca-workflows/self-recovery.md` 참고).
+- **Run 생성**(세션 시작 시 1회): Run을 만들고 바인딩한 뒤 `run_id`를 사이드카 파일에 남긴다(§5는
+  별도 fenced block이라 셸 변수가 그대로 넘어가지 않는다 — 아래 `spec_sidecar`와 같은 이유):
+
+  ```bash
+  run_json="$(orca orchestration run-create --objective "<issue 번호> task implementation" --from <자기 handle> --json)"
+  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt"
+  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt"
+  ```
+
+  이후 §5의 모든 `worker-start`/`check --wait`/`--ack` 호출 앞에서
+  `RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt")"`로 다시 읽는다.
+  `orca-workflow`가 이 세션을 스폰할 때 자기 Run을 갖고 있더라도 그건 재사용하지 않는다(Run이 섞이면
+  서로 다른 세션의 `worker_done`이 잘못된 mailbox로 전달된다 — `~/.agents/orca-workflows/self-recovery.md`
+  참고).
 
 ## 1. Contract 제안 (generator 역할)
 
@@ -134,6 +147,7 @@ subtask가 worker_done을 보내기 전에 스스로 실행: typecheck, unit tes
 
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
+RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt")"   # §0에서 남긴 사이드카
 orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
   orca orchestration task-list --ready --brief --json
 spec_sidecar="$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"   # §2에서 남긴 사이드카

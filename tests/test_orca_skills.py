@@ -729,7 +729,7 @@ def test_orca_workflow_round2_uses_worker_start_not_raw_dispatch():
     round-2+ dispatch site migrates to worker-start -- the initial §2a task-runner/evaluator
     dispatch and §1d retro stay on raw dispatch --inject (no polling problem there)."""
     text = _read_skill("orca-workflow")
-    round2_idx = text.index("라운드 2+")
+    round2_idx = text.index("**Contract 협상 relay — 라운드 2+")
     round2_end = text.index("## 3.", round2_idx)
     round2_section = text[round2_idx:round2_end]
     assert "worker-start" in round2_section
@@ -850,13 +850,19 @@ def test_self_recovery_file_documents_principle_and_loop():
     assert "last_heartbeat_at" in text, (
         "must record that heartbeat was observed null and is not relied on as a liveness signal"
     )
+    assert "3600000" in text, (
+        "must state the exact 1-hour timeout constant (3600000ms) the user specified, not a rounded "
+        "or prose-only restatement"
+    )
 
 
 def test_self_recovery_file_states_no_process_action_for_abandon():
     """worker-abandon's whole value proposition is that it is non-destructive — pin the exact
     observed evidence so a future edit can't quietly turn this into a claim we didn't verify."""
     text = _read_workflows_file(SELF_RECOVERY_FILE)
-    assert "processAction" in text and "none" in text
+    assert 'processAction:"none"' in text, (
+        "must pin the exact live-observed field:value, not just the word 'none' anywhere in the file"
+    )
 
 
 @pytest.mark.parametrize("name", NEW_SKILLS)
@@ -1195,7 +1201,7 @@ def test_logging_documents_self_recovery_event():
     assert "resumed_wait" in text and "retried_enter" in text and "worker_abandon_retry" in text, (
         "must enumerate the action_taken values self-recovery.md's loop can produce"
     )
-    assert "waves-<date>.jsonl" in text or "waves-" in text, (
+    assert "waves-<date>.jsonl" in text, (
         "must state orca-task-runner writes this event to its dated waves log"
     )
 

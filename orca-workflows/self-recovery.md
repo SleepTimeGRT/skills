@@ -38,9 +38,13 @@ dead) — never as the default.
 
 ## The wait/recovery loop
 
-Run this once per pending dispatch. A wave has one pending-set entry per subtask, keyed by `task_id`
-(stable across retries — a `worker_abandon_retry` changes `dispatch_id`, so update the entry's
-`dispatch_id` in place rather than adding a second entry). A contract round has exactly one entry.
+Run this once per pending dispatch. `WORKER_HANDLE`/`TASK_ID`/`DISPATCH_ID`/`MY_HANDLE`/`RUN_ID` are
+caller-supplied for that dispatch; `CALLING_SKILL` (`orca-task-runner` or `orca-workflow`) and
+`ISSUE_NUM` are caller-supplied constants for the whole session. A wave has one pending-set entry per
+subtask, keyed by `task_id` (stable across retries — a `worker_abandon_retry` changes `dispatch_id`, so
+update the entry's `dispatch_id` in place rather than adding a second entry). `retry_count` is likewise
+tracked per `task_id` in that same pending-set entry, not as one shell scalar shared across a wave's
+concurrent subtasks. A contract round has exactly one entry.
 
 ```bash
 result="$(orca orchestration check --run "$RUN_ID" --wait \
@@ -48,38 +52,57 @@ result="$(orca orchestration check --run "$RUN_ID" --wait \
 timed_out="$(printf '%s' "$result" | jq -r '.result.timedOut')"
 
 if [ "$timed_out" = "true" ]; then
-  # The only "polling" in this design: one liveness probe, not a repeated tick.
-  read_json="$(orca terminal read --terminal "$WORKER_HANDLE" --json)"
-  # Classify read_json's tail the same way dispatch-verify.md already does:
-  #   - the worker's own turn still visibly progressing               -> alive
-  #   - our own injected spec_prefix still sitting unsubmitted         -> stuck_draft
-  #   - dead shell / no process responding                             -> dead
-  case "$terminal_status" in
-    alive)
-      action_taken=resumed_wait
-      ;;
-    stuck_draft)
-      orca terminal send --terminal "$WORKER_HANDLE" --enter --json
-      action_taken=retried_enter
-      ;;
-    dead)
-      orca orchestration worker-abandon --dispatch "$DISPATCH_ID" --json
-      # Re-launch per the calling skill's own explicit launch template (fresh terminal), or reuse
-      # the existing handle if it is a live process just not answering this dispatch.
-      new_result="$(orca orchestration worker-start --task "$TASK_ID" --worktree active \
-        --terminal "$NEW_OR_SAME_HANDLE" --retry-of "$DISPATCH_ID" --run "$RUN_ID" \
-        --from "$MY_HANDLE" --json)"
-      DISPATCH_ID="$(printf '%s' "$new_result" | jq -r '.result.dispatchId')"
-      # Re-run dispatch-verify.md's positive-confirmation procedure against this NEW dispatch.
-      action_taken=worker_abandon_retry
-      retry_count=$((retry_count + 1))
-      ;;
-  esac
-  # Log a self_recovery event (see logging.md) regardless of which branch was taken.
-  if [ "$action_taken" = worker_abandon_retry ] && [ "$retry_count" -gt 2 ]; then
-    # Retry budget exhausted for this task_id -- escalate instead of retrying a third time.
-    : # existing spawn-failures.md escalation procedure
+  new_dispatch_id=""
+  if [ "${retry_count:-0}" -ge 2 ]; then
+    terminal_status=n/a
+    action_taken=escalated_spawn_failure
+    # Retry budget exhausted for this task_id -- go straight to spawn-failures.md's grep-first
+    # procedure instead of attempting a third worker-abandon/worker-start --retry-of.
+  else
+    # The only "polling" in this design: one liveness probe, not a repeated tick.
+    read_json="$(orca terminal read --terminal "$WORKER_HANDLE" --json)"
+    # Classify read_json's tail the same way dispatch-verify.md already does, and assign it:
+    #   - the worker's own turn still visibly progressing               -> alive
+    #   - our own injected spec_prefix still sitting unsubmitted         -> stuck_draft
+    #   - dead shell / no process responding                             -> dead
+    terminal_status="<alive|stuck_draft|dead, assigned from classifying read_json above>"
+    case "$terminal_status" in
+      alive)
+        action_taken=resumed_wait
+        ;;
+      stuck_draft)
+        orca terminal send --terminal "$WORKER_HANDLE" --enter --json
+        action_taken=retried_enter
+        ;;
+      dead)
+        orca orchestration worker-abandon --dispatch "$DISPATCH_ID" --json
+        # Re-launch per the calling skill's own explicit launch template (fresh terminal), or reuse
+        # the existing handle if it is a live process just not answering this dispatch.
+        new_result="$(orca orchestration worker-start --task "$TASK_ID" --worktree active \
+          --terminal "$NEW_OR_SAME_HANDLE" --retry-of "$DISPATCH_ID" --run "$RUN_ID" \
+          --from "$MY_HANDLE" --json)"
+        new_dispatch_id="$(printf '%s' "$new_result" | jq -r '.result.dispatchId')"
+        # Re-run dispatch-verify.md's positive-confirmation procedure against this NEW dispatch.
+        action_taken=worker_abandon_retry
+        retry_count=$(( ${retry_count:-0} + 1 ))
+        ;;
+    esac
   fi
+  # Log a self_recovery event exactly per logging.md's recipe, regardless of which branch was
+  # taken. DISPATCH_ID here is still the dispatch that timed out; new_dispatch_id is only
+  # non-empty when action_taken=worker_abandon_retry (logging.md's schema keeps both fields
+  # distinct so a late completion from the old dispatch can't be confused with the retry).
+  install -d -m 700 ~/.local/state/orca-workflows/logs
+  target="$HOME/.local/state/orca-workflows/logs/waves-$(date -u +%F).jsonl"   # orca-task-runner
+  # or: target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"   # orca-workflow
+  printf '{"ts":"%s","event":"self_recovery","skill":"%s","issue":"%s","task_id":"%s","dispatch_id":"%s","terminal":"%s","waited_ms":3600000,"terminal_status":"%s","action_taken":"%s","new_dispatch_id":"%s"}\n' \
+    "$(date -u +%FT%TZ)" "$CALLING_SKILL" "$ISSUE_NUM" "$TASK_ID" "$DISPATCH_ID" "$WORKER_HANDLE" \
+    "$terminal_status" "$action_taken" "$new_dispatch_id" >> "$target"
+  chmod 600 "$target"
+  # If a retry happened, this pending-set entry's dispatch_id moves forward now (see the opening
+  # paragraph above: "update the entry's dispatch_id in place").
+  [ -n "$new_dispatch_id" ] && DISPATCH_ID="$new_dispatch_id"
+  [ "$action_taken" = escalated_spawn_failure ] && : # hand off to spawn-failures.md here; do not loop back
   # Loop back to the top (re-issue check --wait) unless escalated above.
 fi
 

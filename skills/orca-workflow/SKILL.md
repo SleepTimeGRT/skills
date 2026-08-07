@@ -34,7 +34,23 @@ description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-ma
   보고에 그대로 포함한다. 복구는 이 스킬이 직접 하지 않는다 — worker_done 유실 복구는
   `orca-task-runner` §5 절차(worktree의 `.orca-orphaned-result-<task_id>.json` 확인 포함)를 해당
   run의 소유자가 수행한다(issue #41).
-- **Run 생성**(실행 시작 시 1회): `orca orchestration run-create --objective "<issue 번호> contract round relay" --from <자기 handle> --json`로 이 실행 전용 Run을 만들고 바인딩한다. §2a 라운드 2+ relay의 모든 `worker-start`/`check --wait`/`--ack` 호출은 이 run_id를 쓴다 — `orca-task-runner`/`orca-evaluate`가 각자 내부 fan-out에 쓰는 Run과는 별개다(섞이면 서로 다른 세션의 `worker_done`이 잘못된 mailbox로 전달된다 — `~/.agents/orca-workflows/self-recovery.md` 참고).
+- **Run 생성**(실행 시작 시 1회): Run을 만들고 바인딩한 뒤 `run_id`를 사이드카 파일에 남긴다(§2a의
+  라운드 2+ relay 코드 블록은 별도 fenced block이라 셸 변수가 그대로 넘어가지 않는다):
+
+  ```bash
+  run_json="$(orca orchestration run-create --objective "<issue 번호> contract round relay" --from <자기 handle> --json)"
+  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt"
+  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt"
+  ```
+
+  이후 §2a 라운드 2+ relay의 모든 `worker-start`/`check --wait`/`--ack` 호출 앞에서
+  `RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt")"`로 다시 읽는다 —
+  `orca-task-runner`/`orca-evaluate`가 각자 내부 fan-out에 쓰는 Run과는 별개다(섞이면 서로 다른
+  세션의 `worker_done`이 잘못된 mailbox로 전달된다 — `~/.agents/orca-workflows/self-recovery.md`
+  참고). 라운드 1의 `task-create`/`dispatch`(§2a 상단)는 `--run`을 명시하지 않지만, `task-create`가
+  `--run` 생략 시 호출 터미널에 바인딩된 Run을 그대로 물려받는 것으로 실측 확인했다(`--run` 없이 만든
+  task의 `.run_id`가 이미 바인딩돼 있던 Run과 일치) — 따라서 라운드 2+의 `check --wait --run "$RUN_ID"`와
+  `task-list --run "$RUN_ID"`는 라운드 1의 결과도 정상적으로 찾는다.
 
 ## 1. Epic 경로
 
@@ -176,6 +192,7 @@ spec만 재전송된다. 대신 매 라운드 새 task를 만들어 같은 터�
 
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
+RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt")"   # §0에서 남긴 사이드카
 orca_call_with_retry "orca-workflow" "contract-round" -- \
   orca orchestration task-list --run "$RUN_ID" --json
 # 위 결과에서 직전 라운드 task_id를 찾아 .result(JSON 문자열)를 파싱해 .reportPath를 읽는다 —
@@ -191,8 +208,9 @@ orca_call_with_retry "orca-workflow" "contract-round" -- \
 # 규칙은 이 사이트엔 적용되지 않는다(issue #64로 해소).
 ```
 
-- 오래(예: 30분) `completed`가 안 되면(= self-recovery.md의 재시도 예산까지 소진) 체크포인트 —
-  재진단하지 않고 `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차로.
+- self-recovery.md의 재시도 예산까지 소진해도(최초 대기 1회 + `worker_abandon_retry` 최대 2회, 각
+  최대 1시간 — 최악의 경우 약 3시간) `completed`가 안 되면 체크포인트 — 재진단하지 않고
+  `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차로.
 
 **2b. Generate** — `orca-task-runner` 호출, 결과로 **task 전체 diff 경로** 또는 **`GATE_FAIL`**을 받는다(`orca-task-runner`가 자기 task-레벨 게이트를 재시도 한도(2회) 안에 못 넘긴 경우 — `skills/orca-task-runner/SKILL.md` §6).
 
