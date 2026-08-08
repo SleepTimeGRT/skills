@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import subprocess
 import textwrap
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = REPO_ROOT / "orca-workflows" / "scripts" / "orca_call_with_retry.sh"
@@ -27,6 +30,7 @@ def _run(
     stubs: dict[str, str],
     command: str,
     extra_env: dict[str, str] | None = None,
+    shell: str = "bash",
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     home = tmp_path / "home"
     home.mkdir()
@@ -40,7 +44,7 @@ def _run(
     env.update(extra_env or {})
     script = f"source '{SCRIPT}'\n{command}\n"
     result = subprocess.run(
-        ["bash", "-c", script],
+        [shell, "-c", script],
         cwd=tmp_path,
         env=env,
         text=True,
@@ -364,3 +368,75 @@ def test_case_insensitive_match_does_not_alter_known_literal_extraction(tmp_path
     )
     logs = _log_lines(home)
     assert logs[0]["failure_signature"] == "Could not connect to the running Orca app"
+
+
+def test_retry_wrapper_header_documents_retry_request_dedupe():
+    text = SCRIPT.read_text()
+    assert "No idempotency safeguard" not in text, (
+        "stale claim -- --retry-request dedupe now exists and must be documented instead (#73)"
+    )
+    assert "--retry-request" in text
+    assert "mutation.replayed" in text
+
+
+SHELLS = ["bash", "zsh"]
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_retry_request_value_is_identical_across_retry_cycle(tmp_path, shell):
+    """A caller embeds --retry-request "$(uuidgen)" in the command line handed to
+    orca_call_with_retry, once, before the retry loop starts. This test proves that literal
+    value -- not a fresh uuidgen call -- is what reaches the wrapped command on every retry
+    attempt, which is exactly the property issue #73/AC1 relies on to make retries
+    idempotent server-side. Reproduces the wrapper's real retry path (transient failure ->
+    orca status ready -> identical re-exec) rather than asserting on the SKILL.md prose."""
+    if shutil.which(shell) is None:
+        pytest.skip(f"{shell} not on PATH")
+    stubs = {
+        "orca": """
+            #!/usr/bin/env bash
+            [ "$1" = "status" ] && echo '{"state":"ready"}' && exit 0
+            exit 1
+        """,
+        "real-cmd": """
+            #!/usr/bin/env bash
+            # record every --retry-request value this invocation was called with
+            for a in "$@"; do
+              if [ "$prev" = "--retry-request" ]; then echo "$a" >> "$SEEN_FILE"; fi
+              prev="$a"
+            done
+            count=0
+            [ -f "$COUNTER_FILE" ] && count="$(cat "$COUNTER_FILE")"
+            count=$((count + 1))
+            echo "$count" > "$COUNTER_FILE"
+            if [ "$count" -eq 1 ]; then
+              echo "Could not connect to the running Orca app. Restart Orca and try again." >&2
+              exit 1
+            fi
+            exit 0
+        """,
+    }
+    counter_file = tmp_path / "counter"
+    seen_file = tmp_path / "seen"
+    # mimic a caller's real call-site: id expanded once via command substitution, at
+    # construction time, exactly as skills/*/SKILL.md's proposed edits do
+    result, home = _run(
+        tmp_path,
+        stubs,
+        'orca_call_with_retry "test-skill" "test-role" -- '
+        'real-cmd --retry-request "$(uuidgen)" --json',
+        extra_env={
+            "COUNTER_FILE": str(counter_file),
+            "SEEN_FILE": str(seen_file),
+            "ORCA_RETRY_POLL_INTERVAL": "0",
+            "ORCA_RETRY_POLL_MAX": "1",
+        },
+        shell=shell,
+    )
+    assert result.returncode == 0
+    seen = seen_file.read_text().splitlines()
+    assert len(seen) == 2, f"expected real-cmd invoked twice (initial + 1 retry), got {seen}"
+    assert seen[0] == seen[1], (
+        f"--retry-request value changed across the retry cycle: {seen[0]!r} != {seen[1]!r}"
+    )
+    assert seen[0] != "", "--retry-request value must not be empty"

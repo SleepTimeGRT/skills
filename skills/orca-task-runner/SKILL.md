@@ -82,7 +82,7 @@ description: Use when generating the implementation for one task (issue) — pro
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 spec_text="<subtask 본문 + 아래 필수 항목>"
 orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
-  orca orchestration task-create --spec "$spec_text" --deps '["task_xxx"]' --json
+  orca orchestration task-create --spec "$spec_text" --deps '["task_xxx"]' --retry-request "$(uuidgen)" --json
 # spec_text 사이드카(로그 아님 — 일회성 핸드오프 파일) — logging.md §2의 sent 레시피는 "task-create
 # --spec에 쓴 텍스트와 동일한 문자열"을 요구하는데, 그 원문을 코디네이터가 실제로 들고 있는 시점은
 # 지금뿐이다(§5 dispatch는 몇 wave, 잠재적으로 긴 시간 뒤). 이 시점엔 아직 dispatch 대상 handle을
@@ -165,7 +165,7 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
 spec_sidecar="$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"   # §2에서 남긴 사이드카
 spec_text="$(cat "$spec_sidecar")"   # 지금 재구성하지 않는다 — §2에서 남긴 원문 그대로
 orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
-  orca orchestration worker-start --task <task_id> --worktree active --terminal <impl_handle> --run "$RUN_ID" --from <자기 handle> --json   # wave 크기만큼 병렬 — 상한 임시 해제, §3 참고
+  orca orchestration worker-start --task <task_id> --worktree active --terminal <impl_handle> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json   # wave 크기만큼 병렬 — 상한 임시 해제, §3 참고
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43, positive-confirmation
 # 방식으로 issue #58에서 교체 — worker-start에도 동일하게 필요: stage:"input_accepted"는 실제 제출을
 # 보장하지 않는다, 실측): 15초 뒤 재-read해서 $spec_text 앞부분이 tail에서 확인 안 되면 Enter만
