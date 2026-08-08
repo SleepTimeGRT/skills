@@ -112,7 +112,23 @@ printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<epic-num>
 
 ## 2. Task 경로
 
-**2a. Contract 협상 relay** — `orca-task-runner`를 "제안서 작성" 모드로 호출(제안서 = `contract-schema.md` 스키마의 `proposal-r<n>.json`, **AC 초안 포함**) → `orca-evaluate`에 "검토" 모드로 전달(판정 = `verdict-r<n>.json`) → 반려면 다시 `orca-task-runner`에 전달. 산출물 경로는 §0의 `CONTRACT_DIR`와 라운드 번호로 결정론적이므로 **이 스킬은 파일을 읽지도, 경로를 추출하지도 않고 CONTRACT_DIR·라운드 번호만 중계**한다. 최대 2라운드, 그 이후는 `orca-task-runner`가 결정권을 가지고 진행(그대로 2b로 넘어감 — `override.json` 존재가 그 기록이다). **라운드 한도 도달 시점에** — 2b로 넘어가기 전에 — `~/.agents/orca-workflows/logging.md` §1 `outcome` 레시피대로 `outcome=CONTRACT_FINALIZED_BY_GENERATOR`, `round=<도달한 라운드 수>`를 남긴다(issue #63 — 이전엔 이 분기가 outcome 이벤트를 전혀 남기지 않아 세션마다 즉석 문자열을 만들거나 로그를 누락했다). **라운드 1에서 곧장 승인된 시점에도** — 마찬가지로 2b로 넘어가기 전에 — 같은 레시피대로 `outcome=CONTRACT_APPROVED_ROUND1`, `round=1`을 남긴다(issue #69 — 이전엔 이 분기가 outcome 이벤트를 생략하거나 즉석 문자열을 발명했다).
+**2a. Contract 협상 relay** — `orca-task-runner`를 "제안서 작성" 모드로 호출(제안서 = `contract-schema.md` 스키마의 `proposal-r<n>.json`, **AC 초안 포함**) → `orca-evaluate`에 "검토" 모드로 전달(판정 = `verdict-r<n>.json`) → 반려면 다시 `orca-task-runner`에 전달. 산출물 경로는 §0의 `CONTRACT_DIR`와 라운드 번호로 결정론적이므로 **이 스킬은 파일을 읽지도, 경로를 추출하지도 않고 CONTRACT_DIR·라운드 번호만 중계**한다. 최대 2라운드, 그 이후는 `orca-task-runner`가 결정권을 가질 수 있다(`override.json` 존재가 그 기록이다) — 단 무조건 2b로 가는 것이 아니다. **라운드 한도 도달 시점에** — 2b로 넘어가기 전에 — 다음 기계적 분기를 먼저 태운다(구조 필드 1개 추출이라 "diff/report 본문을 읽지 않는다" 원칙과 충돌하지 않는다 — dispatch-verify의 불투명 비교와 같은 결):
+
+```bash
+if [ ! -f "<CONTRACT_DIR>/override.json" ]; then
+  # 라운드 한도에 도달했는데 override.json이 없다 — generator가 §1의 기록 계약을 어긴 것.
+  # 기록 없는 진행을 허용하지 않는다(fail-closed): outcome=CONTRACT_ESCALATE로 남기고 "3. Inspecting"으로.
+elif jq -e '[.unresolved_reasons[].target] | index("ac_fidelity")' "<CONTRACT_DIR>/override.json" >/dev/null; then
+  # AC 자체("무엇을 만들지")에 이견이 남음 — 생성 비용을 쓰기 전에 사람에게 보낸다.
+  # logging.md §1 outcome 레시피대로 outcome=CONTRACT_ESCALATE, round=<도달한 라운드 수>를 남기고
+  # 2b 없이 곧장 "3. Inspecting"으로.
+else
+  # plan_coverage 이견만 남음 — 검증 방법 이견은 §3 리뷰·e2e가 최종 AC 기준으로 재검증하므로 진행.
+  # logging.md §1 outcome 레시피대로 outcome=CONTRACT_FINALIZED_BY_GENERATOR,
+  # round=<도달한 라운드 수>를 남기고 2b로 (issue #63 — 이전엔 이 분기가 outcome 이벤트를 전혀
+  # 남기지 않아 세션마다 즉석 문자열을 만들거나 로그를 누락했다).
+fi
+``` **라운드 1에서 곧장 승인된 시점에도** — 마찬가지로 2b로 넘어가기 전에 — 같은 레시피대로 `outcome=CONTRACT_APPROVED_ROUND1`, `round=1`을 남긴다(issue #69 — 이전엔 이 분기가 outcome 이벤트를 생략하거나 즉석 문자열을 발명했다).
 
 **"호출"의 실체**: `orca-task-runner`/`orca-evaluate`는 이 스킬(orca-workflow)과 같은 세션에서 도는 게 아니라, 각각 orchestration으로 별도 터미널을 띄워서 넘기는 것이다 — 그래야 이 스킬이 "diff나 report 본문을 직접 읽지 않는다"는 원칙이 실제로 지켜진다.
 
@@ -210,11 +226,11 @@ log_dispatch --skill "orca-workflow" --role "contract-round" --issue "<issue-num
   최대 1시간 — 최악의 경우 약 3시간) `completed`가 안 되면 체크포인트 — 재진단하지 않고
   `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차로.
 
-**2b. Generate** — `orca-task-runner` 호출, 결과로 **task 전체 diff 경로** 또는 **`GATE_FAIL`**을 받는다(`orca-task-runner`가 자기 task-레벨 게이트를 재시도 한도(2회) 안에 못 넘긴 경우 — `skills/orca-task-runner/SKILL.md` §6).
+**2b. Generate** — `orca-task-runner` 호출, 결과로 **task 전체 diff 경로** 또는 **`GATE_FAIL`**을 받는다(`orca-task-runner`가 자기 task-레벨 게이트를 재시도 한도(2회) 안에 못 넘긴 경우 — `skills/orca-task-runner/SKILL.md` §6). §2d의 FAIL 재시도로 돌아온 호출이면 spec에 직전 attempt 번호를 넣는다 — generator가 `CONTRACT_DIR`의 `eval-report-a<attempt>.json`을 직접 읽는다(이 스킬은 feedback 본문을 중계하지 않는다).
 
 **2b-1. GATE_FAIL 라우팅** — `orca-evaluate`를 호출하지 않고 바로 **3. Inspecting**으로 간다. `orca-task-runner`가 이미 자기 재시도 예산을 다 썼으므로 여기서 추가 재시도를 걸지 않는다(이중 카운팅 방지). Inspecting 보고에 "evaluate 호출 안 됨(GATE_FAIL) — 기계적 게이트 실패"를 명시해 아래 FAIL/ESCALATE와 구분한다. 이때도 §2d의 outcome 로그 라인을 `outcome:"GATE_FAIL"`로 남긴다(§2d를 거치지 않으므로 여기서 직접).
 
-**2c. Evaluate** — (§2b가 diff 경로를 반환했을 때만) `orca-evaluate` 호출(diff 경로 전달), PASS / FAIL / ESCALATE 중 하나를 결과로 받는다.
+**2c. Evaluate** — (§2b가 diff 경로를 반환했을 때만) `orca-evaluate` 호출(diff 경로 + attempt 번호 전달 — attempt는 1부터, FAIL 재시도마다 +1), PASS / FAIL / ESCALATE 중 하나를 결과로 받는다. evaluator는 판정을 `CONTRACT_DIR`의 `eval-report-a<attempt>.json`으로도 남긴다(스키마는 `contract-schema.md` — 이 스킬은 그 파일을 읽지 않는다).
 
 **2d. 라우팅**:
 - PASS → PR 생성/보강, merge, issue 종료(§2b가 반환하는 건 diff 경로일 뿐 PR이 아니므로 이 단계에서 처음 PR을 만들거나 기존 PR을 찾아 보강한다):
@@ -327,7 +343,7 @@ log_dispatch --skill "orca-workflow" --role "contract-round" --issue "<issue-num
   머지 성공 시(둘 중 어느 분기든) **`is_open(task-issue-num)`이 true면 `close_issue(task-issue-num, "Merged via PR #$pr_num")`를 호출**한다 — 코드호스팅(PR 머지)은 GitHub 전용이라 미변경이고, issue 종료는 트래커 무관하게 이 한 경로로 처리된다: GitHub는 위 `link_pr_for_close`가 보통 이미 닫아둬서 여기선 안전망(no-op)이고, Jira 등 merge-magic이 없는 트래커는 이 호출이 유일한 종료 경로다. (`is_open`/`close_issue`/`link_pr_for_close`는 실제 셸 커맨드가 아니라 tracker adapter 오퍼레이션이다 — 문자 그대로 셸에 붙여넣지 말 것.)
 
   task 종료(premerge.sh가 있고 실패한 경우는 예외 — 아래 PREMERGE_FAIL 참고, task 종료가 아니라 inspecting으로 간다).
-- FAIL → 재시도 카운터 확인. **2회 미만이면** feedback과 함께 `orca-task-runner`에 재-dispatch(2b로). **2회 도달하면** inspecting으로.
+- FAIL → 재시도 카운터 확인. **2회 미만이면** `orca-task-runner`에 재-dispatch(2b로 — spec에 방금 FAIL한 attempt 번호만 넣는다; feedback 정본은 `eval-report-a<attempt>.json`이고 generator가 직접 읽는다, §2a 라운드 2+ relay와 같은 원칙). **2회 도달하면** inspecting으로.
 - ESCALATE → 재시도 카운트 무관하게 즉시 inspecting.
 - PREMERGE_FAIL → (PASS 라우팅 안에서만 발생 — 위 참고) 추가 재시도 없이 즉시 inspecting. `orca-evaluate`는 이미 PASS를 냈으므로 재-dispatch 대상이 아니다 — merge 직전 게이트가 별도로 막은 것.
 - PREMERGE_TIMEOUT → (PASS 라우팅 안에서만 발생, PREMERGE_FAIL과 같은 위치) premerge 게이트가 budget
@@ -339,7 +355,7 @@ log_dispatch --skill "orca-workflow" --role "contract-round" --issue "<issue-num
 
 ## 3. Inspecting
 
-사람 체크포인트. 보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/PREMERGE_FAIL/PREMERGE_TIMEOUT/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **PREMERGE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 merge 직전 게이트에서 막혔다는 뜻이므로, premerge.sh의 exit code와 그 의미(대상 repo `scripts/premerge.sh`의 헤더 주석에서 디코드한다 — 그 헤더 주석이 정본이고, 표를 이 스킬에 복제하지 않는다), 마지막 출력 몇 줄을 그대로 표시한다 — 사람이 그 의미를 다시 유추하지 않게. **PREMERGE_TIMEOUT**은 게이트 명령이 budget 안에 자기 판정 라인을 내지 못했다는 뜻이므로(코드 실패가 아니라 실행 실패), premerge_log 경로와 그 마지막 몇 줄, 그리고 (아직 살아있을 수 있는) 백그라운드 프로세스를 사람이 직접 확인해야 한다는 점을 표시한다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음). 이 outcome은 §2d를 거치지 않고 발생하므로(GATE_FAIL과 같은 이유), 발생 시점에서 즉시 위 outcome 로그 라인을 해당 outcome 값으로 직접 남긴다. 사람이 고를 수 있는 것: 계속(피드백 반영해 재시도) / 재계획(요구사항 자체를 다시 논의 — 1a 또는 issue 수정으로 복귀) / 중단.
+사람 체크포인트. 보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/CONTRACT_ESCALATE/PREMERGE_FAIL/PREMERGE_TIMEOUT/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **CONTRACT_ESCALATE**는 contract 협상이 라운드 한도에도 `ac_fidelity` 이견으로 끝났다는 뜻이다 — 코드 생성 전이므로 diff가 없다. `override.json`의 `unresolved_reasons`를 그대로 표시한다(무엇을 만들지에 대한 generator/evaluator의 이견 — 사람이 issue를 명확히 하거나 방향을 정한다). §2a의 fail-closed 분기(override.json 자체가 없음)로 온 경우면 이견 내용 대신 그 사실 — generator가 기록 없이 라운드 한도에 도달함 — 을 표시한다. **PREMERGE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 merge 직전 게이트에서 막혔다는 뜻이므로, premerge.sh의 exit code와 그 의미(대상 repo `scripts/premerge.sh`의 헤더 주석에서 디코드한다 — 그 헤더 주석이 정본이고, 표를 이 스킬에 복제하지 않는다), 마지막 출력 몇 줄을 그대로 표시한다 — 사람이 그 의미를 다시 유추하지 않게. **PREMERGE_TIMEOUT**은 게이트 명령이 budget 안에 자기 판정 라인을 내지 못했다는 뜻이므로(코드 실패가 아니라 실행 실패), premerge_log 경로와 그 마지막 몇 줄, 그리고 (아직 살아있을 수 있는) 백그라운드 프로세스를 사람이 직접 확인해야 한다는 점을 표시한다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음). 이 outcome은 §2d를 거치지 않고 발생하므로(GATE_FAIL과 같은 이유), 발생 시점에서 즉시 위 outcome 로그 라인을 해당 outcome 값으로 직접 남긴다. 사람이 고를 수 있는 것: 계속(피드백 반영해 재시도) / 재계획(요구사항 자체를 다시 논의 — 1a 또는 issue 수정으로 복귀) / 중단.
 
 ## 폴백
 

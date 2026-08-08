@@ -63,7 +63,7 @@ Extra fields (`wave_index`, `subtask_type`, `advisor`, ...) are added per call s
 **`outcome`** (`orca-workflow` only — routing result for a task). 값은 두 축으로 나뉜다 — 둘 다 같은
 `outcome` JSON 필드에 담기지만 의미가 다르므로 구분해서 읽는다:
 
-- **verdict 축** — task 라우팅 판정: `PASS`|`FAIL`|`ESCALATE`|`GATE_FAIL`|`PREMERGE_FAIL`
+- **verdict 축** — task 라우팅 판정: `PASS`|`FAIL`|`ESCALATE`|`GATE_FAIL`|`CONTRACT_ESCALATE`|`PREMERGE_FAIL`
 - **진행-분기 축** — 판정이 아니라 정상적인 워크플로 상태 전이:
   `NO_DONE_TRANSITION`|`CONTRACT_FINALIZED_BY_GENERATOR`|`CONTRACT_APPROVED_ROUND1`|
   `MANUAL_RECOVERY_COMPLETED`|`PREMERGE_TIMEOUT`|`RETRO_DONE`|`RETRO_FAIL`
@@ -71,7 +71,7 @@ Extra fields (`wave_index`, `subtask_type`, `advisor`, ...) are added per call s
 ```bash
 install -d -m 700 ~/.local/state/orca-workflows/logs
 target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
-printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|PREMERGE_FAIL|NO_DONE_TRANSITION|CONTRACT_FINALIZED_BY_GENERATOR|CONTRACT_APPROVED_ROUND1|MANUAL_RECOVERY_COMPLETED|PREMERGE_TIMEOUT|RETRO_DONE|RETRO_FAIL>","retry":<n>}\n' \
+printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|CONTRACT_ESCALATE|PREMERGE_FAIL|NO_DONE_TRANSITION|CONTRACT_FINALIZED_BY_GENERATOR|CONTRACT_APPROVED_ROUND1|MANUAL_RECOVERY_COMPLETED|PREMERGE_TIMEOUT|RETRO_DONE|RETRO_FAIL>","retry":<n>}\n' \
   "$(date -u +%FT%TZ)" >> "$target"
 chmod 600 "$target"
 ```
@@ -85,11 +85,18 @@ retro 사이트)만 쓴다. `RETRO_DONE` 라인은 per-call-site 추가 필드 �
 정수 카운트를 더해 남기고, `RETRO_FAIL` 라인은 카운트 필드를 생략한다.
 
 `CONTRACT_FINALIZED_BY_GENERATOR`는 계약 협상(orca-task-runner ↔ orca-evaluate) 라운드 한도에 도달해
-task-runner(generator) 쪽 결정이 그대로 확정된 경우다 — PASS/FAIL/ESCALATE 어느 것도 아닌 정상 분기이므로,
+task-runner(generator) 쪽 결정이 그대로 확정된 경우다(라운드 한도 도달이 곧 이 값은 아니다 —
+`ac_fidelity` 이견이 남았으면 아래 `CONTRACT_ESCALATE`로 간다) — PASS/FAIL/ESCALATE 어느 것도 아닌 정상 분기이므로,
 이 결과에 도달했을 때 outcome 이벤트 자체를 생략하지 말고 반드시 이 값으로 남긴다(observed in practice:
 issue #62). 이 라인은 per-call-site 추가 필드 규칙에 따라 `round`(도달한 계약 협상 라운드 수)를 더해
 남긴다 — `retry`는 §2 하단의 task-level FAIL 재-dispatch 횟수를 세는 별개 필드이므로, 라운드 수를 `retry`에
 넣지 않는다.
+
+`CONTRACT_ESCALATE`는 contract 협상이 라운드 한도에 도달했고 `override.json`의 `unresolved_reasons`에
+`ac_fidelity` target이 남아, 코드 생성(2b) 없이 곧장 Inspecting으로 보낸 경우다(`orca-workflow` §2a의
+기계적 분기 — `contract-schema.md`의 override 라우팅 규칙 참고). 같은 라운드-한도 지점의 다른 갈래인
+`CONTRACT_FINALIZED_BY_GENERATOR`(`plan_coverage`만 남은 경우, 진행)와 상호 배타다. 이 라인은
+per-call-site 추가 필드 규칙에 따라 `round`(도달한 라운드 수)를 더해 남긴다.
 
 `CONTRACT_APPROVED_ROUND1`는 contract 협상이 라운드 1에서 곧장 승인되어 재협상 없이 2b(Generate)로
 넘어가는 정상 분기다 — PASS/FAIL/ESCALATE 어느 것도 아니므로 outcome 이벤트를 생략하지 말고 이 값으로

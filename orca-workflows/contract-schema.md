@@ -1,8 +1,10 @@
 # Contract Negotiation Schema
 
-Shared reference for `orca-workflow`(§2a relay), `orca-task-runner`(§1), `orca-evaluate`(§1).
-Defines the on-disk artifacts the contract round exchanges. The coordinator relays the directory
-path and round number only; generator and evaluator read/write these files directly.
+Shared reference for `orca-workflow`(§2a relay, §2d FAIL relay), `orca-task-runner`(§1, §7),
+`orca-evaluate`(§1, §4). Defines the on-disk artifacts the contract lifecycle exchanges — 협상
+라운드(proposal/verdict/override)와 이행 평가(eval-report) 둘 다. The coordinator relays the
+directory path and round/attempt numbers only; generator and evaluator read/write these files
+directly.
 
 ## Directory
 
@@ -28,6 +30,7 @@ install -d -m 700 "$CONTRACT_DIR"
 | `proposal-r<n>.json` | orca-task-runner (generator) | 라운드 n 제안 |
 | `verdict-r<n>.json` | orca-evaluate (evaluator) | 라운드 n 판정 |
 | `override.json` | orca-task-runner | 2라운드에도 rejected일 때 결정권 행사 기록 |
+| `eval-report-a<k>.json` | orca-evaluate (evaluator) | 구현 attempt k의 평가 판정 기록 |
 
 ## proposal-r&lt;n&gt;.json
 
@@ -94,6 +97,43 @@ install -d -m 700 "$CONTRACT_DIR"
 - 2라운드에도 rejected일 때만 존재한다. evaluator의 verdict 파일은 수정하지 않는다 — 판정은
   rejected로 남고, 진행 결정만 여기 기록된다. `unresolved_reasons`는 `verdict-r2.json`의
   `reasons` 중 generator가 해소하지 못한 항목을 그대로 복사한다.
+- **override의 라우팅은 무조건 진행이 아니다** — 코디네이터(`orca-workflow` §2a)가 이 파일의
+  `unresolved_reasons[].target`만 기계적으로 확인해 분기한다: `ac_fidelity`가 하나라도 남아 있으면
+  "무엇을 만들지" 자체에 이견이 남은 것이므로 코드 생성 없이 human escalate(`CONTRACT_ESCALATE`),
+  `plan_coverage`만 남았으면 검증 방법 이견일 뿐이므로 진행(그 항목은 `orca-evaluate` §3 리뷰어의
+  집중 검토 입력이 된다). 숫자 임계치가 아니라 target 범주가 기준이다.
+
+## eval-report-a&lt;k&gt;.json
+
+구현이 끝난 뒤 `orca-evaluate` §4가 합성한 판정의 기계적 기록이다. `<k>`는 evaluate **attempt**
+번호(1부터 — attempt 1이 최초 평가, FAIL 재-dispatch 후의 재평가가 attempt 2, 3). 협상 라운드
+`r<n>`과는 별개 카운터다.
+
+```json
+{
+  "schema_version": 1,
+  "issue": "<issue id>",
+  "run_id": "<orchestration run id>",
+  "attempt": 1,
+  "verdict": "FAIL",
+  "findings": [ {"severity": "critical", "finding": "<결함 서술>", "evidence": "<file:line 또는 e2e 관찰>", "fix_direction": "<수정 방향>"} ]
+}
+```
+
+- `verdict`: `"PASS"` | `"FAIL"` | `"ESCALATE"` — `orca-workflow`에 반환하는 값과 반드시 일치한다.
+- `findings[].severity`: `"critical"` | `"important"` | `"minor"`.
+- **불변식**: `"FAIL"`이면 `findings`는 비어 있을 수 없고, `"PASS"`면 `critical`/`important`
+  finding이 없어야 한다.
+- **이 파일이 FAIL feedback의 정본이다.** 경로가 `CONTRACT_DIR`와 attempt 번호로 결정론적이므로
+  코디네이터는 attempt 번호만 중계하고 본문을 요약·중계하지 않는다 — 재-dispatch된 generator가
+  직접 읽는다(협상 라운드 2+의 verdict 전달과 같은 원칙).
+
+## 재시도 입력 격리 (evaluate attempt 2+)
+
+attempt 2+의 리뷰 입력에 추가되는 것은 **자신의 직전 `eval-report-a<k-1>.json`의 findings**뿐이다
+(지적 항목이 실제 수정됐는지 확인용 — 협상 라운드 2가 자신의 `verdict-r1.json`을 입력으로 받는
+것과 동일). generator의 수정 요약·서술형 해명은 입력에 넣지 않는다 — 판정을 바꾸는 근거는 diff의
+사실 변화뿐이다("라운드 2 입력 격리"와 같은 근거, arXiv:2509.16533).
 
 ## 확정 AC의 정본
 
