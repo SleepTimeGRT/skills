@@ -95,6 +95,28 @@ rejected disabling auto-update and required self-recovery instead — "자동 �
 `orca_call_with_retry.sh`'s regex didn't cover) — treat it as the running example of this principle, not a
 closed case to imitate blindly.
 
+### Prefer Orca's current recommended mechanism over ad-hoc CLI composition
+
+Before implementing any orca-* skill behavior — waiting on a worker, reading its output, retrying,
+cleaning up a terminal, or any other operation — load the current guide (`orca skills get <name>`, `--help`,
+or `agent-context --json`) for that exact operation and use whatever it documents as the primary/composed
+path. Do not substitute a lower-level primitive (raw `terminal read`, `terminal wait --for tui-idle`, manual
+`terminal send`) just because it is more familiar or already at hand. When a documented command names its
+own fallback (e.g. `worker-read`'s hook-based transcript degrading to a `terminal` source), treat the
+fallback as evidence the primary path carries guarantees the fallback does not — using the fallback by
+default forfeits those guarantees, it does not substitute for them.
+
+When Orca's version changes, do not assume a skill's existing behavior or workaround still reflects Orca's
+current recommended path. Re-check whether a newer, more direct mechanism now exists for that operation —
+Orca's own CLI help, `skills get`, and changelog are the source of truth, not memory of a prior version's
+limitations — and adapt the skill's structure to match, rather than carrying forward a workaround built for
+a capability gap that may have since closed.
+
+**Orca CLI baseline**: the orca-* skills in this repo, and the principles above, were last verified against
+Orca app version 1.4.176. Check `orca status --json`'s `runtime.appVersion` against this number before
+trusting any Orca-specific mechanism claim here as still accurate — a mismatch means the claim needs
+re-verification against the current version's own `skills get`/`--help` output, not blind reuse.
+
 ## Repository operations
 
 - Do not run deploy, release, migration, seed, wipe, or other external-write commands merely to measure output.
