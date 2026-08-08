@@ -42,8 +42,13 @@
 # succeeds server-side but the client observes a non-zero exit whose output happens to contain one
 # of the broadened keywords, a retry can duplicate the task/dispatch — a pre-existing risk (it
 # already existed for the two original literals) that this broadening widens the surface of,
-# without introducing it. No idempotency safeguard (client-request-id, dedupe) was found for these
-# calls in this repo. Auditing and fixing that is issue #73, deliberately not addressed here.
+# without introducing it. `task-create`/`dispatch`/`worker-start` support a `--retry-request <id>`
+# flag with confirmed server-side dedupe (same key replayed returns `mutation.replayed: true` and
+# the same resulting id) — callers that want this call idempotent supply a stable id in the wrapped
+# command's own argument vector (this function stays opaque to it; see the three SKILL.md families'
+# call sites, `skills/` scope only — `orca-workflows/self-recovery.md`'s unwrapped `worker-start
+# --retry-of` call is a separate, already-intentional retry-lineage mechanism and is out of this
+# note's scope). `terminal create` has no `--retry-request` flag and remains unprotected.
 
 _ORCA_RETRY_SIGNATURE_RE='Could not connect to the running Orca app|Orca is not running\. Run .orca open. first|not running|could not connect|reconnect|bootstrap'
 

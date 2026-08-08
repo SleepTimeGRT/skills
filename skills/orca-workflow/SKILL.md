@@ -94,9 +94,9 @@ orca_call_with_retry "orca-workflow" "retro" -- \
 orca terminal wait --terminal <retro-handle> --for tui-idle --timeout-ms 60000 --json
 spec_text="<orca-retro SKILL.md 지침 + epic 번호 + child 목록 + 대상 repo + skills repo(sleeptimegrt-skills) slug>"
 orca_call_with_retry "orca-workflow" "retro" -- \
-  orca orchestration task-create --spec "$spec_text" --json
+  orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow" "retro" -- \
-  orca orchestration dispatch --task <task_id> --to <retro-handle> --inject --json
+  orca orchestration dispatch --task <task_id> --to <retro-handle> --retry-request "$(uuidgen)" --inject --json
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43).
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로, dispatch와 같은 블록에서 즉시:
 #  §1 assign 이벤트: role="retro", issue=<epic-num>, task_id=<task_id>, provider/model/effort=resolved 값,
@@ -131,9 +131,9 @@ orca_call_with_retry "orca-workflow" "task-runner" -- \
   --command "<provider의 launch 문법 — provider 문서에서 resolve>" --json
 spec_text="<issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 제안서/구현 모드 + worker_done을 포함해 네가 보내는 orca orchestration/orca terminal 호출은 항상 orca_call_with_retry로 감싸고(issue #42), wrapper가 exhausted를 반환하면 ask를 포함한 추가 orchestration 호출을 시도하지 말고(같은 죽은 transport) 즉시 사람에게 알리지 말고 .orca-orphaned-result-<task_id>.json에 결과를 저장(커밋 금지)한 뒤 터미널에 ORPHANED_RESULT <task_id> <파일 절대경로> 한 줄을 출력하고 멈추라는 지시(orca-task-runner SKILL.md subtask spec 항목 ⑦과 동일 계약)>"
 orca_call_with_retry "orca-workflow" "task-runner" -- \
-  orca orchestration task-create --spec "$spec_text" --json
+  orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow" "task-runner" -- \
-  orca orchestration dispatch --task <task_id> --to <run-handle> --inject --json
+  orca orchestration dispatch --task <task_id> --to <run-handle> --retry-request "$(uuidgen)" --inject --json
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43, positive-confirmation
 # 방식으로 issue #58에서 교체): 15초 뒤 재-read해서 $spec_text 앞부분이 tail에서 확인 안 되면 Enter만
 # 재전송, 그래도 확인 안 되면 spawn-failures.md로. 이 확인은 자기가 주입한 문자열의 존재만 보는
@@ -161,9 +161,9 @@ orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 6000
 # 절차를 따른다(agy 전용 시퀀스를 여기서 가정하지 않는다).
 spec_text="<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문 + issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 요청 모드 + worker_done을 포함해 네가 보내는 orca orchestration/orca terminal 호출은 항상 orca_call_with_retry로 감싸고(issue #42), wrapper가 exhausted를 반환하면 ask를 포함한 추가 orchestration 호출을 시도하지 말고(같은 죽은 transport) 즉시 사람에게 알리지 말고 .orca-orphaned-result-<task_id>.json에 결과를 저장(커밋 금지)한 뒤 터미널에 ORPHANED_RESULT <task_id> <파일 절대경로> 한 줄을 출력하고 멈추라는 지시(orca-task-runner SKILL.md subtask spec 항목 ⑦과 동일 계약)>"
 orca_call_with_retry "orca-workflow" "evaluator" -- \
-  orca orchestration task-create --spec "$spec_text" --json
+  orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow" "evaluator" -- \
-  orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
+  orca orchestration dispatch --task <task_id> --to <evaluate-handle> --retry-request "$(uuidgen)" --inject --json
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43, positive-confirmation
 # 방식으로 issue #58에서 교체): 15초 뒤 재-read해서 $spec_text 앞부분이 tail에서 확인 안 되면 Enter만
 # 재전송, 그래도 확인 안 되면 spawn-failures.md로. (이 이슈의 실제 발생 사례가 바로 이 dispatch 대상
@@ -200,10 +200,10 @@ orca_call_with_retry "orca-workflow" "contract-round" -- \
 # 본문은 읽지 않고 경로만 중계한다는 원칙은 여기서도 유지된다.
 spec_text="<round 번호 + 위에서 읽은 reportPath + (evaluator→task-runner 방향이면) 반려 사유 요약 + worker_done을 포함해 네가 보내는 orca orchestration/orca terminal 호출은 항상 orca_call_with_retry로 감싸고(issue #42), wrapper가 exhausted를 반환하면 ask를 포함한 추가 orchestration 호출을 시도하지 말고(같은 죽은 transport) 즉시 사람에게 알리지 말고 .orca-orphaned-result-<task_id>.json에 결과를 저장(커밋 금지)한 뒤 터미널에 ORPHANED_RESULT <task_id> <파일 절대경로> 한 줄을 출력하고 멈추라는 지시(orca-task-runner SKILL.md subtask spec 항목 ⑦과 동일 계약)>"
 orca_call_with_retry "orca-workflow" "contract-round" -- \
-  orca orchestration task-create --spec "$spec_text" --json
+  orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow" "contract-round" -- \
   orca orchestration worker-start --task <방금 만든 task_id> --worktree current \
-  --terminal <재-engage 대상 handle> --run "$RUN_ID" --from <자기 handle> --json
+  --terminal <재-engage 대상 handle> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(worker-start에도 동일하게 필요).
 # 로그 — logging.md §1 assign + §2 meta/sent를 log_dispatch()가 한 호출로 원자적으로 기록한다(issue #68).
 #   task_id가 실제 존재하므로(매 라운드 새 task-create) §1의 relay:true/omit 규칙은 이 사이트엔 적용되지

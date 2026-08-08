@@ -737,6 +737,81 @@ def test_orca_call_with_retry_count_per_skill(name, expected):
     assert actual == expected, f"{name}: expected {expected} orca_call_with_retry invocations, found {actual}"
 
 
+EXPECTED_RETRY_REQUEST_COUNTS = {
+    "orca-workflow": 8,
+    "orca-task-runner": 2,
+    "orca-evaluate": 6,
+}
+
+_RETRY_REQUEST_MUTATING_CALL_RE = re.compile(
+    r"orca orchestration (?:task-create|dispatch|worker-start)\b[^\n]*"
+    r"(?:\n[ \t]+--[^\n]*)*",  # command may continue on wrapped `\`-continuation lines
+)
+
+
+@pytest.mark.parametrize(("name", "expected"), EXPECTED_RETRY_REQUEST_COUNTS.items())
+def test_mutating_call_sites_carry_retry_request(name, expected):
+    """AC2: every task-create/dispatch/worker-start invocation must embed its own
+    --retry-request "$(uuidgen)" so the server can dedupe a client-side spurious retry
+    (issue #73). Scoped to the three flags that --help confirms support it -- terminal create
+    does not and is asserted absent below, not required here."""
+    text = _read_skill(name)
+    calls = _RETRY_REQUEST_MUTATING_CALL_RE.findall(text)
+    assert len(calls) == expected, (
+        f"{name}: expected {expected} task-create/dispatch/worker-start call sites, found {len(calls)}"
+    )
+    missing = [c.splitlines()[0] for c in calls if "--retry-request" not in c]
+    assert missing == [], f"{name}: call site(s) missing --retry-request: {missing}"
+
+
+@pytest.mark.parametrize("name", NEW_SKILLS)
+def test_terminal_create_never_carries_retry_request(name):
+    """orca terminal create --help has no --retry-request flag (confirmed 2026-08-08) -- a
+    site that adds it anyway would silently no-op or error depending on CLI strictness, and
+    either way signals someone copy-pasted the mutating-call pattern onto the wrong command.
+    Scoped to fenced ```bash blocks via the repo's existing _BASH_FENCE_RE (same convention as
+    _bare_wrapped_call_line_numbers, tests/test_orca_skills.py:686-711) rather than a loose
+    re.S span over the whole file -- round 1's version of this test used `.*?--json` with re.S,
+    which over-matches into prose sentences that merely mention 'orca terminal create' (e.g.
+    each skill's own §0 note) and would false-positive the moment an unrelated --retry-request
+    site landed later in the same file."""
+    text = _read_skill(name)
+    for m in _BASH_FENCE_RE.finditer(text):
+        block_lines = m.group(1).splitlines()
+        for j, line in enumerate(block_lines):
+            if "orca terminal create" in line:
+                window = "\n".join(block_lines[j : j + 4])
+                assert "--retry-request" not in window, (
+                    f"{name}: 'orca terminal create' must not carry --retry-request (unsupported flag)"
+                )
+
+
+EXPECTED_DISPATCH_POSITIONS = {
+    "orca-workflow": 4,
+    "orca-task-runner": 1,
+    "orca-evaluate": 3,
+}
+
+
+@pytest.mark.parametrize(("name", "expected"), EXPECTED_DISPATCH_POSITIONS.items())
+def test_dispatch_inject_positions_not_vacuous(name, expected):
+    """Vacuity guard (round-1 rejection root cause): test_dispatch_sites_are_followed_by_*_pointer
+    iterate `_dispatch_positions(text)` and assert something about each element -- an empty list
+    makes the loop body never execute and the test passes having verified nothing. This pins the
+    per-skill count so a future edit that collapses positions to 0 (e.g. by breaking
+    _DISPATCH_INJECT_RE's `--inject --json` adjacency requirement, exactly what round 1 of this
+    proposal did before this fix) fails loudly here instead of the pointer tests going green
+    for the wrong reason. Counts match today's pre-#73 baseline exactly -- this proposal's
+    call-site edits are additive-only and must not change how many sites _DISPATCH_INJECT_RE
+    matches."""
+    text = _read_skill(name)
+    positions = _dispatch_positions(text)
+    assert len(positions) == expected, (
+        f"{name}: expected {expected} _DISPATCH_INJECT_RE match(es), found {len(positions)} "
+        f"-- a drop to 0 would make the logging/dispatch-verify pointer tests vacuously pass"
+    )
+
+
 def test_orca_workflow_documents_round2_relay_protocol():
     """Issue #64: §2a must name the actual mechanism (new task-create per round, event-driven wait
     via self-recovery.md, dispatched to the same terminal handle via worker-start) rather than

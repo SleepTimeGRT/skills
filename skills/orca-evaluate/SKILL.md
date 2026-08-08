@@ -30,9 +30,9 @@ orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 6000
 # 해당 provider가 최초 launch 시 신뢰/승인류 재프롬프트를 요구하면 그 provider 문서가 정의하는 절차를 따른다
 # (agy처럼 자동 확정 가능한 provider도 있고 아닐 수도 있다 — 여기서 agy 전용 시퀀스를 가정하지 않는다).
 orca_call_with_retry "orca-workflow" "evaluator" -- \
-  orca orchestration task-create --spec "<이 SKILL.md 지침 + diff 경로 + issue 원문 acceptance criteria + PASS/FAIL/ESCALATE 요청>" --json
+  orca orchestration task-create --spec "<이 SKILL.md 지침 + diff 경로 + issue 원문 acceptance criteria + PASS/FAIL/ESCALATE 요청>" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow" "evaluator" -- \
-  orca orchestration dispatch --task <task_id> --to <evaluate-handle> --inject --json
+  orca orchestration dispatch --task <task_id> --to <evaluate-handle> --retry-request "$(uuidgen)" --inject --json
 ```
 
 **이 세션 자체는 agy가 아니다.** agy는 §2(agent e2e)에서만, headless sub-spawn으로만 쓴다 — Gemini의 속도·비용·컴퓨터 사용 강점이 거기 맞기 때문이다(`model-selection.md`의 Computer Use / Long-Context 축, `models/agy.md` 참고). e2e·pgTAP 자체는 새로 안 들어온다 — `orca-task-runner`의 task-레벨 게이트(`skills/orca-task-runner/SKILL.md` §6)를 이미 통과한 뒤에만 이 스킬이 호출되므로 전량 신뢰한다.
@@ -53,9 +53,9 @@ orca_call_with_retry "orca-evaluate" "contract-review" -- \
 orca terminal wait --terminal <contract-handle> --for tui-idle --timeout-ms 60000 --json
 spec_text="<제안서 경로 + acceptance criteria 원문 + 승인/반려 판정 요청 + 반려 시 어느 criteria가 안 커버되는지 명시 + 판정 결과를 보낼 orchestration 호출은 orca_call_with_retry로 감싸고 연결 실패를 즉시 사람에게 알리지 말라는 지시>"
 orca_call_with_retry "orca-evaluate" "contract-review" -- \
-  orca orchestration task-create --spec "$spec_text" --json
+  orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-evaluate" "contract-review" -- \
-  orca orchestration dispatch --task <task_id> --to <contract-handle> --inject --json
+  orca orchestration dispatch --task <task_id> --to <contract-handle> --retry-request "$(uuidgen)" --inject --json
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43, positive-confirmation
 # 방식으로 issue #58에서 교체): 15초 뒤 재-read해서 $spec_text 앞부분이 tail에서 확인 안 되면 Enter만
 # 재전송, 그래도 확인 안 되면 spawn-failures.md로. §3 스폰도 동일하게 적용한다.
@@ -162,9 +162,9 @@ orca terminal wait --terminal <review-handle> --for tui-idle --timeout-ms 60000 
 # 않고 --no-codex-available로 select_reviewer.py를 다시 불러 Claude 분기로 재시도한다.
 spec_text="<diff 절대경로 + acceptance criteria 원문 + §2 agent e2e 결과 요약 + (해당 시) migration-lint 결과와 §1 destructive-op 선언 + skeptical 리뷰 지침 + report 경로 + 코드 수정 금지 + 판정 결과를 보낼 orchestration 호출은 orca_call_with_retry로 감싸고 연결 실패를 즉시 사람에게 알리지 말라는 지시>"
 orca_call_with_retry "orca-evaluate" "code-review" -- \
-  orca orchestration task-create --spec "$spec_text" --json
+  orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-evaluate" "code-review" -- \
-  orca orchestration dispatch --task <task_id> --to <review-handle> --inject --json
+  orca orchestration dispatch --task <task_id> --to <review-handle> --retry-request "$(uuidgen)" --inject --json
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43, positive-confirmation
 # 방식으로 issue #58에서 교체): 15초 뒤 재-read해서 $spec_text 앞부분이 tail에서 확인 안 되면 Enter만
 # 재전송, 그래도 확인 안 되면 spawn-failures.md로.
