@@ -116,14 +116,17 @@ install -d -m 700 "$CONTRACT_DIR"
   "run_id": "<orchestration run id>",
   "attempt": 1,
   "verdict": "FAIL",
+  "code_review_ran": true,
   "findings": [ {"severity": "critical", "finding": "<결함 서술>", "evidence": "<file:line 또는 e2e 관찰>", "fix_direction": "<수정 방향>"} ]
 }
 ```
 
 - `verdict`: `"PASS"` | `"FAIL"` | `"ESCALATE"` — `orca-workflow`에 반환하는 값과 반드시 일치한다.
 - `findings[].severity`: `"critical"` | `"important"` | `"minor"`.
+- `code_review_ran`: 이 attempt에서 §3 code review가 실제 실행됐는가. agent e2e 실패 확정으로
+  fail-fast 생략된 attempt는 `false`.
 - **불변식**: `"FAIL"`이면 `findings`는 비어 있을 수 없고, `"PASS"`면 `critical`/`important`
-  finding이 없어야 한다.
+  finding이 없어야 하며 `code_review_ran`은 `true`여야 한다(리뷰 생략 후 PASS는 위반이다).
 - **이 파일이 FAIL feedback의 정본이다.** 경로가 `CONTRACT_DIR`와 attempt 번호로 결정론적이므로
   코디네이터는 attempt 번호만 중계하고 본문을 요약·중계하지 않는다 — 재-dispatch된 generator가
   직접 읽는다(협상 라운드 2+의 verdict 전달과 같은 원칙).

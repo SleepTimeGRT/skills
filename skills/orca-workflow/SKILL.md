@@ -251,111 +251,60 @@ log_dispatch --skill "orca-workflow" --role "contract-round" --issue "<issue-num
 
   ```bash
   pr_num="$(gh pr list --head "<task-branch>" --json number -q '.[0].number')"
-  # premerge 게이트 — orca-evaluate의 PASS는 "코드가 acceptance criteria를 충족하는가"만 보고,
-  # "지금 이 브랜치를 origin/main에 얹어도 안전한가"(stale-main, gate-integrity 자기수정 여부)는
-  # 안 본다. 그건 lifecycle-gate-policy의 premerge.sh 몫이라 merge 직전에 따로 불러야 한다.
-  # 이 레포가 그 컨벤션을 아직 안 썼으면(scripts/premerge.sh 자체가 없으면) 예전처럼 바로 merge —
-  # 여기서 새로 강제하지 않는다.
-  # migration/schema 변경이 diff에 있으면 premerge가 MIGRATION_ESCALATE로 막아줄 것이라 가정하지
-  # 않는다(#45) — 그 체크는 배포된 템플릿 버전에 따라 아예 없거나(v1), 있어도 기본 꺼짐이다
-  # (opt-in MIGRATION_LINT_ENABLED). 대상 repo의 merge policy 문서(AGENTS.md 등)를 exit code와
-  # 별개로 직접 확인한 뒤에만 self-merge한다.
-  ```
-
-  ```bash
-  if [ -f scripts/premerge.sh ]; then
-    # 실행 모드(#72): premerge.sh는 이 repo의 verify+e2e 전량을 부르는 유일한 사이트라 수 분~수십
-    # 분 걸릴 수 있고, 코디네이터 harness의 단일 명령 타임아웃/무출력 킬(관측 사례 ~170초)을 넘을
-    # 수 있다. foreground 단일 명령으로 부르지 않는다 — detached로 실행해 로그 파일에 결과를 쌓고,
-    # 시작 시각도 별도 파일에 남긴다(아래 poll이 재시작돼도 elapsed를 벽시계 기준으로 정확히
-    # 이어받기 위함). 셸 상태가 명령 간 유지되지 않는 harness도 있으므로(이 launch 블록과 아래 poll
-    # 블록은 서로 다른 호출로 실행된다는 전제) 종료코드는 job 자신이 로그 파일 끝에 EXIT:<code>로
-    # 직접 적어 남기고, 로그 파일 경로도 mktemp의 무작위 접미사 대신 <issue-num>으로 결정론적으로
-    # 고정한다 — poll 블록이 셸 변수 전달 없이 같은 경로를 스스로 다시 계산할 수 있어야 하기 때문.
-    # 이 launch 블록은 딱 1번만 실행한다 — poll이 harness에 죽어 재시도가 필요해도 재실행 대상은
-    # 아래 poll 블록뿐이다. launch를 재실행하면 이전 nohup job이 아직 살아있는 채로 새 job이 같은
-    # 검증을 중복 실행한다(코드/판정에 영향은 없지만 verify+e2e 리소스 낭비이므로 피한다).
-    premerge_log="${TMPDIR:-/tmp}/premerge-<issue-num>.log"
-    rm -f "$premerge_log" "$premerge_log.started"
-    date -u +%s > "$premerge_log.started"
-    # --review-done: orca-evaluate §3의 code review가 이미 그 review 통과를 의미한다.
-    nohup bash -c '
-      bash scripts/premerge.sh --review-done > "'"$premerge_log"'" 2>&1
-      printf "EXIT:%s\n" "$?" >> "'"$premerge_log"'"
-    ' >/dev/null 2>&1 &
-    disown 2>/dev/null || true
-  fi
-  ```
-
-  ```bash
-  # poll — 이 블록만 재시도 대상이다(launch 블록은 재실행하지 않는다, 위 참고). EXIT:/budget 체크를
-  # sleep보다 먼저 하므로, job이 이미 끝났거나 budget이 이미 초과된 뒤에 재발행된 poll은 불필요한
-  # 30초 대기 없이 즉시 반환된다. 매 반복이 sleep 전에 진행 로그 1줄을 내 무출력 구간을 30초로
-  # 제한한다(라운드 1 반려 사유 수정 — harness의 무출력 kill을 이 poll 자신이 재현하지 않도록). 이
-  # poll 블록 자체가 harness에 의해 중간에 죽으면, 로그 파일의 nohup job은 살아있는 채로 계속 실행
-  # 중이므로 코디네이터는 이 블록을 그대로 다시 실행해 이어받는다 — premerge_elapsed는 로컬 변수가
-  # 아니라 매번 premerge_log.started 파일의 벽시계 타임스탬프에서 다시 계산하므로 재시작 횟수와
-  # 무관하게 실제 경과 시간을 정확히 반영한다.
-  if [ -f scripts/premerge.sh ]; then
-    premerge_log="${TMPDIR:-/tmp}/premerge-<issue-num>.log"
-    premerge_budget=1200
-    premerge_started="$(cat "$premerge_log.started")"
-    while true; do
-      grep -q '^EXIT:' "$premerge_log" 2>/dev/null && break
-      premerge_elapsed=$(( $(date -u +%s) - premerge_started ))
-      printf 'premerge poll: %ss/%ss elapsed\n' "$premerge_elapsed" "$premerge_budget"
-      [ "$premerge_elapsed" -ge "$premerge_budget" ] && break
-      sleep 30
-    done
-
-    if ! grep -q '^EXIT:' "$premerge_log" 2>/dev/null; then
-      # budget 초과, EXIT: 라인 없음 — 아직 실행 중이거나 harness가 알림 없이 죽였거나 판별 불가.
-      # PREMERGE_FAIL로 기록하지 않는다(아래 판정-라인 전제와 동일 원칙) — PREMERGE_TIMEOUT으로
-      # 기록하고 merge하지 않고 3. Inspecting으로 분기.
-      printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"PREMERGE_TIMEOUT","retry":0,"premerge_budget_s":%s,"premerge_log":"%s"}\n' \
-        "$(date -u +%FT%TZ)" "$premerge_budget" "$premerge_log" >> "$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
-    else
-      premerge_exit="$(grep '^EXIT:' "$premerge_log" | tail -1 | cut -d: -f2)"
-      # 판정 라인 전제(#72): PREMERGE_FAIL로 기록하려면 게이트 자신이 낸 판정 라인이 로그에 있어야
-      # 한다 — premerge.sh의 모든 종료 경로(PASS/FAIL/PROTECTED/REVIEW/MIGRATION_ESCALATE)는
-      # `[premerge] `로 시작하는 줄을 최소 1개 낸다(스크립트 자체 컨벤션). 이 줄이 없는 nonzero
-      # 종료(SIGKILL/SIGTERM 등 harness 개입)는 게이트 실패가 아니라 실행 실패이므로 분리한다.
-      if [ "$premerge_exit" -ne 0 ] && ! grep -q '^\[premerge\] ' "$premerge_log"; then
-        printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"PREMERGE_TIMEOUT","retry":0,"premerge_exit":%s,"premerge_log":"%s"}\n' \
-          "$(date -u +%FT%TZ)" "$premerge_exit" "$premerge_log" >> "$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
-      elif [ "$premerge_exit" -ne 0 ]; then
-        printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"PREMERGE_FAIL","retry":0,"premerge_exit":%s}\n' \
-          "$(date -u +%FT%TZ)" "$premerge_exit" >> "$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
-        # 여기서 merge하지 않는다 — gh pr merge를 건너뛰고 바로 아래 "3. Inspecting"으로 분기한다
-        # (GATE_FAIL과 같은 원칙: 여기서 추가 재시도 걸지 않음).
-        # exit code의 의미는 여기 복제하지 않는다 — 대상 repo의 scripts/premerge.sh 헤더 주석이 정본이다
-        # (복제한 표가 배포본 구현과 어긋난 실측: #45). Inspecting 보고에 이 exit code + 그 헤더에서
-        # 디코드한 의미 + 마지막 stderr 몇 줄을 그대로 첨부한다.
-      else
-        gh pr merge "$pr_num" --squash --delete-branch
-      fi
+  # merge — stale-main·게이트-무결성 검증은 이 스킬이 하지 않는다:
+  # 그 검증은 대상 repo의 CI required check(e2e gate)와 branch protection 설정(required check 지정 +
+  # "Require branches to be up to date" 또는 merge queue) 몫이다. 그 설정이 없는 repo에서는 이 merge가
+  # 추가 검증 없이 통과한다 — 이 스킬이 임의로 로컬 게이트를 되살리지 않는다.
+  # 아래 루프는 required check가 있는 repo에서 merge가 거부되는 경우의 bounded 처리다. 재시작 안전:
+  # budget 기준 시각은 로컬 변수가 아니라 파일의 벽시계 값이다(#72 — harness의 단일 명령 타임아웃/
+  # 무출력 kill로 이 블록이 도중에 죽어도, 그대로 다시 실행해 벽시계 기준으로 이어받는다).
+  merge_started_file="${TMPDIR:-/tmp}/merge-<issue-num>.started"
+  [ -f "$merge_started_file" ] || date -u +%s > "$merge_started_file"
+  merge_budget=1800   # CI e2e 완주까지 기다릴 수 있는 예산
+  merged=false; merge_outcome=""
+  while :; do
+    if gh pr merge "$pr_num" --squash --delete-branch; then merged=true; break; fi
+    state="$(gh pr view "$pr_num" --json mergeStateStatus -q .mergeStateStatus)"
+    if [ "$state" = "DIRTY" ]; then
+      merge_outcome=MERGE_CONFLICT; break        # base와 텍스트 충돌 — 자동 해소하지 않는다
+    elif [ "$state" = "BEHIND" ]; then
+      # base가 전진 + up-to-date 강제 설정(epic 순차 merge에서 후속 task의 정상 경로) — 브랜치를
+      # 갱신하고 CI 재실행을 기다린다. 갱신 자체가 실패하면(충돌) 사람 몫이다.
+      gh pr update-branch "$pr_num" || { merge_outcome=MERGE_CONFLICT; break; }
     fi
-  else
-    gh pr merge "$pr_num" --squash --delete-branch
-  fi
+    if gh pr view "$pr_num" --json statusCheckRollup -q '.statusCheckRollup[] | (.conclusion // .state)' \
+        | grep -qiE 'failure|error|timed_out|cancelled|action_required'; then
+      merge_outcome=CI_GATE_FAIL; break          # required check 실패 확정
+    fi
+    merge_elapsed=$(( $(date -u +%s) - $(cat "$merge_started_file") ))
+    printf 'merge poll: %ss/%ss elapsed (state=%s)\n' "$merge_elapsed" "$merge_budget" "$state"
+    [ "$merge_elapsed" -ge "$merge_budget" ] && { merge_outcome=CI_GATE_TIMEOUT; break; }
+    sleep 30
+  done
+  rm -f "$merge_started_file"   # 어느 분기로 끝나든 회수
+  # merge_outcome이 비어있지 않으면 merge되지 않은 것이다 — logging.md §1 outcome 레시피대로 그 값을
+  # 남기고(GATE_FAIL과 같은 원칙: 추가 재시도 없이) 바로 "3. Inspecting"으로 분기한다. printf가 남긴
+  # 마지막 state와 실패 check 이름·링크(gh pr checks "$pr_num")를 Inspecting 보고에 첨부한다.
   ```
 
-  머지 성공 시(둘 중 어느 분기든) **`is_open(task-issue-num)`이 true면 `close_issue(task-issue-num, "Merged via PR #$pr_num")`를 호출**한다 — 코드호스팅(PR 머지)은 GitHub 전용이라 미변경이고, issue 종료는 트래커 무관하게 이 한 경로로 처리된다: GitHub는 위 `link_pr_for_close`가 보통 이미 닫아둬서 여기선 안전망(no-op)이고, Jira 등 merge-magic이 없는 트래커는 이 호출이 유일한 종료 경로다. (`is_open`/`close_issue`/`link_pr_for_close`는 실제 셸 커맨드가 아니라 tracker adapter 오퍼레이션이다 — 문자 그대로 셸에 붙여넣지 말 것.)
+  머지 성공 시(`merged=true`) **`is_open(task-issue-num)`이 true면 `close_issue(task-issue-num, "Merged via PR #$pr_num")`를 호출**한다 — 코드호스팅(PR 머지)은 GitHub 전용이라 미변경이고, issue 종료는 트래커 무관하게 이 한 경로로 처리된다: GitHub는 위 `link_pr_for_close`가 보통 이미 닫아둬서 여기선 안전망(no-op)이고, Jira 등 merge-magic이 없는 트래커는 이 호출이 유일한 종료 경로다. (`is_open`/`close_issue`/`link_pr_for_close`는 실제 셸 커맨드가 아니라 tracker adapter 오퍼레이션이다 — 문자 그대로 셸에 붙여넣지 말 것.)
 
-  task 종료(premerge.sh가 있고 실패한 경우는 예외 — 아래 PREMERGE_FAIL 참고, task 종료가 아니라 inspecting으로 간다).
+  task 종료(`merge_outcome`이 남은 경우는 예외 — 아래 CI_GATE_FAIL/CI_GATE_TIMEOUT/MERGE_CONFLICT 참고, task 종료가 아니라 inspecting으로 간다).
 - FAIL → 재시도 카운터 확인. **2회 미만이면** `orca-task-runner`에 재-dispatch(2b로 — spec에 방금 FAIL한 attempt 번호만 넣는다; feedback 정본은 `eval-report-a<attempt>.json`이고 generator가 직접 읽는다, §2a 라운드 2+ relay와 같은 원칙). **2회 도달하면** inspecting으로.
 - ESCALATE → 재시도 카운트 무관하게 즉시 inspecting.
-- PREMERGE_FAIL → (PASS 라우팅 안에서만 발생 — 위 참고) 추가 재시도 없이 즉시 inspecting. `orca-evaluate`는 이미 PASS를 냈으므로 재-dispatch 대상이 아니다 — merge 직전 게이트가 별도로 막은 것.
-- PREMERGE_TIMEOUT → (PASS 라우팅 안에서만 발생, PREMERGE_FAIL과 같은 위치) premerge 게이트가 budget
-  안에 판정 라인을 내지 못했다는 뜻이다(harness kill 등 인프라 원인일 수 있고, 코드 실패로 확정된
-  것이 아니다) — 추가 재시도 없이 즉시 inspecting. `orca-evaluate`는 이미 PASS를 냈으므로 재-dispatch
-  대상이 아니다.
+- CI_GATE_FAIL → (PASS 라우팅 안에서만 발생 — 위 참고) repo의 CI required check 실패 확정 — 추가 재시도
+  없이 즉시 inspecting. `orca-evaluate`는 이미 PASS를 냈으므로 재-dispatch 대상이 아니다 — merge 앞
+  게이트가 별도로 막은 것.
+- CI_GATE_TIMEOUT → (같은 위치) budget 안에 required check가 완주하지 못했거나 merge 거부 원인이
+  판별되지 않았다는 뜻이다(코드 실패로 확정된 것이 아니다) — 추가 재시도 없이 즉시 inspecting.
+- MERGE_CONFLICT → (같은 위치) base와의 텍스트 충돌(`mergeStateStatus=DIRTY`) 또는
+  `gh pr update-branch` 실패 — 자동 rebase/충돌 해소를 시도하지 않고 즉시 inspecting.
 
 라우팅 판정마다 outcome 이벤트를 할당 로그와 같은 파일에 남긴다 — `issue`/`task_id`로 assign 이벤트와 join해야 "어떤 할당이 어떤 결과를 냈는지"를 사후 감사할 수 있다(할당 기록만으로는 품질 판정 불가). 로그 — `~/.agents/orca-workflows/logging.md` §1 `outcome` 레시피 그대로 실행(enum 값은 그쪽이 정본 — 여기 복제하지 않는다): `skill="orca-workflow"`, `issue=<issue-num>`, `outcome=<위 라우팅 분기에서 결정된 값>`, `retry=<재시도 횟수>`.
 
 ## 3. Inspecting
 
-사람 체크포인트. 보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/CONTRACT_ESCALATE/PREMERGE_FAIL/PREMERGE_TIMEOUT/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **CONTRACT_ESCALATE**는 contract 협상이 라운드 한도에도 `ac_fidelity` 이견으로 끝났다는 뜻이다 — 코드 생성 전이므로 diff가 없다. `override.json`의 `unresolved_reasons`를 그대로 표시한다(무엇을 만들지에 대한 generator/evaluator의 이견 — 사람이 issue를 명확히 하거나 방향을 정한다). §2a의 fail-closed 분기(override.json 자체가 없음)로 온 경우면 이견 내용 대신 그 사실 — generator가 기록 없이 라운드 한도에 도달함 — 을 표시한다. **PREMERGE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 merge 직전 게이트에서 막혔다는 뜻이므로, premerge.sh의 exit code와 그 의미(대상 repo `scripts/premerge.sh`의 헤더 주석에서 디코드한다 — 그 헤더 주석이 정본이고, 표를 이 스킬에 복제하지 않는다), 마지막 출력 몇 줄을 그대로 표시한다 — 사람이 그 의미를 다시 유추하지 않게. **PREMERGE_TIMEOUT**은 게이트 명령이 budget 안에 자기 판정 라인을 내지 못했다는 뜻이므로(코드 실패가 아니라 실행 실패), premerge_log 경로와 그 마지막 몇 줄, 그리고 (아직 살아있을 수 있는) 백그라운드 프로세스를 사람이 직접 확인해야 한다는 점을 표시한다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음). 이 outcome은 §2d를 거치지 않고 발생하므로(GATE_FAIL과 같은 이유), 발생 시점에서 즉시 위 outcome 로그 라인을 해당 outcome 값으로 직접 남긴다. 사람이 고를 수 있는 것: 계속(피드백 반영해 재시도) / 재계획(요구사항 자체를 다시 논의 — 1a 또는 issue 수정으로 복귀) / 중단.
+사람 체크포인트. 보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/CONTRACT_ESCALATE/CI_GATE_FAIL/CI_GATE_TIMEOUT/MERGE_CONFLICT/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **CONTRACT_ESCALATE**는 contract 협상이 라운드 한도에도 `ac_fidelity` 이견으로 끝났다는 뜻이다 — 코드 생성 전이므로 diff가 없다. `override.json`의 `unresolved_reasons`를 그대로 표시한다(무엇을 만들지에 대한 generator/evaluator의 이견 — 사람이 issue를 명확히 하거나 방향을 정한다). §2a의 fail-closed 분기(override.json 자체가 없음)로 온 경우면 이견 내용 대신 그 사실 — generator가 기록 없이 라운드 한도에 도달함 — 을 표시한다. **CI_GATE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 repo의 CI required check가 merge를 막았다는 뜻이므로, 실패한 check 이름과 로그 링크(`gh pr checks <pr_num>`)를 그대로 표시한다 — 사람이 다시 조회하지 않게. **CI_GATE_TIMEOUT**은 budget 안에 check가 완주하지 못했거나 merge 거부 원인이 판별되지 않았다는 뜻이므로(코드 실패로 확정 아님), 마지막 `mergeStateStatus`와 check 상태 스냅샷을 표시한다. **MERGE_CONFLICT**는 base와의 충돌로 자동 merge가 불가능하다는 뜻이다 — 충돌 지점 정보를 표시하고, rebase/충돌 해소 여부는 사람이 결정한다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음). 이 outcome은 §2d를 거치지 않고 발생하므로(GATE_FAIL과 같은 이유), 발생 시점에서 즉시 위 outcome 로그 라인을 해당 outcome 값으로 직접 남긴다. 사람이 고를 수 있는 것: 계속(피드백 반영해 재시도) / 재계획(요구사항 자체를 다시 논의 — 1a 또는 issue 수정으로 복귀) / 중단.
 
 ## 폴백
 

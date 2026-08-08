@@ -1,6 +1,6 @@
 ---
 name: orca-evaluate
-description: Use when evaluating a completed task's diff before merge. This session runs on a REPL-capable provider other than agy (agy REPL is unsupported — see `~/.agents/orca-workflows/models/agy.md`); it spawns agy headless for the agent-e2e test gate (speed/cost/computer-use strength — e2e/pgTAP already passed in orca-task-runner, so this skill never re-touches them), spawns a separate strong-coding-agent terminal for the two judgment calls it can't make itself (sprint contract approval — judging the generator's drafted acceptance criteria against the original issue — and diff code review informed by the agent-e2e result), and synthesizes all three into one report against the negotiated Acceptance Criteria. Returns PASS, FAIL-with-feedback, or ESCALATE. Self-relative.
+description: Use when evaluating a completed task's diff before merge. This session runs on a REPL-capable provider other than agy (agy REPL is unsupported — see `~/.agents/orca-workflows/models/agy.md`); it spawns agy headless for the agent-e2e test gate (speed/cost/computer-use strength — e2e/pgTAP already passed in orca-task-runner, so this skill never re-touches them), spawns a separate strong-coding-agent terminal for the two judgment calls it can't make itself (sprint contract approval — judging the generator's drafted acceptance criteria against the original issue — and diff code review informed by the agent-e2e result — skipped fail-fast when agent-e2e failure is confirmed), and synthesizes the results into one report against the negotiated Acceptance Criteria. Returns PASS, FAIL-with-feedback, or ESCALATE. Self-relative.
 ---
 
 # Orca Evaluate
@@ -95,7 +95,11 @@ orca terminal read --terminal <agent-e2e-handle> --json
 
 이 세션(evaluator)은 agy의 자기 요약을 **그대로 믿지 않는다** — 이미 이 세션 자체가 롱컨텍스트 REPL 세션이므로, `$report_path`와 원본 트레이스를 직접(별도 터미널 스폰 없이) 읽어서 "성공했다"는 보고가 실제로 맞는지, 조용히 막히거나 우회한 흔적은 없는지 확인한다.
 
+**실패 확정 시 fail-fast — §3 생략**: 위 재확인 결과 실패가 실제이고(자기 요약·report·트레이스가 일치) 인프라 원인이 아니라 AC-관련 동작 실패로 확인되면, §3 code-reviewer를 스폰하지 않고 곧장 §4로 간다 — §4의 PASS 조건이 어차피 agent e2e 통과를 요구하므로 리뷰를 돌려도 verdict는 FAIL로 같고, 강한 reasoning 모델 스폰 비용만 든다(이미 실패가 확정된 코드를 비싼 단계에 태우지 않는다는 `GATE_FAIL`과 같은 원칙). 이때 FAIL findings는 e2e 관찰(어떤 시나리오가 어떤 AC에서 실패했는지)로 작성하고, eval-report의 `code_review_ran`을 `false`로 남긴다 — 생략은 이번 attempt에 한하며, 다음 attempt는 §3을 다시 태운다. 인프라 원인(계정·secret·환경)이면 §4의 ESCALATE 규칙 그대로다. 부분 통과 등 판단이 애매하면 생략하지 않는다 — §3을 그대로 진행한다.
+
 ## 3. Diff 리뷰 (coding agent 스폰, agent e2e 결과 반영)
+
+(§2가 실패 확정 fail-fast로 끝난 attempt면 이 절은 실행되지 않는다 — §2 참고.)
 
 ```bash
 git diff "$(git merge-base origin/main HEAD)"...HEAD > <worktree 루트>/.evaluate-diff.patch
@@ -180,7 +184,7 @@ report는 severity(Critical/Important/Minor) + 도달 조건 + 최악 결과 + f
 
 ## 4. 리포트 합성 (evaluator 역할)
 
-§1(contract 판정 기록) + §2(agent e2e 자기 요약 + 재확인 결과) + §3(code-reviewer report, agent e2e 결과가 이미 반영됨) 세 가지를 이 세션이 하나의 리포트로 합성한다 — 이건 판단이 아니라 이미 나온 판단들을 압축하는 일이라(어려운 판단은 §1·§3에서 강한 reasoning 모델이 이미 끝냄) 이 세션(REPL-capable provider, agy 아님)이 그대로 해도 된다. PASS/FAIL/ESCALATE 매핑도 아래 고정 규칙을 그대로 적용하는 것이라 이 세션이 직접 낸다:
+§1(contract 판정 기록) + §2(agent e2e 자기 요약 + 재확인 결과) + §3(code-reviewer report, agent e2e 결과가 이미 반영됨) 세 가지를 이 세션이 하나의 리포트로 합성한다(§2 fail-fast로 §3이 생략된 attempt면 §1+§2 두 가지다) — 이건 판단이 아니라 이미 나온 판단들을 압축하는 일이라(어려운 판단은 §1·§3에서 강한 reasoning 모델이 이미 끝냄) 이 세션(REPL-capable provider, agy 아님)이 그대로 해도 된다. PASS/FAIL/ESCALATE 매핑도 아래 고정 규칙을 그대로 적용하는 것이라 이 세션이 직접 낸다:
 
 - **PASS** — code-reviewer report에 Critical/Important finding 없음, agent e2e 통과(자기 요약과 재확인 결과가 일치), contract 종결이 approved거나 `plan_coverage`-only override(override의 unresolved 항목이 §3 리뷰(입력 ⑥)에서 실제 결함으로 실체화되면 그게 곧 finding이라 첫 조건에서 걸린다 — override 자체는 PASS를 막지 않는다. `ac_fidelity` 미해소 override는 이 스킬에 도달하지 않는다: `orca-workflow` §2a가 `CONTRACT_ESCALATE`로 먼저 자른다).
 - **FAIL** — 구체적 finding(severity+근거+수정 방향)은 아래 `eval-report-a<attempt>.json`에 남기고, `orca-workflow`에는 FAIL verdict만 반환한다. (재시도는 `orca-workflow`가 관리한다 — 이 스킬은 재-dispatch하지 않는다. `orca-workflow`가 재시도 카운터를 세고, 필요하면 attempt 번호와 함께 `orca-task-runner`에 재-dispatch — evaluator가 task-runner를 직접 부르지 않고, feedback 본문도 코디네이터를 거치지 않는다.)

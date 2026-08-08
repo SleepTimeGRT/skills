@@ -63,15 +63,15 @@ Extra fields (`wave_index`, `subtask_type`, `advisor`, ...) are added per call s
 **`outcome`** (`orca-workflow` only — routing result for a task). 값은 두 축으로 나뉜다 — 둘 다 같은
 `outcome` JSON 필드에 담기지만 의미가 다르므로 구분해서 읽는다:
 
-- **verdict 축** — task 라우팅 판정: `PASS`|`FAIL`|`ESCALATE`|`GATE_FAIL`|`CONTRACT_ESCALATE`|`PREMERGE_FAIL`
+- **verdict 축** — task 라우팅 판정: `PASS`|`FAIL`|`ESCALATE`|`GATE_FAIL`|`CONTRACT_ESCALATE`|`CI_GATE_FAIL`
 - **진행-분기 축** — 판정이 아니라 정상적인 워크플로 상태 전이:
   `NO_DONE_TRANSITION`|`CONTRACT_FINALIZED_BY_GENERATOR`|`CONTRACT_APPROVED_ROUND1`|
-  `MANUAL_RECOVERY_COMPLETED`|`PREMERGE_TIMEOUT`|`RETRO_DONE`|`RETRO_FAIL`
+  `MANUAL_RECOVERY_COMPLETED`|`CI_GATE_TIMEOUT`|`MERGE_CONFLICT`|`RETRO_DONE`|`RETRO_FAIL`
 
 ```bash
 install -d -m 700 ~/.local/state/orca-workflows/logs
 target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
-printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|CONTRACT_ESCALATE|PREMERGE_FAIL|NO_DONE_TRANSITION|CONTRACT_FINALIZED_BY_GENERATOR|CONTRACT_APPROVED_ROUND1|MANUAL_RECOVERY_COMPLETED|PREMERGE_TIMEOUT|RETRO_DONE|RETRO_FAIL>","retry":<n>}\n' \
+printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|CONTRACT_ESCALATE|CI_GATE_FAIL|NO_DONE_TRANSITION|CONTRACT_FINALIZED_BY_GENERATOR|CONTRACT_APPROVED_ROUND1|MANUAL_RECOVERY_COMPLETED|CI_GATE_TIMEOUT|MERGE_CONFLICT|RETRO_DONE|RETRO_FAIL>","retry":<n>}\n' \
   "$(date -u +%FT%TZ)" >> "$target"
 chmod 600 "$target"
 ```

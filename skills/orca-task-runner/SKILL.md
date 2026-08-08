@@ -247,22 +247,6 @@ bash -lc '<repo의 pgTAP 커맨드, 예: pg_prove> > <worktree 루트>/.gate-pgt
 이 기록이 없으면 `orca-evaluate`·코디네이터가 "이 diff와 무관한 flake였다"는 재실행측 판단을 사후에
 검증할 방법이 없다 — 재실행-green과 "게이트 통과"를 구분하지 못하게 된다.
 
-**e2e 통과 시 캐시 기록 (premerge.sh 소비용)**: `<repo의 e2e 커맨드>`가 성공(EXIT:0)하면, `lifecycle-gate-policy`의 `scripts/premerge.sh`가 같은 커밋에 대해 e2e를 또 돌리지 않도록 캐시 레코드를 남긴다 — premerge는 이 task 브랜치를 그대로 merge하기 직전에 다시 호출되므로, 방금 통과한 것과 정확히 같은 commit·같은 e2e 커맨드라면 재실행이 낭비다(반대로 그 사이 origin/main이 움직여 이 브랜치가 rebase/merge로 흡수해야 했다면 commit이 바뀌어 캐시가 자연히 미스난다 — stale-main 재검증은 그대로 유지됨). **쓰기만 한다 — premerge.sh는 이 캐시를 읽기만 하고 쓰지 않는다**(범용 스크립트에 orca 전용 쓰기 경로를 넣지 않기 위함).
-
-```bash
-repo_id="$(git remote get-url origin 2>/dev/null || git rev-parse --show-toplevel)"
-repo_hash="$(node -e 'console.log(require("crypto").createHash("sha256").update(process.argv[1]).digest("hex").slice(0,16))' "$repo_id")"
-cache_dir="$HOME/.local/state/orca-workflows/e2e-cache/$repo_hash"
-head_sha="$(git rev-parse HEAD)"
-install -d -m 700 "$cache_dir"
-printf '{"sha":"%s","e2e_cmd":"%s","result":"PASS","ts":"%s"}\n' \
-  "$head_sha" "<repo의 e2e 커맨드 — premerge.conf.sh의 $E2E_CMD와 반드시 같은 문자열>" "$(date -u +%FT%TZ)" \
-  > "$cache_dir/$head_sha.json"
-chmod 600 "$cache_dir/$head_sha.json"
-```
-
-`repo_id`/`repo_hash` 계산식은 `premerge.sh`가 읽을 때 쓰는 것과 **글자 그대로 동일해야 한다** — 하나라도 다르면 캐시가 영원히 미스난다. `~/.local/state`는 머신 전역 디렉터리라 repo별 네임스페이스(`repo_hash`) 없이 commit SHA만 키로 쓰면 서로 다른 레포가 우연히 같은 SHA(예: 빈 init 커밋)를 가질 때 다른 레포의 캐시를 잘못 히트할 수 있다 — 그래서 repo_hash 서브디렉터리가 필수다. `e2e_cmd` 필드도 반드시 기록한다 — premerge.sh의 `$E2E_CMD`와 문자열이 다르면(범위·env가 다른 커맨드라면) 캐시를 신뢰하면 안 되기 때문에, premerge 쪽에서 이 필드를 자기 `$E2E_CMD`와 대조해 다르면 캐시 미스로 처리한다. pgTAP은 이 캐시 대상이 아니다 — `premerge.sh`엔 애초에 pgTAP 개념이 없다.
-
 ## 7. 완료
 
 Task 레벨 게이트(§6)를 통과하면 → task 전체 diff를 정리해 `orca-workflow`에 반환한다(diff 경로 + resolved providers/models + wave 구성 기록 + (§6에서 재시도 후 통과한 경우) flake 증거: 실패 attempt의 spec 파일명·에러 첫 줄 + 알려진 flake 목록 대조 결과). **`orca-evaluate`는 이 스킬이 직접 호출하지 않는다** — `orca-workflow`가 호출한다. (§6에서 `GATE_FAIL`을 반환한 경우엔 diff를 넘기지 않는다 — 그 자체가 반환값이다.)

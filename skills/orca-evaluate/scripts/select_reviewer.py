@@ -63,7 +63,7 @@ def classify_tier(stats: DiffStats, *, high_risk_signal: bool = False) -> str:
     for an unrelated reason (round1 Finding 2: §3 already runs a migration/schema-file check
     before spawning the reviewer, to decide whether to run the destructive-op linter — throwing
     that result away here let a small-churn migration diff fall to the cheapest reviewer tier,
-    the one place in this repo's own pipeline with no `scripts/premerge.sh` backstop). This is
+    with no later local gate to catch it: merge-time verification is delegated to repo CI). This is
     still not path matching: the caller decides what counts as a "known high-risk kind" using
     whatever pre-existing check it already ran (migration-lint's own file list here); this
     function and its caller never introduce a new static path list to satisfy it — the boolean is
