@@ -13,7 +13,9 @@ description: Single-issue coordinator for one task issue — invoked in-session 
 - **이슈 트래커 해석** (실행 시작 시 1회, 캐싱 없이 — 매 실행마다 새로 읽는다): `~/.agents/orca-workflows/issue-trackers/selection.md`가 정의하는 절차로 백엔드를 정하고, 그 백엔드의 `~/.agents/orca-workflows/issue-trackers/{github,jira}.md`가 정의하는 `get_issue`/`get_issue_type`/`list_children`/`get_child_order`/`is_open`/`close_issue`/`link_pr_for_close`를 이후 전체 실행에서 쓴다. 구체 값(project key, transition id 등)은 이 스킬에 복제하지 않는다 — 항상 selection.md가 가리키는 대상 repo의 tracker 문서에서 얻는다.
 - **Contract 디렉토리**(실행 시작 시 1회) — 이 실행이 처리하는 issue 번호로
   `~/.agents/orca-workflows/contract-schema.md` 규칙대로 `CONTRACT_DIR`를 계산·생성(`install -d -m 700`)해
-  §1의 두 spec_text에 절대경로로 넣는다.
+  §1의 두 spec_text에 절대경로로 넣는다. acceptance criteria는 issue 본문의 사전 섹션이 아니라 §1
+  협상에서 초안·승인된다 — 산출물 파일(proposal/verdict/override)과 확정 AC의 정본 위치는 같은
+  문서가 정의한다.
 - CLI 기반 coordinator(Codex/agy)는 launch 시 approval·sandbox를 명시한다. codex posture는 `--dangerously-bypass-approvals-and-sandbox` — 근거·예외(headless read-only 등)는 `~/.agents/orca-workflows/models/codex.md`가 정본이다(sandbox 하 worker_done 유실·CONTRACT_DIR 워크스페이스 밖 쓰기). 안전 전제는 워크트리 격리다.
 - 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 —
   `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다. §1의 두 `terminal create` 호출
