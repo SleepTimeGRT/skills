@@ -1,6 +1,6 @@
 ---
 name: orca-workflow
-description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-matching, which collides with Orca's built-in `orchestration` skill (multi-agent coordination, task dispatch, coordinator loops). Picks up an issue (GitHub Issues or Jira, resolved per repo — see `~/.agents/orca-workflows/issue-trackers/selection.md`) and drives it through its full lifecycle — branches on issue type (epic vs task), runs issue-drain validation for epics, builds an issue-graph task-queue, and for each task relays the orca-task-runner/orca-evaluate contract negotiation, routes PASS/FAIL/ESCALATE (GATE_FAIL, CONTRACT_ESCALATE, and the merge-gate outcomes CI_GATE_FAIL/CI_GATE_TIMEOUT/MERGE_CONFLICT go straight to inspecting; merge-time verification itself is delegated to repo CI required checks), creates the PR and closes the issue only after evaluate passes and the merge lands, and escalates to a human inspection checkpoint. Never generates or evaluates code directly — pure orchestration, kept context-light. Self-relative.
+description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-matching, which collides with Orca's built-in `orchestration` skill (multi-agent coordination, task dispatch, coordinator loops). Picks up an issue (GitHub Issues or Jira, resolved per repo — see `~/.agents/orca-workflows/issue-trackers/selection.md`) and drives it through its full lifecycle as a drain queue — the queue is the issue's children if it has any, else the issue itself (size-1); issue-drain validation, ordering, traversal, root close, and best-effort retro run identically regardless of queue size. For each queued task it relays the orca-task-runner/orca-evaluate contract negotiation, routes PASS/FAIL/ESCALATE (GATE_FAIL, CONTRACT_ESCALATE, and the merge-gate outcomes CI_GATE_FAIL/CI_GATE_TIMEOUT/MERGE_CONFLICT go straight to inspecting; merge-time verification itself is delegated to repo CI required checks), creates the PR and closes the issue only after evaluate passes and the merge lands, closes the root issue once the queue drains, then runs a best-effort orca-retro over that run's logs, and escalates to a human inspection checkpoint. Never generates or evaluates code directly — pure orchestration, kept context-light. Self-relative.
 ---
 
 # Orca Workflow
@@ -11,8 +11,8 @@ description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-ma
 
 - `orca status --json` ready. 실패 시 아래 "폴백".
 - **이슈 트래커 해석** (실행 시작 시 1회, 캐싱 없이 — 매 실행마다 새로 읽는다): `~/.agents/orca-workflows/issue-trackers/selection.md`가 정의하는 절차로 백엔드를 정하고, 그 백엔드의 `~/.agents/orca-workflows/issue-trackers/{github,jira}.md`가 정의하는 `get_issue`/`get_issue_type`/`list_children`/`get_child_order`/`is_open`/`close_issue`/`link_pr_for_close`를 이후 전체 실행에서 쓴다. 구체 값(project key, transition id 등)은 이 스킬에 복제하지 않는다 — 항상 selection.md가 가리키는 대상 repo의 tracker 문서에서 얻는다.
-- **이슈 타입 판별** — `get_issue_type(issue-num)`으로 epic/task를 판별해 아래 "1. Epic 경로"/"2. Task 경로"로 분기한다.
-- **Contract 디렉토리**(실행 시작 시 1회) — `~/.agents/orca-workflows/contract-schema.md`의 규칙대로 `CONTRACT_DIR`를 계산·생성(`install -d -m 700`)해 §2a의 두 spec_text에 절대경로로 넣는다. acceptance criteria는 issue 본문의 사전 섹션이 아니라 §2a 협상에서 초안·승인된다 — 산출물 파일(proposal/verdict/override)과 확정 AC의 정본 위치는 같은 문서가 정의한다.
+- **큐 구성** — `get_issue_type(issue-num)`/`list_children(issue-num)`으로 drain queue를 정한다: child가 있으면 child 전체가, 없으면 root 자신 1건이 큐다(size-1 drain queue). 이슈 타입이 갈라놓는 것은 여기까지다 — 이후 §1의 1a(검증)→1b(순서)→1c(순회)→1d(retro)는 큐 크기와 무관하게 동일한 경로다.
+- **Contract 디렉토리**(큐의 task마다 — §2a 시작 시) — 처리 중인 task issue 번호로 `~/.agents/orca-workflows/contract-schema.md`의 규칙대로 `CONTRACT_DIR`를 계산·생성(`install -d -m 700`)해 §2a의 두 spec_text에 절대경로로 넣는다. 키는 큐 항목 단위다 — 큐의 task issue마다 별개 디렉토리. acceptance criteria는 issue 본문의 사전 섹션이 아니라 §2a 협상에서 초안·승인된다 — 산출물 파일(proposal/verdict/override)과 확정 AC의 정본 위치는 같은 문서가 정의한다.
 - **온보딩** — selection.md가 "문서 없음 + GitHub 형식이 아닌 이슈 ID"로 판정하면, 곧바로 GitHub로 넘어가지 않고 사용자에게 직접 묻는다: ①어떤 tracker를 쓰는지 + 그 API를 부르는 데 필요한 최소 정보(Jira라면 site·cloudId·project key) ②"완료" transition/상태 이름. 받은 답으로 `docs/agents/issue-tracker.md` 형식의 초안을 작성해 보여주고, 승인되면 별도의 작은 커밋으로 대상 repo에 반영한 뒤 이번 실행을 이어간다. 이후 실행부터는 문서가 있으므로 다시 트리거되지 않는다.
 - CLI 기반 coordinator(Codex/agy)는 launch 시 approval·sandbox를 명시한다. codex posture는 `--dangerously-bypass-approvals-and-sandbox` — 근거·예외(headless read-only 등)는 `~/.agents/orca-workflows/models/codex.md`가 정본이다(sandbox 하 worker_done 유실·CONTRACT_DIR 워크스페이스 밖 쓰기). 안전 전제는 워크트리 격리다.
 - 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 —
@@ -53,34 +53,40 @@ description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-ma
   task의 `.run_id`가 이미 바인딩돼 있던 Run과 일치) — 따라서 라운드 2+의 `check --wait --run "$RUN_ID"`와
   `task-list --run "$RUN_ID"`는 라운드 1의 결과도 정상적으로 찾는다.
 
-## 1. Epic 경로
+## 1. 큐 구성·순회
 
-**1a. issue-drain** — 별도 subagent(이 세션과 다른, 별도로 뜬 세션)에게 child issue 전체 검증을 맡긴다:
+§0에서 구성한 큐를 1a→1b→1c→1d로 태운다. 큐 크기에 따른 별도 경로는 없다.
 
-- 각 child issue가 self-contained한지("무엇을 만들지"가 본문에 있고, 본문만으로 acceptance-criteria 초안을 쓸 수 있을 만큼 요구가 구체적인지 — AC 자체는 §2a 협상에서 초안된다)
+**1a. issue-drain** — 별도 subagent(이 세션과 다른, 별도로 뜬 세션)에게 큐의 issue 전체 검증을 맡긴다:
+
+- 큐의 각 issue가 self-contained한지("무엇을 만들지"가 본문에 있고, 본문만으로 acceptance-criteria 초안을 쓸 수 있을 만큼 요구가 구체적인지 — AC 자체는 §2a 협상에서 초안된다)
 - 의존 관계가 있다면(`get_child_order`가 참고하는 것과 같은 그래프) 그게 실제로 존재하고 방향이 맞는지 — 의존 링크 자체가 없는 건 실패가 아니다
-- 그래프상 빠진 child나 순환 의존이 없는지
+- 그래프상 빠진 issue나 순환 의존이 없는지 (size-1 큐면 그래프 검증은 공허하게 통과 — 남는 검증은 self-containedness뿐이다)
 
 ```
-get_issue(epic-num)
-list_children(epic-num)
+get_issue(root-num)
+list_children(root-num)
 ```
 
 검증 실패 → 사용자에게 보고하고 멈춘다(수정 후 재호출). 통과 → **1b**.
 
-**1b. task-queue 확정** — `get_child_order(epic-num, children)`로 실행 순서를 정한다. file-overlap이 아니라 **issue 그래프 기준**이다(구현 전이라 파일 목록을 아직 모른다).
+**1b. task-queue 확정** — `get_child_order(root-num, 큐)`로 실행 순서를 정한다. file-overlap이 아니라 **issue 그래프 기준**이다(구현 전이라 파일 목록을 아직 모른다). size-1 큐면 순서는 자명하다.
 
-**1c. 순회** — ready task마다 아래 "2. Task 경로"를 실행. 완료되면 dequeue하고 의존이 풀린 다음 task로 진행. 이번 큐가 비었다고 바로 epic을 닫지 않는다 — 이번 실행 밖에서 처리된 child가 있을 수 있으므로, 닫기 전에 child 전체가 실제로 닫혀 있는지 확인한다(child 완료가 epic에 자동 반영되지 않는 tracker일 수 있으므로 이 확인·종료는 항상 명시적으로 한다):
+**1c. 순회** — ready task마다 아래 "2. Task 경로"를 실행. 완료되면 dequeue하고 의존이 풀린 다음 task로 진행. 큐가 비면 root issue 종료를 확인한다:
 
-```
-list_children(epic-num)의 각 항목에 is_open() 확인
-# 전부 닫혀 있을 때만(=열린 child가 없을 때만) epic을 닫는다
-close_issue(epic-num, "All child tasks complete: <child-num-1>, <child-num-2>, ...")
-```
+- root가 큐 항목 자신이면(size-1 큐) — §2d가 merge 후 이미 닫았다. close 확인만 하고 **1d**로.
+- root가 큐 밖의 상위 issue면 — 큐가 비었다고 바로 root를 닫지 않는다. 이번 실행 밖에서 처리된 child가 있을 수 있으므로, 닫기 전에 child 전체가 실제로 닫혀 있는지 확인한다(child 완료가 root에 자동 반영되지 않는 tracker일 수 있으므로 이 확인·종료는 항상 명시적으로 한다):
 
-**1d. Retro (best-effort, epic close 직후)** — 방금 닫힌 epic의 로그를 분석해 스킬 결함 이슈를 만들도록
-retro 터미널 1개를 띄워 `orca-retro`를 실행시킨다. close **후**에 실행한다 — close 전에 돌리다
-coordinator가 죽으면 child가 전부 닫힌 epic이 열린 채 남는다. retro의 어떤 실패(스폰·dispatch·분석·gh)도
+  ```
+  list_children(root-num)의 각 항목에 is_open() 확인
+  # 전부 닫혀 있을 때만(=열린 child가 없을 때만) root를 닫는다
+  close_issue(root-num, "All child tasks complete: <child-num-1>, <child-num-2>, ...")
+  ```
+
+**1d. Retro (best-effort, root issue 종료 직후)** — 방금 끝난 실행의
+로그를 분석해 스킬 결함 이슈를 만들도록 retro 터미널 1개를 띄워 `orca-retro`를 실행시킨다. close **후**에
+실행한다 — close 전에 돌리다 coordinator가 죽으면 일이 다 끝난 root issue가 열린 채 남는다. root issue가
+닫히지 못하고 §3으로 끝난 실행은 retro 대상이 아니다. retro의 어떤 실패(스폰·dispatch·분석·gh)도
 이 워크플로를 실패시키지 않는다: `RETRO_FAIL` outcome만 남기고 정상 종료한다. 이 스킬은 여기서도 로그
 본문을 직접 분석하지 않는다 — 분석은 전부 retro 터미널 몫이고, 이 스킬은 §5 요약 한 줄만 받는다.
 
@@ -89,25 +95,25 @@ source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 # provider는 model-selection.md 기준 resolve — 판단(judgment) 작업. REPL 필수, agy 제외
 # (§2a evaluate 사이트와 같은 제약, 같은 이유).
 orca_call_with_retry "orca-workflow" "retro" -- \
-  orca terminal create --worktree active --title epic-retro-<epic-num> \
+  orca terminal create --worktree active --title retro-<root-issue-num> \
   --command "<REPL 가능, agy 제외 provider의 launch 문법 — provider 문서에서 resolve>" --json
 orca terminal wait --terminal <retro-handle> --for tui-idle --timeout-ms 60000 --json
-spec_text="<orca-retro SKILL.md 지침 + epic 번호 + child 목록 + 대상 repo + skills repo(sleeptimegrt-skills) slug>"
+spec_text="<orca-retro SKILL.md 지침 + root issue 번호 + 큐 issue 목록(분석 issue 집합 = root ∪ 큐, 중복 제거) + 대상 repo + skills repo(sleeptimegrt-skills) slug>"
 orca_call_with_retry "orca-workflow" "retro" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow" "retro" -- \
   orca orchestration dispatch --task <task_id> --to <retro-handle> --retry-request "$(uuidgen)" --inject --json
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43).
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로, dispatch와 같은 블록에서 즉시:
-#  §1 assign 이벤트: role="retro", issue=<epic-num>, task_id=<task_id>, provider/model/effort=resolved 값,
+#  §1 assign 이벤트: role="retro", issue=<root-issue-num>, task_id=<task_id>, provider/model/effort=resolved 값,
 #    terminal=<retro-handle>, worktree=<worktree 경로>
 #  §2 term 로그: skill="orca-workflow", role="retro", terminal=<retro-handle>, meta 기록 후
 #    sent.content=$spec_text. 이 사이트는 §2a의 두 사이트와 달리 요약을 터미널에서 직접 읽으므로,
 #    요약 수신 시점에 logging.md §2의 최초-read 레시피(--cursor 없이)로 recv도 기록한다.
 # 요약(RETRO filed=[...] commented=[...] discarded=<n>) 수신 후 — 수신 실패·timeout이면 RETRO_FAIL:
-printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<epic-num>","outcome":"<RETRO_DONE|RETRO_FAIL>","retry":0,"filed":<n>,"commented":<n>,"discarded":<n>}\n' \
+printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<root-issue-num>","outcome":"<RETRO_DONE|RETRO_FAIL>","retry":0,"filed":<n>,"commented":<n>,"discarded":<n>}\n' \
   "$(date -u +%FT%TZ)" >> "$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
-# RETRO_FAIL이면 filed/commented/discarded 필드는 생략한다(logging.md §1). 터미널 close 후 epic 경로 종료.
+# RETRO_FAIL이면 filed/commented/discarded 필드는 생략한다(logging.md §1). 터미널 close 후 실행 종료.
 ```
 
 ## 2. Task 경로
@@ -304,7 +310,7 @@ log_dispatch --skill "orca-workflow" --role "contract-round" --issue "<issue-num
 
 ## 3. Inspecting
 
-사람 체크포인트. 보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/CONTRACT_ESCALATE/CI_GATE_FAIL/CI_GATE_TIMEOUT/MERGE_CONFLICT/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **CONTRACT_ESCALATE**는 contract 협상이 라운드 한도에도 `ac_fidelity` 이견으로 끝났다는 뜻이다 — 코드 생성 전이므로 diff가 없다. `override.json`의 `unresolved_reasons`를 그대로 표시한다(무엇을 만들지에 대한 generator/evaluator의 이견 — 사람이 issue를 명확히 하거나 방향을 정한다). §2a의 fail-closed 분기(override.json 자체가 없음)로 온 경우면 이견 내용 대신 그 사실 — generator가 기록 없이 라운드 한도에 도달함 — 을 표시한다. **CI_GATE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 repo의 CI required check가 merge를 막았다는 뜻이므로, 실패한 check 이름과 로그 링크(`gh pr checks <pr_num>`)를 그대로 표시한다 — 사람이 다시 조회하지 않게. **CI_GATE_TIMEOUT**은 budget 안에 check가 완주하지 못했거나 merge 거부 원인이 판별되지 않았다는 뜻이므로(코드 실패로 확정 아님), 마지막 `mergeStateStatus`와 check 상태 스냅샷을 표시한다. **MERGE_CONFLICT**는 base와의 충돌로 자동 merge가 불가능하다는 뜻이다 — 충돌 지점 정보를 표시하고, rebase/충돌 해소 여부는 사람이 결정한다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음). 이 outcome은 §2d를 거치지 않고 발생하므로(GATE_FAIL과 같은 이유), 발생 시점에서 즉시 위 outcome 로그 라인을 해당 outcome 값으로 직접 남긴다. 사람이 고를 수 있는 것: 계속(피드백 반영해 재시도) / 재계획(요구사항 자체를 다시 논의 — 1a 또는 issue 수정으로 복귀) / 중단.
+사람 체크포인트. 보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/CONTRACT_ESCALATE/CI_GATE_FAIL/CI_GATE_TIMEOUT/MERGE_CONFLICT/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **CONTRACT_ESCALATE**는 contract 협상이 라운드 한도에도 `ac_fidelity` 이견으로 끝났다는 뜻이다 — 코드 생성 전이므로 diff가 없다. `override.json`의 `unresolved_reasons`를 그대로 표시한다(무엇을 만들지에 대한 generator/evaluator의 이견 — 사람이 issue를 명확히 하거나 방향을 정한다). §2a의 fail-closed 분기(override.json 자체가 없음)로 온 경우면 이견 내용 대신 그 사실 — generator가 기록 없이 라운드 한도에 도달함 — 을 표시한다. **CI_GATE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 repo의 CI required check가 merge를 막았다는 뜻이므로, 실패한 check 이름과 로그 링크(`gh pr checks <pr_num>`)를 그대로 표시한다 — 사람이 다시 조회하지 않게. **CI_GATE_TIMEOUT**은 budget 안에 check가 완주하지 못했거나 merge 거부 원인이 판별되지 않았다는 뜻이므로(코드 실패로 확정 아님), 마지막 `mergeStateStatus`와 check 상태 스냅샷을 표시한다. **MERGE_CONFLICT**는 base와의 충돌로 자동 merge가 불가능하다는 뜻이다 — 충돌 지점 정보를 표시하고, rebase/충돌 해소 여부는 사람이 결정한다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음). 이 outcome은 §2d를 거치지 않고 발생하므로(GATE_FAIL과 같은 이유), 발생 시점에서 즉시 위 outcome 로그 라인을 해당 outcome 값으로 직접 남긴다. 사람이 고를 수 있는 것: 계속(피드백 반영해 재시도) / 재계획(요구사항 자체를 다시 논의 — issue 수정 후, 큐에 남은 issue가 있으면 1a로 복귀해 재검증·재구성) / 중단.
 
 ## 폴백
 

@@ -13,9 +13,11 @@ CONTRACT_DIR="$HOME/.local/state/orca-workflows/contracts/<project-slug>/issue-<
 install -d -m 700 "$CONTRACT_DIR"
 ```
 
-- `<project-slug>`: 대상 repo의 디렉토리명(예: `medicount`). 코디네이터(`orca-workflow` §0)가 1회
-  계산해 두 spec_text에 절대경로로 넣는다.
-- 워크트리 밖(전역)인 이유: worktree는 merge 후 삭제되지만 retro(`orca-retro`)는 epic close 후에
+- `<project-slug>`: 대상 repo의 디렉토리명(예: `medicount`). 코디네이터(`orca-workflow`)가 계산해
+  두 spec_text에 절대경로로 넣는다.
+- `<issue>`: 처리 중인 task issue 번호 — 큐 항목마다 별개 디렉토리다. 계산·생성 시점은 그 task의
+  §2a 시작 시(`orca-workflow` §0).
+- 워크트리 밖(전역)인 이유: worktree는 merge 후 삭제되지만 retro(`orca-retro`)는 root issue close 후에
   이 기록을 읽는다. 실수 커밋 위험도 없다. per-project 폴더는 repo가 다른 같은 issue 번호끼리의
   충돌을 막는다.
 - 파일은 라운드별 append-only — r1 파일을 r2에서 수정하지 않는다. 파일은 `chmod 600`.

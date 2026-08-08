@@ -1,23 +1,24 @@
 ---
 name: orca-retro
-description: Use right after orca-workflow closes an epic — analyzes only that epic's logs under ~/.local/state/orca-workflows/logs/ (assignments/outcome events, spawn-failures, term transcripts) through four defect lenses (documented-schema violations, repeated FAILs attributable to skill prose, preventable escalations or human interventions, new spawn-failure signatures) and files at most 3 evidence-backed skill-defect issues on the sleeptimegrt-skills repo, deduplicating against open issues via recurrence comments. Never edits skills directly — output is issues only; fixes flow through the normal /orca-workflow pipeline later. Best-effort by contract: no retro failure may block the epic. Self-relative.
+description: Use right after orca-workflow closes its root issue (an epic or a standalone task issue) — analyzes only that run's logs under ~/.local/state/orca-workflows/logs/ (assignments/outcome events, spawn-failures, term transcripts) through four defect lenses (documented-schema violations, repeated FAILs attributable to skill prose, preventable escalations or human interventions, new spawn-failure signatures) and files at most 3 evidence-backed skill-defect issues on the sleeptimegrt-skills repo, deduplicating against open issues via recurrence comments. Never edits skills directly — output is issues only; fixes flow through the normal /orca-workflow pipeline later. Best-effort by contract: no retro failure may block the run. Self-relative.
 ---
 
 # Orca Retro
 
-방금 닫힌 epic 하나의 로그만 분석해 **스킬 결함 이슈**를 만든다. 환경(orca-* 스킬군) 자체를 개선하는
-피드백 루프의 관측→이슈 단계다. 코드를 만들지 않고, 스킬 파일을 직접 수정하지 않는다 — 산출물은
-sleeptimegrt-skills 이슈(또는 기존 이슈의 재발 코멘트)뿐이며, 수정 자체는 나중에 그 이슈를 평소의
-`/orca-workflow` 파이프라인이 집어 처리한다.
+방금 닫힌 root issue 실행 하나의 로그만 분석해 **스킬 결함 이슈**를 만든다.
+환경(orca-* 스킬군) 자체를 개선하는 피드백 루프의 관측→이슈 단계다. 코드를 만들지 않고, 스킬 파일을
+직접 수정하지 않는다 — 산출물은 sleeptimegrt-skills 이슈(또는 기존 이슈의 재발 코멘트)뿐이며, 수정
+자체는 나중에 그 이슈를 평소의 `/orca-workflow` 파이프라인이 집어 처리한다.
 
 ## 0. 입력·전제
 
-- 입력 3개: epic 이슈 번호, 대상 repo, skills repo(sleeptimegrt-skills)의 GitHub slug.
-- child 목록: 호출자(`orca-workflow` §1d)가 spec_text로 넘긴 목록을 그대로 쓴다. 목록이 안 넘어온
-  경우에만 `~/.agents/orca-workflows/issue-trackers/selection.md` 절차로 백엔드를 정해
-  `list_children(epic-num)`으로 해석한다. epic 자신 + child 전체가 이번 분석의 issue 집합이다.
+- 입력 3개: root issue 번호, 대상 repo, skills repo(sleeptimegrt-skills)의 GitHub slug.
+- 큐 issue 목록: 호출자(`orca-workflow` §1d)가 spec_text로 넘긴 목록을 그대로 쓴다. 목록 자체가 안
+  넘어온 경우에만 `~/.agents/orca-workflows/issue-trackers/selection.md` 절차로 백엔드를 정해
+  `list_children(root-num)`으로 해석한다(child 없는 issue면 빈 목록). root issue ∪ 이 목록(중복 제거)이
+  이번 분석의 issue 집합이다 — size-1 큐면 root 1건이다.
 - 로그 루트 `~/.local/state/orca-workflows/logs/`가 없거나 비어 있으면 §5 요약(filed=[])으로 즉시
-  종료한다 — harness 밖에서 처리된 epic은 정상 케이스다.
+  종료한다 — harness 밖에서 처리된 실행은 정상 케이스다.
 
 ## 1. 수집
 
@@ -26,21 +27,21 @@ sleeptimegrt-skills 이슈(또는 기존 이슈의 재발 코멘트)뿐이며, �
 
 ```bash
 logs="$HOME/.local/state/orca-workflows/logs"
-# issue 집합(epic+children)으로 필터한 assignments/waves 레코드
+# issue 집합(root ∪ 큐 목록)으로 필터한 assignments/waves 레코드
 # assignments.jsonl(미날짜 레거시)은 항상 dated 파일보다 오래된 레코드만 담고 있는데,
 # 단순 `-name 'assignments*.jsonl' | sort`는 ASCII상 '.'(0x2e) > '-'(0x2d)라 레거시 파일을
 # 맨 뒤로 보낸다 — 그래서 명시적으로 먼저 읽는다(logging.md §1 "Reading across dates" 참고, issue #55).
 { [ -f "$logs/assignments.jsonl" ] && cat "$logs/assignments.jsonl"; \
   find "$logs" -name 'assignments-*.jsonl' 2>/dev/null | sort | xargs cat 2>/dev/null; \
 } 2>/dev/null \
-  | jq -c --argjson set '["<epic-num>","<child-1>","<child-2>"]' 'select(.issue as $i | $set | index($i))'
+  | jq -c --argjson set '["<root-num>","<child-1>","<child-2>"]' 'select(.issue as $i | $set | index($i))'
 find "$logs" -name 'waves*.jsonl' 2>/dev/null | sort | xargs cat 2>/dev/null \
-  | jq -c --argjson set '["<epic-num>","<child-1>","<child-2>"]' 'select(.issue as $i | $set | index($i))'
+  | jq -c --argjson set '["<root-num>","<child-1>","<child-2>"]' 'select(.issue as $i | $set | index($i))'
 cat "$logs/spawn-failures.jsonl" 2>/dev/null
 # term 전사: meta 라인(1행)의 issue가 집합에 드는 파일만 통째로 읽는다
 for f in "$logs"/term-*.jsonl; do
   [ -f "$f" ] || continue
-  head -1 "$f" | jq -e --argjson set '["<epic-num>","<child-1>","<child-2>"]' \
+  head -1 "$f" | jq -e --argjson set '["<root-num>","<child-1>","<child-2>"]' \
     'select(.type=="meta" and (.issue as $i | $set | index($i)))' >/dev/null 2>&1 && cat "$f"
 done
 ```
@@ -49,8 +50,8 @@ done
 전체 내용을 대상으로 한다(아래).
 
 **필터 공집합**: issue 필터에 걸린 레코드가 0개면 여기서 §5 요약(`filed=[]`)으로 즉시 종료한다 — 로그
-루트에 다른 epic의 기록만 있는 경우가 이에 해당한다. `spawn-failures.jsonl`에는 `issue` 필드가
-없으므로 렌즈 4도 이 날짜 범위(`ts` 기준)로 한정한다 — 범위 밖 항목은 이번 epic의 후보가 아니다.
+루트에 다른 실행의 기록만 있는 경우가 이에 해당한다. `spawn-failures.jsonl`에는 `issue` 필드가
+없으므로 렌즈 4도 이 날짜 범위(`ts` 기준)로 한정한다 — 범위 밖 항목은 이번 실행의 후보가 아니다.
 
 ## 2. 결함 후보 — 렌즈 4개
 
@@ -70,7 +71,7 @@ done
 
 - 후보마다 **로그 파일 경로 + 원문 인용(레코드 라인 그대로) 최소 1개**. 인용을 못 붙이는 후보는
   이슈화하지 않고 폐기 카운트에만 넣는다.
-- 신규 이슈는 **epic당 최대 3개**. 우선순위: 재발 횟수 → 영향 범위(걸린 스킬·사이트 수). 4번째
+- 신규 이슈는 **실행(root issue)당 최대 3개**. 우선순위: 재발 횟수 → 영향 범위(걸린 스킬·사이트 수). 4번째
   이하 후보는 가장 우선순위 높은 신규 이슈 본문의 "부록" 섹션에 목록으로 넣는다.
 
 ## 4. 중복 대조 → 이슈/코멘트
@@ -110,7 +111,7 @@ gh issue list --repo <skills-repo-slug> --state open --json number,title,labels 
    ```
 
 - 기존 open 이슈가 같은 결함을 다루면 **새 이슈 대신 그 이슈에 재발 코멘트**를 단다(증거 인용 +
-  epic 번호 + 위에서 조립한 "## 환경/버전" 섹션): `gh issue comment <num> --repo <skills-repo-slug>
+  root issue 번호 + 위에서 조립한 "## 환경/버전" 섹션): `gh issue comment <num> --repo <skills-repo-slug>
   --body "..."`. 재발 코멘트 횟수가 이 루프의 우선순위 신호다.
 - spawn-failure 후보는 `~/.agents/orca-workflows/spawn-failures.md`가 이미 부여한 known_issue
   번호와도 대조한다.
@@ -121,7 +122,7 @@ gh issue list --repo <skills-repo-slug> --state open --json number,title,labels 
   ```bash
   gh issue create --repo <skills-repo-slug> --label retro \
     --title "<대상 스킬>: <결함 한 줄>" \
-    --body "<대상 스킬 파일 경로 / 증거 인용(로그 경로+레코드 라인) / epic 번호 / 참조한 로그 경로 / 수정 방향 1문단(diff 금지) / 위에서 조립한 ## 환경/버전 섹션>"
+    --body "<대상 스킬 파일 경로 / 증거 인용(로그 경로+레코드 라인) / root issue 번호 / 참조한 로그 경로 / 수정 방향 1문단(diff 금지) / 위에서 조립한 ## 환경/버전 섹션>"
   ```
 
 ## 5. 보고
@@ -133,4 +134,4 @@ RETRO filed=[#12,#13] commented=[#7] discarded=2
 ```
 
 수집·분석·gh 어느 단계가 실패해도 가능한 데까지의 카운트와 실패 사실을 같은 형식으로 보고한다 —
-이 스킬은 best-effort이며, 실패를 epic 완료로 전파하는 책임은 호출자(`orca-workflow` §1d)에 있다.
+이 스킬은 best-effort이며, 실패를 실행 완료로 전파하지 않을 책임은 호출자(`orca-workflow` §1d)에 있다.

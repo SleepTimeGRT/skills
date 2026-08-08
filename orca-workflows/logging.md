@@ -80,7 +80,7 @@ chmod 600 "$target"
 이벤트 자체를 생략하지 말고, `sleeptimegrt-skills`에 스키마 구멍 이슈를 연다 — 이 규칙 자체가 새 값이
 필요할 때마다 반복되는 드리프트(#62, #69)를 막는 대상이다.
 
-`RETRO_DONE`/`RETRO_FAIL`은 task 라우팅이 아니라 epic retro 결과다 — `orca-workflow` §1d(epic close 직후의
+`RETRO_DONE`/`RETRO_FAIL`은 task 라우팅이 아니라 retro 결과다 — `orca-workflow` §1d(root issue close 직후의
 retro 사이트)만 쓴다. `RETRO_DONE` 라인은 per-call-site 추가 필드 규칙에 따라 `filed`/`commented`/`discarded`
 정수 카운트를 더해 남기고, `RETRO_FAIL` 라인은 카운트 필드를 생략한다.
 
