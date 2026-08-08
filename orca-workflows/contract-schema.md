@@ -1,6 +1,6 @@
 # Contract Negotiation Schema
 
-Shared reference for `orca-workflow`(§2a relay, §2d FAIL relay), `orca-task-runner`(§1, §7),
+Shared reference for `orca-workflow-task`(§1 relay, §4 FAIL relay), `orca-task-runner`(§1, §7),
 `orca-evaluate`(§1, §4). Defines the on-disk artifacts the contract lifecycle exchanges — 협상
 라운드(proposal/verdict/override)와 이행 평가(eval-report) 둘 다. The coordinator relays the
 directory path and round/attempt numbers only; generator and evaluator read/write these files
@@ -13,10 +13,10 @@ CONTRACT_DIR="$HOME/.local/state/orca-workflows/contracts/<project-slug>/issue-<
 install -d -m 700 "$CONTRACT_DIR"
 ```
 
-- `<project-slug>`: 대상 repo의 디렉토리명(예: `medicount`). 코디네이터(`orca-workflow`)가 계산해
+- `<project-slug>`: 대상 repo의 디렉토리명(예: `medicount`). 코디네이터(`orca-workflow-task`)가 계산해
   두 spec_text에 절대경로로 넣는다.
 - `<issue>`: 처리 중인 task issue 번호 — 큐 항목마다 별개 디렉토리다. 계산·생성 시점은 그 task의
-  §2a 시작 시(`orca-workflow` §0).
+  §1 시작 시(`orca-workflow-task` §0).
 - 워크트리 밖(전역)인 이유: worktree는 merge 후 삭제되지만 retro(`orca-retro`)는 root issue close 후에
   이 기록을 읽는다. 실수 커밋 위험도 없다. per-project 폴더는 repo가 다른 같은 issue 번호끼리의
   충돌을 막는다.
@@ -100,7 +100,7 @@ install -d -m 700 "$CONTRACT_DIR"
 - 2라운드에도 rejected일 때만 존재한다. evaluator의 verdict 파일은 수정하지 않는다 — 판정은
   rejected로 남고, 진행 결정만 여기 기록된다. `unresolved_reasons`는 `verdict-r2.json`의
   `reasons` 중 generator가 해소하지 못한 항목을 그대로 복사한다.
-- **override의 라우팅은 무조건 진행이 아니다** — 코디네이터(`orca-workflow` §2a)가 이 파일의
+- **override의 라우팅은 무조건 진행이 아니다** — 코디네이터(`orca-workflow-task` §1)가 이 파일의
   `unresolved_reasons[].target`만 기계적으로 확인해 분기한다: `ac_fidelity`가 하나라도 남아 있으면
   "무엇을 만들지" 자체에 이견이 남은 것이므로 코드 생성 없이 human escalate(`CONTRACT_ESCALATE`),
   `plan_coverage`만 남았으면 검증 방법 이견일 뿐이므로 진행(그 항목은 `orca-evaluate` §3 리뷰어의
@@ -124,7 +124,7 @@ install -d -m 700 "$CONTRACT_DIR"
 }
 ```
 
-- `verdict`: `"PASS"` | `"FAIL"` | `"ESCALATE"` — `orca-workflow`에 반환하는 값과 반드시 일치한다.
+- `verdict`: `"PASS"` | `"FAIL"` | `"ESCALATE"` — `orca-workflow-task`에 반환하는 값과 반드시 일치한다.
 - `findings[].severity`: `"critical"` | `"important"` | `"minor"`.
 - `code_review_ran`: 이 attempt에서 §3 code review가 실제 실행됐는가. agent e2e 실패 확정으로
   fail-fast 생략된 attempt는 `false`.

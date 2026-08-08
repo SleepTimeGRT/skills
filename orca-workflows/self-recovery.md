@@ -2,7 +2,7 @@
 
 > verified_at: 2026-08-07
 
-Shared wait/recovery procedure for `orca-task-runner`/`orca-workflow`
+Shared wait/recovery procedure for `orca-task-runner`/`orca-workflow-task`/`orca-workflow-epic`
 (`docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md`) — split out so both `SKILL.md`
 files point here instead of each repeating the same loop (same precedent as `dispatch-verify.md`/
 `logging.md`/`spawn-failures.md`).
@@ -26,7 +26,7 @@ dead) — never as the default.
 
 - The calling coordinator has already created and bound its own Run once, at the start of its own
   session: `orca orchestration run-create --objective "<...>" --from <own handle> --json`. Never reuse
-  a *different* coordinator's Run (e.g. `orca-task-runner` must not reuse `orca-workflow`'s Run, and
+  a *different* coordinator's Run (e.g. `orca-task-runner` must not reuse `orca-workflow-task`'s Run, and
   vice versa) — mixing Runs cross-delivers `worker_done`/`escalation` messages between unrelated
   mailboxes.
 - The worker terminal has already been dispatched via `orca orchestration worker-start --task
@@ -39,7 +39,7 @@ dead) — never as the default.
 ## The wait/recovery loop
 
 Run this once per pending dispatch. `WORKER_HANDLE`/`TASK_ID`/`DISPATCH_ID`/`MY_HANDLE`/`RUN_ID` are
-caller-supplied for that dispatch; `CALLING_SKILL` (`orca-task-runner` or `orca-workflow`) and
+caller-supplied for that dispatch; `CALLING_SKILL` (`orca-task-runner`, `orca-workflow-task`, or `orca-workflow-epic`) and
 `ISSUE_NUM` are caller-supplied constants for the whole session. A wave has one pending-set entry per
 subtask, keyed by `task_id` (stable across retries — a `worker_abandon_retry` changes `dispatch_id`, so
 update the entry's `dispatch_id` in place rather than adding a second entry). `retry_count` is likewise
@@ -94,10 +94,10 @@ if [ "$timed_out" = "true" ]; then
   # distinct so a late completion from the old dispatch can't be confused with the retry).
   # orca-task-runner adds "wave_index":<n> to the JSON object below as an extra field (same
   # per-call-site extra-field convention logging.md §1 already uses for "assign" events) so it
-  # joins with that wave's wave_start/wave_end records; orca-workflow omits it (no wave concept).
+  # joins with that wave's wave_start/wave_end records; orca-workflow-task/orca-workflow-epic omit it (no wave concept).
   install -d -m 700 ~/.local/state/orca-workflows/logs
   target="$HOME/.local/state/orca-workflows/logs/waves-$(date -u +%F).jsonl"   # orca-task-runner
-  # or: target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"   # orca-workflow
+  # or: target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"   # orca-workflow-task / orca-workflow-epic
   printf '{"ts":"%s","event":"self_recovery","skill":"%s","issue":"%s","task_id":"%s","dispatch_id":"%s","terminal":"%s","waited_ms":3600000,"terminal_status":"%s","action_taken":"%s","new_dispatch_id":"%s"}\n' \
     "$(date -u +%FT%TZ)" "$CALLING_SKILL" "$ISSUE_NUM" "$TASK_ID" "$DISPATCH_ID" "$WORKER_HANDLE" \
     "$terminal_status" "$action_taken" "$new_dispatch_id" >> "$target"
@@ -112,7 +112,7 @@ fi
 # result.timedOut == "false": process every message in the batch, then ack.
 # for msg in result.messages: worker_done -> remove this task_id from the pending set;
 #                              escalation  -> route immediately (decision_gate reply, or escalate
-#                                             to orca-workflow) -- do not wait for the rest of the
+#                                             to the coordinator) -- do not wait for the rest of the
 #                                             pending set first.
 orca orchestration check --run "$RUN_ID" --ack "<result.deliveryId>" --peek --json   # mandatory
 # if pending set non-empty: loop back to the top with the remaining task_ids.
@@ -128,7 +128,7 @@ The liveness `terminal read` above does not count as "already reads that termina
 `recv` line for it.
 
 **Retry budget: 2** `worker_abandon_retry` attempts per `task_id`, matching `orca-task-runner` §6's
-task-level-gate retry limit and `orca-workflow` §2d's FAIL-retry limit.
+task-level-gate retry limit and `orca-workflow-task` §4's FAIL-retry limit.
 
 **1-hour (`--timeout-ms 3600000`) is a starting default**, spot-checked live only up to ~180 seconds
 during the design investigation and once for ~10 minutes during implementation — not proven safe for a
