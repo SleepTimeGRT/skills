@@ -14,18 +14,9 @@ Launch:
 codex --model <id> -c model_reasoning_effort=<effort>
 ```
 
-Use `codex exec` for headless runs. `-s workspace-write -a never` permits reads and writes inside the
-workspace without approval prompts; it is not read-only. Use `-s read-only -a never` when the reviewer
-must not write.
-
-**Linked worktree exception:** the writable boundary `-s workspace-write` grants is the worktree's own
-filesystem path, nothing more. In a linked worktree (`~/worktrees/...` — `orca-task-runner`'s standard
-per-task layout), `.git` is not a directory but a file that points at the parent repository's
-`.git/worktrees/<name>/`. That target path lives outside the worktree's own filesystem tree, so it is
-outside the sandbox boundary. A codex worker launched this way edits source files normally, but any
-`git add`/`git commit` it runs fails — the write lands on a path the sandbox denies. Do not have codex
-workers commit in this configuration; see `skills/orca-task-runner/SKILL.md` §2 (subtask spec, provider=codex
-branch) and §5 (commit-helper terminal) for the contract this exception drives.
+Use `codex exec` for headless runs. `-s workspace-write` permits reads and writes inside the workspace;
+it is not read-only. Approval policy is separate from the sandbox boundary. Use `-s read-only` when the
+reviewer must not write.
 
 ## Mapping
 
@@ -33,23 +24,16 @@ branch) and §5 (commit-helper terminal) for the contract this exception drives.
 |---|---|---|
 | `gpt-5.6-sol` | High Risk implementation and final review | high; xhigh for security/final gates with asymmetric miss cost |
 | `gpt-5.6-terra` | Routine implementation and bounded first-pass triage | medium |
-| `gpt-5.6-luna` | Simple work, plus narrow-context Routine subtasks (single file or small bounded diff) | max |
+| `gpt-5.6-luna` | Clear, repeatable, high-volume work; narrow-context routine subtasks | medium |
 
 Routine review path: Terra may triage a bounded diff, but final or high-risk judgment escalates to Sol.
-Do not use Luna for large diffs, long logs, final code review, or anything requiring reasoning across
-multiple files or a large codebase — its long-context recall collapses regardless of effort level (see
-reference, MRCR). Luna's role is bounded-context volume work, not depth.
+Luna's role is clear, repeatable, high-volume work.
 
 ## Effort support
 
-The current Codex catalog exposes:
-
-- Sol and Terra: `low`, `medium`, `high`, `xhigh`, `max`, `ultra`
-- Luna: `low`, `medium`, `high`, `xhigh`, `max`
-
-`max` is opt-in for the hardest single-agent problems. Do not use `ultra` for Orca workers: it adds
-automatic delegation on top of Orca's explicit orchestration. Use only the model-specific values listed
-above.
+Use the lowest reasoning effort that produces the required result, then increase it when the task needs
+more planning, analysis, or checking. `max` is for the hardest single-agent problems. Ultra uses automatic
+task delegation. Do not use `ultra` for Orca workers; Orca owns parallel decomposition explicitly.
 
 ## Launch precondition
 

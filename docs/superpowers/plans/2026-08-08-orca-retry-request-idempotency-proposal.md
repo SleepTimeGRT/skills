@@ -91,7 +91,7 @@ below for the one executable mutating call site that lives outside that family a
 not counted in the 16.
 
 `orca terminal create` sites are excluded throughout (flag unsupported, confirmed above) — 3 in
-`orca-workflow`, 4 in `orca-task-runner` (3 provider launches + 1 commit-helper), 4 in
+`orca-workflow`, 3 in `orca-task-runner` (provider launches), 4 in
 `orca-evaluate`. `orca orchestration task-list` (round-2+ relay's `reportPath` lookup) is also
 excluded — it's a read, not a mutation, and `--help` for it is not claimed to expose the flag (not
 checked; out of AC2's named scope of task-create/dispatch/worker-start).
