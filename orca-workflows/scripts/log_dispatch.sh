@@ -36,8 +36,8 @@
 # portability contract. A bash-only `${!req}` loop was tried first and rejected: in zsh it throws
 # "bad substitution", and that error unwinds the entire sourced script (not just this function),
 # silently skipping every later command in the same fenced block — including, at this issue's site
-# 1, the evaluator dispatch that follows the task-runner log_dispatch call in the shared §2a
-# round-1 block.
+# 1, the evaluator dispatch that follows the task-runner log_dispatch call in the shared
+# `orca-workflow-task` §1 round-1 block.
 #
 # Writes, in order: (1) assign event, (2) meta(if first write to this handle)+sent to
 # term-<handle>.jsonl. If (1) fails (install -d/chmod/write error), returns non-zero immediately

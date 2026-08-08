@@ -54,13 +54,13 @@ description: Use when generating the implementation for one task (issue) — pro
 
   이후 §5의 모든 `worker-start`/`check --wait`/`--ack` 호출 앞에서
   `RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt")"`로 다시 읽는다.
-  `orca-workflow`가 이 세션을 스폰할 때 자기 Run을 갖고 있더라도 그건 재사용하지 않는다(Run이 섞이면
+  `orca-workflow-task`가 이 세션을 스폰할 때 자기 Run을 갖고 있더라도 그건 재사용하지 않는다(Run이 섞이면
   서로 다른 세션의 `worker_done`이 잘못된 mailbox로 전달된다 — `~/.agents/orca-workflows/self-recovery.md`
   참고).
 
 ## 1. Contract 제안 (generator 역할)
 
-`orca-workflow`가 이 task를 넘기면, 코드를 쓰기 전에 **제안서**를 먼저 쓴다 — 프리텍스트가 아니라
+`orca-workflow-task`가 이 task를 넘기면, 코드를 쓰기 전에 **제안서**를 먼저 쓴다 — 프리텍스트가 아니라
 spec으로 받은 `CONTRACT_DIR`에 `proposal-r<라운드>.json`으로,
 `~/.agents/orca-workflows/contract-schema.md`의 스키마 그대로:
 
@@ -177,7 +177,7 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
 ```
 
 - **완료 대기와 self-recovery**: `~/.agents/orca-workflows/self-recovery.md`의 wait/recovery 루프를 그대로 따른다 — 이 wave의 각 subtask `task_id`를 pending set에 넣고, `check --wait`(+`--ack`)로 기다리다 타임아웃되면 그 파일의 alive/stuck_draft/dead 분기(`worker-abandon`→`worker-start --retry-of`)로 복구한다. `dead` 판정 후 재시도할 때는 새 worker 터미널을 §3의 launch 템플릿으로 다시 띄운다(모델·effort는 같은 subtask이므로 재-resolve 없이 그대로 재사용).
-- decision_gate(워커 ask) → 판단 가능하면 `reply`, 불가하면 `orca-workflow`에 에스컬레이션.
+- decision_gate(워커 ask) → 판단 가능하면 `reply`, 불가하면 `orca-workflow-task`에 에스컬레이션.
 - **`orca_call_with_retry` exhausted로 인한 worker_done 유실**(위 self-recovery와는 다른 시나리오 — Orca 오케스트레이션 API 자체에 닿을 수 없는 경우, issue #41/#42): 커밋/산출물/worktree 루트의 `.orca-orphaned-result-<task_id>.json`(⑦의 exhausted 폴백 산출물) 확인 + `task-update --status completed` 수동 복구, 기록. orphan 파일은 복구 반영 후 삭제한다.
 - **완료 확인된 subtask 터미널은 즉시 닫는다** — wave 전체를 기다리지 않고, 그 subtask의 `worker_done` 수신(taskId+dispatchId 일치) 또는 위 유실 복구가 끝나는 즉시:
 
@@ -194,7 +194,7 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
   # 기록할 수 있다.
   ```
 
-  `--tab`을 반드시 붙인다 — 실측 결과 `--tab` close는 기저 프로세스를 실제로 종료시키고 메모리를 회수하지만(`diagnostics memory`에서 세션이 사라짐), `--tab` 없는 close는 pane만 닫고 프로세스가 남을 수 있다. close 전에 `term-<impl_handle>.jsonl`에 마지막 `recv`를 남기는 이유는 close하면 스크롤백이 사라져서, §6 task-레벨 게이트가 나중에 실패했을 때 "이 subtask가 뭘 했는지" 재확인할 방법이 없어지기 때문이다. worker_done/유실 복구 둘 다 확인 전에는(단순히 활동이 멈췄다는 이유만으로는) 닫지 않는다 — 아직 파일 쓰기·커밋이 끝나지 않은 프로세스를 죽일 위험이 있다. 이 close는 §3에서 매 wave 새 터미널을 스폰하는 구조라 재사용 대상이 없다는 전제 위에서만 안전하다 — 이 스킬 밖(범용 `orchestration`, `orca-workflow` 자체 relay 터미널)에는 적용하지 않는다.
+  `--tab`을 반드시 붙인다 — 실측 결과 `--tab` close는 기저 프로세스를 실제로 종료시키고 메모리를 회수하지만(`diagnostics memory`에서 세션이 사라짐), `--tab` 없는 close는 pane만 닫고 프로세스가 남을 수 있다. close 전에 `term-<impl_handle>.jsonl`에 마지막 `recv`를 남기는 이유는 close하면 스크롤백이 사라져서, §6 task-레벨 게이트가 나중에 실패했을 때 "이 subtask가 뭘 했는지" 재확인할 방법이 없어지기 때문이다. worker_done/유실 복구 둘 다 확인 전에는(단순히 활동이 멈췄다는 이유만으로는) 닫지 않는다 — 아직 파일 쓰기·커밋이 끝나지 않은 프로세스를 죽일 위험이 있다. 이 close는 §3에서 매 wave 새 터미널을 스폰하는 구조라 재사용 대상이 없다는 전제 위에서만 안전하다 — 이 스킬 밖(범용 `orchestration`, `orca-workflow-task` 자체 relay 터미널)에는 적용하지 않는다.
 
 **Wave telemetry(종료)** — 이 wave의 모든 subtask가 완료(worker_done 또는 수동 복구)된 직후 1회, §3 `wave_start`와 같은 `issue`+`wave_index`로 join되도록:
 
@@ -238,7 +238,7 @@ bash -lc '<repo의 pgTAP 커맨드, 예: pg_prove> > <worktree 루트>/.gate-pgt
 어떤 시도든 통과하면 이후 시도는 생략하되, 지금까지의 attempt 로그는 지우지 않는다 — §7 반환값이
 필요로 한다.
 
-실패 시 subtask 게이트(§4)와 같은 방식으로 스스로 고치고 재시도한다. 단 subtask 게이트와 달리 **재시도 한도 2회**(무한 자가치유가 아니다 — `orca-workflow` §2d의 evaluate-FAIL 재시도 한도와 같은 숫자로 맞췄다). 2회 시도 후에도 통과 못하면 `orca-evaluate`를 호출하지 않고 `orca-workflow`에 **`GATE_FAIL`**을 직접 반환한다 — 기계적으로도 안 돌아가는 코드를 agent e2e·code review 같은 비싼 단계에 태울 이유가 없다.
+실패 시 subtask 게이트(§4)와 같은 방식으로 스스로 고치고 재시도한다. 단 subtask 게이트와 달리 **재시도 한도 2회**(무한 자가치유가 아니다 — `orca-workflow-task` §4의 evaluate-FAIL 재시도 한도와 같은 숫자로 맞췄다). 2회 시도 후에도 통과 못하면 `orca-evaluate`를 호출하지 않고 `orca-workflow-task`에 **`GATE_FAIL`**을 직접 반환한다 — 기계적으로도 안 돌아가는 코드를 agent e2e·code review 같은 비싼 단계에 태울 이유가 없다.
 
 **재시도 후 통과("flake"로 재분류)를 §7 반환값 없이 조용히 넘기지 않는다.** 1회차가 실패하고 이후
 시도가 통과해 게이트를 넘겼다면, §7 반환값에 다음을 반드시 포함한다: 실패했던 attempt의 spec
@@ -249,7 +249,7 @@ bash -lc '<repo의 pgTAP 커맨드, 예: pg_prove> > <worktree 루트>/.gate-pgt
 
 ## 7. 완료
 
-Task 레벨 게이트(§6)를 통과하면 → task 전체 diff를 정리해 `orca-workflow`에 반환한다(diff 경로 + resolved providers/models + wave 구성 기록 + (§6에서 재시도 후 통과한 경우) flake 증거: 실패 attempt의 spec 파일명·에러 첫 줄 + 알려진 flake 목록 대조 결과). **`orca-evaluate`는 이 스킬이 직접 호출하지 않는다** — `orca-workflow`가 호출한다. (§6에서 `GATE_FAIL`을 반환한 경우엔 diff를 넘기지 않는다 — 그 자체가 반환값이다.)
+Task 레벨 게이트(§6)를 통과하면 → task 전체 diff를 정리해 `orca-workflow-task`에 반환한다(diff 경로 + resolved providers/models + wave 구성 기록 + (§6에서 재시도 후 통과한 경우) flake 증거: 실패 attempt의 spec 파일명·에러 첫 줄 + 알려진 flake 목록 대조 결과). **`orca-evaluate`는 이 스킬이 직접 호출하지 않는다** — `orca-workflow-task`가 호출한다. (§6에서 `GATE_FAIL`을 반환한 경우엔 diff를 넘기지 않는다 — 그 자체가 반환값이다.)
 
 **Evaluate-FAIL 재시도로 재호출된 경우**(spec에 attempt 번호가 있음): contract 협상(§1)을 다시 하지 않는다 — 확정 AC는 그대로다. `CONTRACT_DIR`의 `eval-report-a<attempt>.json`에서 `findings`를 직접 읽고(코디네이터는 본문을 중계하지 않는다 — `~/.agents/orca-workflows/contract-schema.md`), 그 수정에 필요한 만큼만 §2~§5를 다시 태운 뒤 §6 task-레벨 게이트를 전체 재통과시키고 위 §7 반환을 반복한다. 수정 결과에 대한 서술형 해명을 evaluator에게 보내지 않는다 — 재평가의 입력은 diff의 사실 변화뿐이다(같은 문서의 "재시도 입력 격리").
 

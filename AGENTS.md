@@ -61,7 +61,7 @@ skills so the recorded commit never lies about the deployed content.
 
 `orca-workflows/` is intentionally *not* brought under the commit-pinned mechanism above.
 `~/.agents/orca-workflows/` is a plain symlink to this repo's local main-branch checkout
-(single machine, single consumer: the three `orca-*` skills that read
+(single machine, single consumer: the `orca-*` skills that read
 `model-selection.md`/`spawn-failures.md`/`logging.md` from it, plus `orca-workflows/scripts/` for
 executable helpers such as `orca_call_with_retry.sh` — issue #42 — that call sites `source`
 directly and invoke, not just read as reference prose). It isn't installed by other repos via
@@ -77,7 +77,7 @@ worktree currently in use.
 
 ## Orca-\* skill design principle: diagnose + self-recover, don't bypass
 
-For `orca-workflow`/`orca-task-runner`/`orca-evaluate` (and any future skill wrapping Orca's CLI/features):
+For `orca-workflow`/`orca-workflow-epic`/`orca-workflow-task`/`orca-task-runner`/`orca-evaluate` (and any future skill wrapping Orca's CLI/features):
 use Orca's own features as fully as possible. When one of them misbehaves, the required fix order is:
 
 1. **Diagnose** — reproduce, capture the exact failure text/signature and where it fires (this is what

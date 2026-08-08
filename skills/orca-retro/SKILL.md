@@ -1,11 +1,11 @@
 ---
 name: orca-retro
-description: Use right after orca-workflow closes its root issue (an epic or a standalone task issue) — analyzes only that run's logs under ~/.local/state/orca-workflows/logs/ (assignments/outcome events, spawn-failures, term transcripts) through four defect lenses (documented-schema violations, repeated FAILs attributable to skill prose, preventable escalations or human interventions, new spawn-failure signatures) and files at most 3 evidence-backed skill-defect issues on the sleeptimegrt-skills repo, deduplicating against open issues via recurrence comments. Never edits skills directly — output is issues only; fixes flow through the normal /orca-workflow pipeline later. Best-effort by contract: no retro failure may block the run. Self-relative.
+description: Use right after an orca-workflow invocation ends (retro runs regardless of how the run ended) — analyzes only that run's logs under ~/.local/state/orca-workflows/logs/ (assignments/outcome events, spawn-failures, term transcripts) through four defect lenses (documented-schema violations, repeated FAILs attributable to skill prose, preventable escalations or human interventions, new spawn-failure signatures) and files at most 3 evidence-backed skill-defect issues on the sleeptimegrt-skills repo, deduplicating against open issues via recurrence comments. Never edits skills directly — output is issues only; fixes flow through the normal /orca-workflow pipeline later. Best-effort by contract: no retro failure may block the run. Self-relative.
 ---
 
 # Orca Retro
 
-방금 닫힌 root issue 실행 하나의 로그만 분석해 **스킬 결함 이슈**를 만든다.
+방금 끝난 orca-workflow invocation 하나의 로그만 분석해 **스킬 결함 이슈**를 만든다.
 환경(orca-* 스킬군) 자체를 개선하는 피드백 루프의 관측→이슈 단계다. 코드를 만들지 않고, 스킬 파일을
 직접 수정하지 않는다 — 산출물은 sleeptimegrt-skills 이슈(또는 기존 이슈의 재발 코멘트)뿐이며, 수정
 자체는 나중에 그 이슈를 평소의 `/orca-workflow` 파이프라인이 집어 처리한다.
@@ -13,7 +13,7 @@ description: Use right after orca-workflow closes its root issue (an epic or a s
 ## 0. 입력·전제
 
 - 입력 3개: root issue 번호, 대상 repo, skills repo(sleeptimegrt-skills)의 GitHub slug.
-- 큐 issue 목록: 호출자(`orca-workflow` §1d)가 spec_text로 넘긴 목록을 그대로 쓴다. 목록 자체가 안
+- 큐 issue 목록: 호출자(`orca-workflow` §2)가 spec_text로 넘긴 목록을 그대로 쓴다. 목록 자체가 안
   넘어온 경우에만 `~/.agents/orca-workflows/issue-trackers/selection.md` 절차로 백엔드를 정해
   `list_children(root-num)`으로 해석한다(child 없는 issue면 빈 목록). root issue ∪ 이 목록(중복 제거)이
   이번 분석의 issue 집합이다 — size-1 큐면 root 1건이다.
@@ -97,7 +97,7 @@ gh issue list --repo <skills-repo-slug> --state open --json number,title,labels 
    ```
 
    `sv.skill`이 이 후보의 **대상 스킬**(`<대상 스킬>`)과 다르면 — term 로그의 meta는 그 터미널을
-   **스폰한** 스킬을 적기 때문에 흔히 벌어진다(예: `orca-workflow`가 `skill="orca-workflow",
+   **스폰한** 스킬을 적기 때문에 흔히 벌어진다(예: `orca-workflow-task`가 `skill="orca-workflow-task",
    role="task-runner"`로 `orca-task-runner` 터미널을 스폰) — 뽑은 값을 "스폰한 스킬(`sv.skill`)의
    버전"이라고 명시하고, 대상 스킬 자체 버전은 아래 우선순위 2를 **추가로** 돌려 함께 싣는다.
 
@@ -134,4 +134,4 @@ RETRO filed=[#12,#13] commented=[#7] discarded=2
 ```
 
 수집·분석·gh 어느 단계가 실패해도 가능한 데까지의 카운트와 실패 사실을 같은 형식으로 보고한다 —
-이 스킬은 best-effort이며, 실패를 실행 완료로 전파하지 않을 책임은 호출자(`orca-workflow` §1d)에 있다.
+이 스킬은 best-effort이며, 실패를 실행 완료로 전파하지 않을 책임은 호출자(`orca-workflow` §2)에 있다.

@@ -2,7 +2,7 @@
 
 > verified_at: 2026-07-30
 
-Shared logging procedure for `orca-task-runner`/`orca-evaluate`/`orca-workflow`, split out so the three
+Shared logging procedure for `orca-task-runner`/`orca-evaluate`/`orca-workflow-task`/`orca-workflow-epic`/`orca-workflow`, split out so the
 `SKILL.md` files point here instead of each carrying its own copy of the same jq/printf (same precedent as
 `spawn-failures.md`). Every path below lives under `~/.local/state/orca-workflows/logs/` — git-untracked
 (the `orca-logs-not-git-tracked` convention: this directory is *not* under the `~/.agents/orca-workflows`
@@ -29,8 +29,8 @@ Append exactly the same jq/printf record shape used today, to `"$target"`, then 
 
 ### Event recipes (unchanged schemas, only the path changed)
 
-(`orca-workflow`'s three dispatch sites — §2a's task-runner/evaluator round-1 calls and the round-2+
-relay — write this event via `orca-workflows/scripts/log_dispatch.sh` rather than hand-copying the
+(`orca-workflow-task`'s three dispatch sites — §1's task-runner/evaluator round-1 calls and the round-2+
+relay — and `orca-workflow-epic`'s task-coordinator site — write this event via `orca-workflows/scripts/log_dispatch.sh` rather than hand-copying the
 recipe below; issue #68. If you change this schema, update that script's jq call to match.)
 
 **`assign`** (who got dispatched what):
@@ -56,11 +56,11 @@ Extra fields (`wave_index`, `subtask_type`, `advisor`, ...) are added per call s
 있다. `task_id` 필드는 기존 `<task_id-or-omit>` 규칙대로 그대로 생략한다 — 빈 문자열(`""`)이나 issue
 #62에서 실제로 관찰된 것 같은 즉석 placeholder 문자열을 넣지 않는다. 대신 extra field로 `"relay":true`를
 추가해 "몰라서 생략"과 "relay라서 없음"을 로그에서 구분한다.
-`orca-workflow` §2a의 라운드 2+ relay(issue #64로 해소)는 매 라운드 `task-create`로 새 task를 만들므로
+`orca-workflow-task` §1의 라운드 2+ relay(issue #64로 해소)는 매 라운드 `task-create`로 새 task를 만들므로
 현재 이 사이트엔 이 규칙이 적용되지 않는다 — 다만 진짜 task_id가 없는 다른 relay dispatch에는 이 규칙이
 그대로 적용된다.
 
-**`outcome`** (`orca-workflow` only — routing result for a task). 값은 두 축으로 나뉜다 — 둘 다 같은
+**`outcome`** (coordinator 스킬 전용 — task 라우팅 결과는 `orca-workflow-task`, `RETRO_*`는 `orca-workflow`). 값은 두 축으로 나뉜다 — 둘 다 같은
 `outcome` JSON 필드에 담기지만 의미가 다르므로 구분해서 읽는다:
 
 - **verdict 축** — task 라우팅 판정: `PASS`|`FAIL`|`ESCALATE`|`GATE_FAIL`|`CONTRACT_ESCALATE`|`CI_GATE_FAIL`
@@ -71,16 +71,18 @@ Extra fields (`wave_index`, `subtask_type`, `advisor`, ...) are added per call s
 ```bash
 install -d -m 700 ~/.local/state/orca-workflows/logs
 target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
-printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|CONTRACT_ESCALATE|CI_GATE_FAIL|NO_DONE_TRANSITION|CONTRACT_FINALIZED_BY_GENERATOR|CONTRACT_APPROVED_ROUND1|MANUAL_RECOVERY_COMPLETED|CI_GATE_TIMEOUT|MERGE_CONFLICT|RETRO_DONE|RETRO_FAIL>","retry":<n>}\n' \
+printf '{"ts":"%s","event":"outcome","skill":"<skill>","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|CONTRACT_ESCALATE|CI_GATE_FAIL|NO_DONE_TRANSITION|CONTRACT_FINALIZED_BY_GENERATOR|CONTRACT_APPROVED_ROUND1|MANUAL_RECOVERY_COMPLETED|CI_GATE_TIMEOUT|MERGE_CONFLICT|RETRO_DONE|RETRO_FAIL>","retry":<n>}\n' \
   "$(date -u +%FT%TZ)" >> "$target"
 chmod 600 "$target"
 ```
+
+`skill`은 기록 주체다 — task 라우팅 outcome은 `orca-workflow-task`, `RETRO_*`는 `orca-workflow`.
 
 **목록에 없는 정상 분기를 만나면** 즉석 문자열을 발명하거나(issue #62에서 최초 관측된 패턴) outcome
 이벤트 자체를 생략하지 말고, `sleeptimegrt-skills`에 스키마 구멍 이슈를 연다 — 이 규칙 자체가 새 값이
 필요할 때마다 반복되는 드리프트(#62, #69)를 막는 대상이다.
 
-`RETRO_DONE`/`RETRO_FAIL`은 task 라우팅이 아니라 retro 결과다 — `orca-workflow` §1d(root issue close 직후의
+`RETRO_DONE`/`RETRO_FAIL`은 task 라우팅이 아니라 retro 결과다 — `orca-workflow` §2(invocation 종료 시의
 retro 사이트)만 쓴다. `RETRO_DONE` 라인은 per-call-site 추가 필드 규칙에 따라 `filed`/`commented`/`discarded`
 정수 카운트를 더해 남기고, `RETRO_FAIL` 라인은 카운트 필드를 생략한다.
 
@@ -89,19 +91,19 @@ task-runner(generator) 쪽 결정이 그대로 확정된 경우다(라운드 한
 `ac_fidelity` 이견이 남았으면 아래 `CONTRACT_ESCALATE`로 간다) — PASS/FAIL/ESCALATE 어느 것도 아닌 정상 분기이므로,
 이 결과에 도달했을 때 outcome 이벤트 자체를 생략하지 말고 반드시 이 값으로 남긴다(observed in practice:
 issue #62). 이 라인은 per-call-site 추가 필드 규칙에 따라 `round`(도달한 계약 협상 라운드 수)를 더해
-남긴다 — `retry`는 §2 하단의 task-level FAIL 재-dispatch 횟수를 세는 별개 필드이므로, 라운드 수를 `retry`에
+남긴다 — `retry`는 `orca-workflow-task` §4의 task-level FAIL 재-dispatch 횟수를 세는 별개 필드이므로, 라운드 수를 `retry`에
 넣지 않는다.
 
 `CONTRACT_ESCALATE`는 contract 협상이 라운드 한도에 도달했고 `override.json`의 `unresolved_reasons`에
-`ac_fidelity` target이 남아, 코드 생성(2b) 없이 곧장 Inspecting으로 보낸 경우다(`orca-workflow` §2a의
+`ac_fidelity` target이 남아, 코드 생성(§2 Generate) 없이 곧장 §5로 보낸 경우다(`orca-workflow-task` §1의
 기계적 분기 — `contract-schema.md`의 override 라우팅 규칙 참고). 같은 라운드-한도 지점의 다른 갈래인
 `CONTRACT_FINALIZED_BY_GENERATOR`(`plan_coverage`만 남은 경우, 진행)와 상호 배타다. 이 라인은
 per-call-site 추가 필드 규칙에 따라 `round`(도달한 라운드 수)를 더해 남긴다.
 
-`CONTRACT_APPROVED_ROUND1`는 contract 협상이 라운드 1에서 곧장 승인되어 재협상 없이 2b(Generate)로
+`CONTRACT_APPROVED_ROUND1`는 contract 협상이 라운드 1에서 곧장 승인되어 재협상 없이 §2(Generate)로
 넘어가는 정상 분기다 — PASS/FAIL/ESCALATE 어느 것도 아니므로 outcome 이벤트를 생략하지 말고 이 값으로
 남긴다(issue #69 — 이전엔 이 분기가 즉석 문자열을 발명하거나(#498) 이벤트 자체를 생략했다(#499~#501)).
-`skills/orca-workflow/SKILL.md` §2a가 이 분기(승인 시점, 2b로 넘어가기 전)에서 기록을 지시한다 — 위
+`skills/orca-workflow-task/SKILL.md` §1이 이 분기(승인 시점, §2로 넘어가기 전)에서 기록을 지시한다 — 위
 `CONTRACT_FINALIZED_BY_GENERATOR`(라운드 한도 도달) 지시와 대칭. 이 라인은 per-call-site 추가 필드
 규칙에 따라 `round=1`을 고정해 남긴다 — 라운드 한도 도달 케이스의 가변 `round`와 값 자체로 구분된다.
 
@@ -118,20 +120,20 @@ per-call-site 추가 필드 규칙에 따라 `round`(도달한 라운드 수)를
 **`wave_start`/`wave_end`** (`orca-task-runner` only): same jq schema as today, written to
 `waves-$(date -u +%F).jsonl` instead of the fixed `waves.jsonl`.
 
-**`self_recovery`** (`orca-task-runner`/`orca-workflow`, per `orca-workflows/self-recovery.md`'s
+**`self_recovery`** (`orca-task-runner`/`orca-workflow-task`/`orca-workflow-epic`, per `orca-workflows/self-recovery.md`'s
 wait/recovery loop):
 
 ```bash
 install -d -m 700 ~/.local/state/orca-workflows/logs
 target="$HOME/.local/state/orca-workflows/logs/waves-$(date -u +%F).jsonl"   # orca-task-runner
-# or: target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"   # orca-workflow
+# or: target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"   # orca-workflow-task / orca-workflow-epic
 printf '{"ts":"%s","event":"self_recovery","skill":"<skill>","issue":"<issue-num>","task_id":"<task_id>","dispatch_id":"<dispatch_id>","terminal":"<handle>","waited_ms":<n>,"terminal_status":"<alive|dead|stuck_draft>","action_taken":"<resumed_wait|retried_enter|worker_abandon_retry|escalated_spawn_failure>","new_dispatch_id":"<new dispatch_id-or-omit, only when action_taken=worker_abandon_retry>"}\n' \
   "$(date -u +%FT%TZ)" >> "$target"
 chmod 600 "$target"
 ```
 
 `orca-task-runner` writes to `waves-<date>.jsonl` (add `wave_index` as an extra field, joinable with
-that wave's `wave_start`/`wave_end` records); `orca-workflow` writes to `assignments-<date>.jsonl` (no
+that wave's `wave_start`/`wave_end` records); `orca-workflow-task`/`orca-workflow-epic` write to `assignments-<date>.jsonl` (no
 `wave_index`). Purpose: `self-recovery.md`'s 3600000ms timeout is an unvalidated starting guess — this
 log is what lets a future session re-derive a real distribution instead of guessing again, and lets
 `orca-retro`'s "repeated FAIL attributable to skill prose" lens notice if a particular signature
@@ -180,7 +182,7 @@ One file per Orca terminal handle, created the first time that terminal is dispa
 Line 1 is always the `meta` record; every line after that is one `sent` or `recv` event. This file fully
 replaces `orca-task-runner`'s old close-time `term-<handle>.json` single-snapshot file — do not write both.
 
-(`orca-workflow`'s three dispatch sites write `meta`+`sent` here via
+(`orca-workflow-task`'s three dispatch sites and `orca-workflow-epic`'s task-coordinator site write `meta`+`sent` here via
 `orca-workflows/scripts/log_dispatch.sh` — the same recipe as the `meta`/`sent` sections below,
 folded into one function call alongside the §1 `assign` write; issue #68. `recv` is never written by
 that helper — see the recv carve-out below.)

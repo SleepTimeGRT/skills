@@ -3,7 +3,7 @@
 > verified_at: 2026-07-30
 
 Shared post-`dispatch --inject`-or-`worker-start` verification procedure for
-`orca-task-runner`/`orca-evaluate`/`orca-workflow` (issue #43) — split out so the `SKILL.md` files point
+`orca-task-runner`/`orca-evaluate`/`orca-workflow-task`/`orca-workflow-epic`/`orca-workflow` (issue #43) — split out so the `SKILL.md` files point
 here instead of each repeating the same bash (same precedent as `logging.md`/`spawn-failures.md`). The
 same unsubmitted-draft failure mode reproduces identically under `worker-start`
 (`docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md`, Test 3) — the bash below is
@@ -98,7 +98,7 @@ before either read runs, which is exactly the false-negative case already priced
 harmless extra Enter, not a corrupted session).
 
 **This check does not violate a skill's "don't read terminal output for judgment" principle** (e.g.
-`orca-workflow`, "diff/report 본문을 직접 읽지 않는다"). It only tests whether a literal, known-in-advance
+`orca-workflow-task`, "diff/report 본문을 직접 읽지 않는다"). It only tests whether a literal, known-in-advance
 substring — the exact bytes this procedure itself injected — is present in the tail. It never inspects,
 interprets, or acts on anything the *target* produced; a byte-for-byte membership test against your own
 payload is not content interpretation, the same distinction the prior equality-only version relied on,
