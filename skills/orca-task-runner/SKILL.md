@@ -60,19 +60,25 @@ description: Use when generating the implementation for one task (issue) — pro
 
 ## 1. Contract 제안 (generator 역할)
 
-`orca-workflow`가 이 task를 넘기면, 코드를 쓰기 전에 **제안서**를 먼저 쓴다:
+`orca-workflow`가 이 task를 넘기면, 코드를 쓰기 전에 **제안서**를 먼저 쓴다 — 프리텍스트가 아니라
+spec으로 받은 `CONTRACT_DIR`에 `proposal-r<라운드>.json`으로,
+`~/.agents/orca-workflows/contract-schema.md`의 스키마 그대로:
 
-- 구현 범위(무엇을 만들 것인가, 어떤 파일을 건드릴 것인가)
-- 검증 방법(구체적인 파일/함수/테스트로 — issue의 acceptance-criteria 섹션[`orca-workflow`가 §0에서 해석해 dispatch spec으로 넘겨준 섹션명 — 트래커 백엔드마다 다르다]을 어떻게 커버할지)
-- (schema/migration 파일을 건드리는 경우) **의도된 destructive 오퍼레이션 목록.** 없으면
-  명시적으로 "없음"이라고 쓴다(공란은 "언급 안 함"이지 "없음"이 아니므로 구분한다). 이 선언은
+- **acceptance criteria 초안**(`draft_acceptance_criteria`) — issue 원문에서 도출한, 판정 가능한
+  완료 기준. 항목마다 id를 부여한다. issue 본문에 AC류 섹션이 이미 있으면 초안의 입력으로 쓰되,
+  정본은 이 초안이다.
+- 구현 범위(`scope`) — 무엇을 만들 것인가, 어떤 파일을 건드릴 것인가. **사실 서술만** — "왜
+  충분한가"류 정당화는 어떤 필드에도 넣지 않는다(스키마 문서의 "라운드 2 입력 격리" 참고).
+- 검증 방법(`verification_plan`) — 구체적인 파일/함수/테스트로, 항목마다 커버하는 ac id를
+  `covers`로 참조한다. 어떤 항목도 커버하지 않는 ac id가 남으면 반려 대상이다.
+- 의도된 destructive 오퍼레이션(`destructive_operations`) — 빈 배열이 "명시적 없음"이다. 이 선언은
   나중에 `orca-evaluate` §3가 diff에서 실제로 flag된 destructive-op와 대조하는 근거가 된다.
-- **이 변경으로 red가 되거나 갱신이 필요한 기존 테스트·단언 목록(파일:라인).** 없으면 명시적으로
-  "없음"이라고 쓴다(위 destructive-op 불릿과 같은 구분 — 공란은 "언급 안 함"이지 "없음"이 아니다).
-  "검증 방법" 불릿은 새로 추가할 검증만 묻는다 — 기존에 green이던 단언 중 이 변경으로 red가 될 것은
-  별도로 열거해야 한다(정확 일치 단언, 게이트 자체를 막는 회귀를 특히 놓치기 쉽다).
+- 이 변경으로 red가 되거나 갱신이 필요한 기존 테스트·단언(`existing_tests_affected`, file:line) —
+  빈 배열이 "명시적 없음"이다. `verification_plan`은 새로 추가할 검증만 담는다 — 기존에 green이던
+  단언 중 이 변경으로 red가 될 것은 여기 별도로 열거한다(정확 일치 단언, 게이트 자체를 막는 회귀를
+  특히 놓치기 쉽다).
 
-`orca-evaluate`가 이 제안을 issue의 원본 acceptance criteria에 대조해 검토한다. 반려되면 수정해서 다시 제안한다 — 각 라운드는 별도 dispatch로 도착한다: 제안서를 쓰고 나면 이번 턴을 끝낸다(주입된 preamble의 worker_done 지시대로), 같은 턴 안에서 반려 여부를 기다리거나 폴링하지 않는다. **최대 2 라운드.** 2라운드 안에 합의가 안 되면 이 스킬(generator)이 결정권을 가지고 그 제안대로 진행한다 — evaluator의 이견은 기록에 남기되 진행을 막지 않는다.
+`orca-evaluate`가 이 제안(AC 초안 포함)을 **원본 issue 전문**에 대조해 검토하고 `verdict-r<라운드>.json`으로 판정을 남긴다. 반려되면 그 `reasons`를 읽고 **수정된 사실로** 다시 제안한다(`proposal-r2.json` — 서술형 반박이 아니라 필드 수준의 변경으로 응답한다). 각 라운드는 별도 dispatch로 도착한다: 제안서를 쓰고 나면 이번 턴을 끝낸다(주입된 preamble의 worker_done 지시대로), 같은 턴 안에서 반려 여부를 기다리거나 폴링하지 않는다. **최대 2 라운드.** 2라운드 안에 합의가 안 되면 이 스킬(generator)이 결정권을 가지고 그 제안대로 진행한다 — evaluator의 verdict 파일은 수정하지 않고, `override.json`(스키마 문서 참고)에 미해소 `reasons`를 복사해 남긴 뒤 진행한다. 이후 모든 단계(§2 subtask 분해 포함)가 참조하는 확정 AC는 최종 라운드 proposal의 `draft_acceptance_criteria`다.
 
 ## 2. Subtask DAG 구성
 

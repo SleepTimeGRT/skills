@@ -13,7 +13,6 @@ repo의 tracker 문서에만 있다. 이 파일에는 project key·transition ID
 
 - `cloudId` (필수 — 이게 없으면 아래 오퍼레이션을 하나도 호출할 수 없다)
 - 정식 워크플로 transition 표, 그중 "완료"에 해당하는 이름
-- acceptance-criteria가 적히는 섹션 이름
 
 ## `get_issue(id)`
 

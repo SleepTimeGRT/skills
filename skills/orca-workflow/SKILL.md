@@ -12,8 +12,8 @@ description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-ma
 - `orca status --json` ready. 실패 시 아래 "폴백".
 - **이슈 트래커 해석** (실행 시작 시 1회, 캐싱 없이 — 매 실행마다 새로 읽는다): `~/.agents/orca-workflows/issue-trackers/selection.md`가 정의하는 절차로 백엔드를 정하고, 그 백엔드의 `~/.agents/orca-workflows/issue-trackers/{github,jira}.md`가 정의하는 `get_issue`/`get_issue_type`/`list_children`/`get_child_order`/`is_open`/`close_issue`/`link_pr_for_close`를 이후 전체 실행에서 쓴다. 구체 값(project key, transition id 등)은 이 스킬에 복제하지 않는다 — 항상 selection.md가 가리키는 대상 repo의 tracker 문서에서 얻는다.
 - **이슈 타입 판별** — `get_issue_type(issue-num)`으로 epic/task를 판별해 아래 "1. Epic 경로"/"2. Task 경로"로 분기한다.
-- **acceptance-criteria 섹션명** — 백엔드가 resolve한 tracker 문서(`~/.agents/orca-workflows/issue-trackers/{github,jira}.md`, 또는 온보딩으로 만들어진 대상 repo 문서)가 명시하는 이름을 쓴다. 이 스킬은 그 값을 복제하지 않는다 — 아래 §1·§2a의 "§0에서 해석한 acceptance-criteria 섹션명"은 이 값을 가리킨다.
-- **온보딩** — selection.md가 "문서 없음 + GitHub 형식이 아닌 이슈 ID"로 판정하면, 곧바로 GitHub로 넘어가지 않고 사용자에게 직접 묻는다: ①어떤 tracker를 쓰는지 + 그 API를 부르는 데 필요한 최소 정보(Jira라면 site·cloudId·project key) ②"완료" transition/상태 이름, acceptance-criteria 섹션 이름. 받은 답으로 `docs/agents/issue-tracker.md` 형식의 초안을 작성해 보여주고, 승인되면 별도의 작은 커밋으로 대상 repo에 반영한 뒤 이번 실행을 이어간다. 이후 실행부터는 문서가 있으므로 다시 트리거되지 않는다.
+- **Contract 디렉토리**(실행 시작 시 1회) — `~/.agents/orca-workflows/contract-schema.md`의 규칙대로 `CONTRACT_DIR`를 계산·생성(`install -d -m 700`)해 §2a의 두 spec_text에 절대경로로 넣는다. acceptance criteria는 issue 본문의 사전 섹션이 아니라 §2a 협상에서 초안·승인된다 — 산출물 파일(proposal/verdict/override)과 확정 AC의 정본 위치는 같은 문서가 정의한다.
+- **온보딩** — selection.md가 "문서 없음 + GitHub 형식이 아닌 이슈 ID"로 판정하면, 곧바로 GitHub로 넘어가지 않고 사용자에게 직접 묻는다: ①어떤 tracker를 쓰는지 + 그 API를 부르는 데 필요한 최소 정보(Jira라면 site·cloudId·project key) ②"완료" transition/상태 이름. 받은 답으로 `docs/agents/issue-tracker.md` 형식의 초안을 작성해 보여주고, 승인되면 별도의 작은 커밋으로 대상 repo에 반영한 뒤 이번 실행을 이어간다. 이후 실행부터는 문서가 있으므로 다시 트리거되지 않는다.
 - CLI 기반 coordinator(Codex/agy)는 launch 시 approval·sandbox를 명시한다. 기본 posture는 `-a never -s workspace-write`.
 - 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 —
   `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다. §2a의 두 `terminal create` 호출
@@ -57,7 +57,7 @@ description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-ma
 
 **1a. issue-drain** — 별도 subagent(이 세션과 다른, 별도로 뜬 세션)에게 child issue 전체 검증을 맡긴다:
 
-- 각 child issue가 self-contained한지(§0에서 해석한 acceptance-criteria 섹션 + "무엇을 만들지"가 본문에 있는지)
+- 각 child issue가 self-contained한지("무엇을 만들지"가 본문에 있고, 본문만으로 acceptance-criteria 초안을 쓸 수 있을 만큼 요구가 구체적인지 — AC 자체는 §2a 협상에서 초안된다)
 - 의존 관계가 있다면(`get_child_order`가 참고하는 것과 같은 그래프) 그게 실제로 존재하고 방향이 맞는지 — 의존 링크 자체가 없는 건 실패가 아니다
 - 그래프상 빠진 child나 순환 의존이 없는지
 
@@ -112,13 +112,7 @@ printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<epic-num>
 
 ## 2. Task 경로
 
-**2. 전제 — acceptance-criteria 섹션 존재 확인**: `orca-task-runner`를 dispatch하기 전에, §0에서 해석한
-acceptance-criteria 섹션명이 issue body에 실제로 있는지 먼저 확인한다. 없으면 **`orca-task-runner`를 호출하지
-않고** 바로 **3. Inspecting**으로 보고한다(outcome: `NO_ACCEPTANCE_CRITERIA`) — issue 생성 시 이 섹션을
-보장하는 절차는 아직 없어서다(별도 후속 이슈; 임시로는 `/triage` 리다이렉트 대상으로 취급). 이 확인은 여기
-한 곳에서만 하고 `orca-task-runner`/`orca-evaluate`에 반복하지 않는다.
-
-**2a. Contract 협상 relay** — `orca-task-runner`를 "제안서 작성" 모드로 호출 → 나온 제안서 파일 경로를 `orca-evaluate`에 "검토" 모드로 전달 → 반려면 파일 경로를 다시 `orca-task-runner`에 전달. **파일 내용은 읽지 않고 경로만 중계**한다. 최대 2라운드, 그 이후는 `orca-task-runner`가 결정권을 가지고 진행(그대로 2b로 넘어감). **라운드 한도 도달 시점에** — 2b로 넘어가기 전에 — `~/.agents/orca-workflows/logging.md` §1 `outcome` 레시피대로 `outcome=CONTRACT_FINALIZED_BY_GENERATOR`, `round=<도달한 라운드 수>`를 남긴다(issue #63 — 이전엔 이 분기가 outcome 이벤트를 전혀 남기지 않아 세션마다 즉석 문자열을 만들거나 로그를 누락했다). **라운드 1에서 곧장 승인된 시점에도** — 마찬가지로 2b로 넘어가기 전에 — 같은 레시피대로 `outcome=CONTRACT_APPROVED_ROUND1`, `round=1`을 남긴다(issue #69 — 이전엔 이 분기가 outcome 이벤트를 생략하거나 즉석 문자열을 발명했다).
+**2a. Contract 협상 relay** — `orca-task-runner`를 "제안서 작성" 모드로 호출(제안서 = `contract-schema.md` 스키마의 `proposal-r<n>.json`, **AC 초안 포함**) → `orca-evaluate`에 "검토" 모드로 전달(판정 = `verdict-r<n>.json`) → 반려면 다시 `orca-task-runner`에 전달. 산출물 경로는 §0의 `CONTRACT_DIR`와 라운드 번호로 결정론적이므로 **이 스킬은 파일을 읽지도, 경로를 추출하지도 않고 CONTRACT_DIR·라운드 번호만 중계**한다. 최대 2라운드, 그 이후는 `orca-task-runner`가 결정권을 가지고 진행(그대로 2b로 넘어감 — `override.json` 존재가 그 기록이다). **라운드 한도 도달 시점에** — 2b로 넘어가기 전에 — `~/.agents/orca-workflows/logging.md` §1 `outcome` 레시피대로 `outcome=CONTRACT_FINALIZED_BY_GENERATOR`, `round=<도달한 라운드 수>`를 남긴다(issue #63 — 이전엔 이 분기가 outcome 이벤트를 전혀 남기지 않아 세션마다 즉석 문자열을 만들거나 로그를 누락했다). **라운드 1에서 곧장 승인된 시점에도** — 마찬가지로 2b로 넘어가기 전에 — 같은 레시피대로 `outcome=CONTRACT_APPROVED_ROUND1`, `round=1`을 남긴다(issue #69 — 이전엔 이 분기가 outcome 이벤트를 생략하거나 즉석 문자열을 발명했다).
 
 **"호출"의 실체**: `orca-task-runner`/`orca-evaluate`는 이 스킬(orca-workflow)과 같은 세션에서 도는 게 아니라, 각각 orchestration으로 별도 터미널을 띄워서 넘기는 것이다 — 그래야 이 스킬이 "diff나 report 본문을 직접 읽지 않는다"는 원칙이 실제로 지켜진다.
 
@@ -129,7 +123,7 @@ source ~/.agents/orca-workflows/scripts/log_dispatch.sh
 orca_call_with_retry "orca-workflow" "task-runner" -- \
   orca terminal create --worktree active --title task-run-<n> \
   --command "<provider의 launch 문법 — provider 문서에서 resolve>" --json
-spec_text="<issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 제안서/구현 모드 + worker_done을 포함해 네가 보내는 orca orchestration/orca terminal 호출은 항상 orca_call_with_retry로 감싸고(issue #42), wrapper가 exhausted를 반환하면 ask를 포함한 추가 orchestration 호출을 시도하지 말고(같은 죽은 transport) 즉시 사람에게 알리지 말고 .orca-orphaned-result-<task_id>.json에 결과를 저장(커밋 금지)한 뒤 터미널에 ORPHANED_RESULT <task_id> <파일 절대경로> 한 줄을 출력하고 멈추라는 지시(orca-task-runner SKILL.md subtask spec 항목 ⑦과 동일 계약)>"
+spec_text="<issue 번호 + CONTRACT_DIR 절대경로 + 제안서/구현 모드(제안서 모드면: contract-schema.md 스키마대로 AC 초안을 포함한 proposal-r<라운드>.json을 CONTRACT_DIR에 작성) + worker_done을 포함해 네가 보내는 orca orchestration/orca terminal 호출은 항상 orca_call_with_retry로 감싸고(issue #42), wrapper가 exhausted를 반환하면 ask를 포함한 추가 orchestration 호출을 시도하지 말고(같은 죽은 transport) 즉시 사람에게 알리지 말고 .orca-orphaned-result-<task_id>.json에 결과를 저장(커밋 금지)한 뒤 터미널에 ORPHANED_RESULT <task_id> <파일 절대경로> 한 줄을 출력하고 멈추라는 지시(orca-task-runner SKILL.md subtask spec 항목 ⑦과 동일 계약)>"
 orca_call_with_retry "orca-workflow" "task-runner" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow" "task-runner" -- \
@@ -159,7 +153,7 @@ orca_call_with_retry "orca-workflow" "evaluator" -- \
 orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json
 # 해당 provider가 최초 launch 시 신뢰/승인류 재프롬프트를 요구하면 그 provider 문서가 정의하는
 # 절차를 따른다(agy 전용 시퀀스를 여기서 가정하지 않는다).
-spec_text="<orca-evaluate SKILL.md 지침 + diff/제안서 경로 + issue 원문 + issue 번호 + §0에서 해석한 acceptance-criteria 섹션명 + 요청 모드 + worker_done을 포함해 네가 보내는 orca orchestration/orca terminal 호출은 항상 orca_call_with_retry로 감싸고(issue #42), wrapper가 exhausted를 반환하면 ask를 포함한 추가 orchestration 호출을 시도하지 말고(같은 죽은 transport) 즉시 사람에게 알리지 말고 .orca-orphaned-result-<task_id>.json에 결과를 저장(커밋 금지)한 뒤 터미널에 ORPHANED_RESULT <task_id> <파일 절대경로> 한 줄을 출력하고 멈추라는 지시(orca-task-runner SKILL.md subtask spec 항목 ⑦과 동일 계약)>"
+spec_text="<orca-evaluate SKILL.md 지침 + CONTRACT_DIR 절대경로와 대상 라운드 번호(검토 대상 proposal-r<n>.json·판정 산출 verdict-r<n>.json — 스키마·적대적 판정 지침·라운드 2 입력 격리 규칙은 contract-schema.md) + issue 원문 + issue 번호 + 요청 모드 + worker_done을 포함해 네가 보내는 orca orchestration/orca terminal 호출은 항상 orca_call_with_retry로 감싸고(issue #42), wrapper가 exhausted를 반환하면 ask를 포함한 추가 orchestration 호출을 시도하지 말고(같은 죽은 transport) 즉시 사람에게 알리지 말고 .orca-orphaned-result-<task_id>.json에 결과를 저장(커밋 금지)한 뒤 터미널에 ORPHANED_RESULT <task_id> <파일 절대경로> 한 줄을 출력하고 멈추라는 지시(orca-task-runner SKILL.md subtask spec 항목 ⑦과 동일 계약)>"
 orca_call_with_retry "orca-workflow" "evaluator" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow" "evaluator" -- \
@@ -186,19 +180,15 @@ spec만 재전송된다. 대신 매 라운드 새 task를 만들어 같은 터�
 직전 라운드가 `completed`인지 확인하는 대기는 `~/.agents/orca-workflows/self-recovery.md`의 wait/recovery
 루프를 그대로 따른다(`check --wait`+`--ack`, 타임아웃 시 alive/stuck_draft/dead 분기) — 이 dispatch에 대한
 `worker_done`을 `check`/`check --wait`로 수신하는 것 자체가 곧 `completed` 확정이다(실측: 완료 시각이
-메시지 타임스탬프와 정확히 일치). `worker_done` 수신 후, 그 결과의 `reportPath`를 읽기 위한 **1회성**
-조회만 한다(폴링 아님 — `worker_done` 메시지의 payload 자체엔 `reportPath`가 없어서, 이 조회는 "완료됐는지"
-확인용이 아니라 값을 얻기 위한 것뿐이다):
+메시지 타임스탬프와 정확히 일치). 산출물 경로는 `CONTRACT_DIR`와 라운드
+번호로 결정론적이므로 `worker_done` 수신 후 `.result`/`reportPath` 파싱을 위한 추가 조회는 하지
+않는다 — 반려 사유도 이 스킬이 요약해 넘기지 않는다(generator가 `verdict-r<n>.json`을 직접 읽는다):
 
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 source ~/.agents/orca-workflows/scripts/log_dispatch.sh
 RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt")"   # §0에서 남긴 사이드카
-orca_call_with_retry "orca-workflow" "contract-round" -- \
-  orca orchestration task-list --run "$RUN_ID" --json
-# 위 결과에서 직전 라운드 task_id를 찾아 .result(JSON 문자열)를 파싱해 .reportPath를 읽는다 —
-# 본문은 읽지 않고 경로만 중계한다는 원칙은 여기서도 유지된다.
-spec_text="<round 번호 + 위에서 읽은 reportPath + (evaluator→task-runner 방향이면) 반려 사유 요약 + worker_done을 포함해 네가 보내는 orca orchestration/orca terminal 호출은 항상 orca_call_with_retry로 감싸고(issue #42), wrapper가 exhausted를 반환하면 ask를 포함한 추가 orchestration 호출을 시도하지 말고(같은 죽은 transport) 즉시 사람에게 알리지 말고 .orca-orphaned-result-<task_id>.json에 결과를 저장(커밋 금지)한 뒤 터미널에 ORPHANED_RESULT <task_id> <파일 절대경로> 한 줄을 출력하고 멈추라는 지시(orca-task-runner SKILL.md subtask spec 항목 ⑦과 동일 계약)>"
+spec_text="<round 번호 + CONTRACT_DIR 절대경로(파일명은 contract-schema.md 컨벤션으로 결정론적 — task-runner행이면 직전 verdict-r<n-1>.json을 읽고 proposal-r<n>.json 작성, evaluator행이면 라운드 2 입력 격리 규칙대로 원본 issue·proposal-r<n>.json·자신의 직전 verdict만 입력) + worker_done을 포함해 네가 보내는 orca orchestration/orca terminal 호출은 항상 orca_call_with_retry로 감싸고(issue #42), wrapper가 exhausted를 반환하면 ask를 포함한 추가 orchestration 호출을 시도하지 말고(같은 죽은 transport) 즉시 사람에게 알리지 말고 .orca-orphaned-result-<task_id>.json에 결과를 저장(커밋 금지)한 뒤 터미널에 ORPHANED_RESULT <task_id> <파일 절대경로> 한 줄을 출력하고 멈추라는 지시(orca-task-runner SKILL.md subtask spec 항목 ⑦과 동일 계약)>"
 orca_call_with_retry "orca-workflow" "contract-round" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow" "contract-round" -- \
@@ -349,7 +339,7 @@ log_dispatch --skill "orca-workflow" --role "contract-round" --issue "<issue-num
 
 ## 3. Inspecting
 
-사람 체크포인트. 보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/PREMERGE_FAIL/PREMERGE_TIMEOUT/NO_ACCEPTANCE_CRITERIA/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **PREMERGE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 merge 직전 게이트에서 막혔다는 뜻이므로, premerge.sh의 exit code와 그 의미(대상 repo `scripts/premerge.sh`의 헤더 주석에서 디코드한다 — 그 헤더 주석이 정본이고, 표를 이 스킬에 복제하지 않는다), 마지막 출력 몇 줄을 그대로 표시한다 — 사람이 그 의미를 다시 유추하지 않게. **PREMERGE_TIMEOUT**은 게이트 명령이 budget 안에 자기 판정 라인을 내지 못했다는 뜻이므로(코드 실패가 아니라 실행 실패), premerge_log 경로와 그 마지막 몇 줄, 그리고 (아직 살아있을 수 있는) 백그라운드 프로세스를 사람이 직접 확인해야 한다는 점을 표시한다. **NO_ACCEPTANCE_CRITERIA**는 §2 전제 확인에서 acceptance-criteria 섹션이 issue body에 없어 `orca-task-runner`를 아예 호출하지 않았다는 뜻이다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음). 두 outcome 모두 §2d를 거치지 않고 발생하므로(GATE_FAIL과 같은 이유), 발생 시점에서 즉시 위 outcome 로그 라인을 해당 outcome 값으로 직접 남긴다. 사람이 고를 수 있는 것: 계속(피드백 반영해 재시도) / 재계획(요구사항 자체를 다시 논의 — 1a 또는 issue 수정으로 복귀) / 중단.
+사람 체크포인트. 보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/PREMERGE_FAIL/PREMERGE_TIMEOUT/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **PREMERGE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 merge 직전 게이트에서 막혔다는 뜻이므로, premerge.sh의 exit code와 그 의미(대상 repo `scripts/premerge.sh`의 헤더 주석에서 디코드한다 — 그 헤더 주석이 정본이고, 표를 이 스킬에 복제하지 않는다), 마지막 출력 몇 줄을 그대로 표시한다 — 사람이 그 의미를 다시 유추하지 않게. **PREMERGE_TIMEOUT**은 게이트 명령이 budget 안에 자기 판정 라인을 내지 못했다는 뜻이므로(코드 실패가 아니라 실행 실패), premerge_log 경로와 그 마지막 몇 줄, 그리고 (아직 살아있을 수 있는) 백그라운드 프로세스를 사람이 직접 확인해야 한다는 점을 표시한다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음). 이 outcome은 §2d를 거치지 않고 발생하므로(GATE_FAIL과 같은 이유), 발생 시점에서 즉시 위 outcome 로그 라인을 해당 outcome 값으로 직접 남긴다. 사람이 고를 수 있는 것: 계속(피드백 반영해 재시도) / 재계획(요구사항 자체를 다시 논의 — 1a 또는 issue 수정으로 복귀) / 중단.
 
 ## 폴백
 

@@ -75,10 +75,8 @@ Closes #<id>"
 충분하다. 단 base가 default branch가 아니면 키워드가 동작하지 않으므로,
 `close_issue`로 머지 후 상태를 한 번 더 확인하는 것이 안전망이 된다(호출자인 `orca-workflow` §2d 참고).
 
-## acceptance-criteria 섹션명
+## acceptance criteria
 
-기본값은 `## Acceptance criteria`뿐이다 — fallback 없음. `## What to build`는 별개의 독립된 섹션이다
-(`orca-workflow` §1a가 둘을 각각 확인하는 것과 일치 — "무엇을 만들지"와 "acceptance criteria"는 서로
-다른 개념이라 하나가 다른 하나를 대신하지 않는다). `## Acceptance criteria`가 issue body에 없으면 이
-섹션은 "없음"으로 취급된다 — `orca-workflow`가 `orca-task-runner`를 dispatch하기 전에 이를 gate로
-확인한다. repo가 다른 컨벤션을 쓴다면 그건 그 repo 자체의 tracker 문서(있다면)가 이 기본값을 오버라이드한다.
+issue body의 AC 섹션은 전제가 아니다 — acceptance criteria는 contract 협상에서 초안·승인되며
+(`~/.agents/orca-workflows/contract-schema.md`), issue body에 `## Acceptance criteria`류 섹션이
+있으면 그 초안의 입력(issue 원문의 일부)이 될 뿐이다. 섹션 존재를 gate로 확인하지 않는다.
