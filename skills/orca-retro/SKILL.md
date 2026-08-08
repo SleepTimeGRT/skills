@@ -1,6 +1,6 @@
 ---
 name: orca-retro
-description: Use right after an orca-workflow invocation ends (retro runs regardless of how the run ended) — analyzes only that run's logs under ~/.local/state/orca-workflows/logs/ (assignments/outcome events, spawn-failures, term transcripts) through four defect lenses (documented-schema violations, repeated FAILs attributable to skill prose, preventable escalations or human interventions, new spawn-failure signatures) and files at most 3 evidence-backed skill-defect issues on the sleeptimegrt-skills repo, deduplicating against open issues via recurrence comments. Never edits skills directly — output is issues only; fixes flow through the normal /orca-workflow pipeline later. Best-effort by contract: no retro failure may block the run. Self-relative.
+description: Use right after an orca-workflow invocation ends (retro runs regardless of how the invocation ended) — analyzes only that invocation's logs under ~/.local/state/orca-workflows/logs/ (assignments/outcome events, spawn-failures, term transcripts) through four defect lenses (documented-schema violations, repeated FAILs attributable to skill prose, preventable escalations or human interventions, new spawn-failure signatures) and files at most 3 evidence-backed skill-defect issues on the sleeptimegrt-skills repo, deduplicating against open issues via recurrence comments. Never edits skills directly — output is issues only; fixes flow through the normal /orca-workflow pipeline later. Best-effort by contract: no retro failure may block the invocation. Self-relative.
 ---
 
 # Orca Retro
@@ -85,7 +85,7 @@ gh issue list --repo <skills-repo-slug> --state open --json number,title,labels 
 
 1. 이 후보의 증거로 인용한 term 로그(`term-<handle>.jsonl`)가 있으면, 그 경로를 `$term_log`에
    바인딩한다(§1에서 읽은 파일 경로). 1행에서 뽑되 `type=="meta"`이고 세 버전 필드가 전부 null/누락이
-   아닐 때만 유효하다 — 구 로그(Task 1 이전 배포분)는 meta에 버전 필드가 없거나, 1행이 애초에 meta가
+   아닐 때만 유효하다 — 버전 필드가 없는 로그도 존재한다 — meta에 버전 필드가 없거나, 1행이 애초에 meta가
    아닐 수 있다:
 
    ```bash
@@ -115,9 +115,7 @@ gh issue list --repo <skills-repo-slug> --state open --json number,title,labels 
   --body "..."`. 재발 코멘트 횟수가 이 루프의 우선순위 신호다.
 - spawn-failure 후보는 `~/.agents/orca-workflows/spawn-failures.md`가 이미 부여한 known_issue
   번호와도 대조한다.
-- 신규 결함이면, 라벨은 `retro` 그대로 쓴다 — orca-retro 전용이 아니라 앞으로 다른 경로로 스킬 결함
-  이슈를 파일링할 때도 재사용하는 일반 컨벤션이다(다만 현재 `gh issue create`를 실제로 호출하는
-  스킬은 orca-retro뿐이다):
+- 신규 결함이면, 라벨은 `retro`를 쓴다:
 
   ```bash
   gh issue create --repo <skills-repo-slug> --label retro \
@@ -127,7 +125,7 @@ gh issue list --repo <skills-repo-slug> --state open --json number,title,labels 
 
 ## 5. 보고
 
-코디네이터에 요약 한 줄만 보낸다(리포트 파일 없음 — 이슈가 곧 산출물):
+호출자(`orca-workflow`)에 요약 한 줄만 보낸다(리포트 파일 없음 — 이슈가 곧 산출물):
 
 ```
 RETRO filed=[#12,#13] commented=[#7] discarded=2

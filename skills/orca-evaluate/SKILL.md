@@ -1,6 +1,6 @@
 ---
 name: orca-evaluate
-description: Use when evaluating a completed task's diff before merge. This session runs on a REPL-capable provider other than agy (agy REPL is unsupported — see `~/.agents/orca-workflows/models/agy.md`); it spawns agy headless for the agent-e2e test gate (speed/cost/computer-use strength — e2e/pgTAP already passed in orca-task-runner, so this skill never re-touches them), spawns a separate strong-coding-agent terminal for the two judgment calls it can't make itself (sprint contract approval — judging the generator's drafted acceptance criteria against the original issue — and diff code review informed by the agent-e2e result — skipped fail-fast when agent-e2e failure is confirmed), and synthesizes the results into one report against the negotiated Acceptance Criteria. Returns PASS, FAIL-with-feedback, or ESCALATE. Self-relative.
+description: Use when evaluating a completed task's diff before merge. This session runs on a REPL-capable provider other than agy (agy REPL is unsupported — see `~/.agents/orca-workflows/models/agy.md`); it spawns agy headless for the agent-e2e test gate (speed/cost/computer-use strength — e2e/pgTAP already passed in orca-task-runner, so this skill never re-touches them), spawns a separate strong-coding-agent terminal for the two judgment calls it can't make itself (contract approval — judging the generator's drafted acceptance criteria against the original issue — and diff code review informed by the agent-e2e result — skipped fail-fast when agent-e2e failure is confirmed), and synthesizes the results into one report against the negotiated Acceptance Criteria. Returns PASS, FAIL-with-feedback, or ESCALATE. Self-relative.
 ---
 
 # Orca Evaluate
@@ -56,9 +56,8 @@ orca_call_with_retry "orca-evaluate" "contract-review" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-evaluate" "contract-review" -- \
   orca orchestration dispatch --task <task_id> --to <contract-handle> --retry-request "$(uuidgen)" --inject --json
-# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43, positive-confirmation
-# 방식으로 issue #58에서 교체): 15초 뒤 재-read해서 $spec_text 앞부분이 tail에서 확인 안 되면 Enter만
-# 재전송, 그래도 확인 안 되면 spawn-failures.md로. §3 스폰도 동일하게 적용한다.
+# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43·#58). §3 스폰도
+# 동일하게 적용한다.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. §3 스폰도 동일한 형태(§2 agent-e2e는
 # assign만 — term 로그 대상 아님).
 #  logging.md §1 assign 이벤트: role="contract-review", issue=<issue-num>, task_id=<task_id>,
@@ -69,13 +68,13 @@ orca_call_with_retry "orca-evaluate" "contract-review" -- \
 #    relay로 받는다 — 위 §1 본문 참고).
 ```
 
-판단 기준은 "제안이 그럴듯한가"가 아니라 "AC 초안이 issue를 충실히 반영하고, verification_plan이 그 AC를 실제로 커버하는가"다. 이 evaluator 세션은 그 판정 결과(승인/반려+사유)를 받아 `orca-task-runner`로 relay한다(파일 내용을 새로 읽거나 재해석하지 않고 판정 결과만 전달) — 각 라운드는 별도 dispatch로 도착한다: 판정 결과를 relay하고 나면 이번 턴을 끝낸다(주입된 preamble의 worker_done 지시대로), 같은 턴 안에서 다음 제안을 기다리거나 폴링하지 않는다. 최대 2라운드까지 왕복하고, 그 안에 합의 안 되면 generator가 결정권을 가진다 — 이견은 기록만 하고 진행을 막지 않는다.
+이 evaluator 세션은 그 판정 결과(승인/반려+사유)를 받아 `orca-task-runner`로 relay한다(파일 내용을 새로 읽거나 재해석하지 않고 판정 결과만 전달) — 각 라운드는 별도 dispatch로 도착한다: 판정 결과를 relay하고 나면 이번 턴을 끝낸다(주입된 preamble의 worker_done 지시대로), 같은 턴 안에서 다음 제안을 기다리거나 폴링하지 않는다. 최대 2라운드까지 왕복하고, 그 안에 합의 안 되면 generator가 결정권을 가진다 — 이견은 기록만 하고 진행을 막지 않는다.
 
 두 번의 coding agent 스폰(여기 §1과 아래 §3)은 시간상 멀리 떨어져 있다(§1은 구현 시작 전, §3은 전체 subtask wave가 끝난 뒤) — 하나의 터미널을 그 사이 계속 띄워두지 않고, 그때그때 fresh-context로 새로 스폰한다.
 
 ## 2. Test Gate: Agent e2e (evaluator가 headless agy로 스폰)
 
-앱을 직접 조작하는 e2e. Playwright MCP(accessibility-tree 기반 — 스크린샷·좌표 클릭보다 UI 변경에 덜 깨진다)를 붙인 agy(Gemini) 세션을 **headless(`-p`, one-shot)로** 스폰한다, REPL 아님(agy는 이 스킬 전체에서 REPL 금지 — 이유는 §0). 시나리오·경로·요청 형식을 launch 시점의 `-p` 인자 하나에 다 담아 한 번에 실행하고, 이후 orchestration 왕복 없이 완료를 회수한다. (e2e·pgTAP은 여기서 안 돈다 — `orca-task-runner`의 task-레벨 게이트를 이미 통과한 뒤에만 이 스킬이 호출되므로 전량 신뢰한다.)
+앱을 직접 조작하는 e2e. Playwright MCP(accessibility-tree 기반 — 스크린샷·좌표 클릭보다 UI 변경에 덜 깨진다)를 붙인 agy(Gemini) 세션을 **headless(`-p`, one-shot)로** 스폰한다, REPL 아님(agy는 이 스킬 전체에서 REPL 금지 — 이유는 §0). 시나리오·경로·요청 형식을 launch 시점의 `-p` 인자 하나에 다 담아 한 번에 실행하고, 이후 orchestration 왕복 없이 완료를 회수한다. (e2e·pgTAP은 여기서 안 돈다 — §0 참고.)
 
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
@@ -105,7 +104,7 @@ orca terminal read --terminal <agent-e2e-handle> --json
 git diff "$(git merge-base origin/main HEAD)"...HEAD > <worktree 루트>/.evaluate-diff.patch
 ```
 
-diff에 schema/migration 파일이 포함돼 있으면, code-reviewer를 스폰하기 전에 destructive-op 린터를 돌린다. 이때 계산한 "migration 파일 포함 여부"는 여기서 버리지 않는다 — 아래 리뷰어 tier 선택에도 그대로 전달해, churn(변경 파일 수·라인 수)이 작아도 migration/destructive 신호가 있으면 최저 tier로 떨어지지 않게 한다(§3 자신이 이미 계산해 둔 신호를 tier 선택 시점에 버리는 것이 결함이었다 — 새 정적 경로 매칭을 추가하는 것이 아니다, AC1과 무관):
+diff에 schema/migration 파일이 포함돼 있으면, code-reviewer를 스폰하기 전에 destructive-op 린터를 돌린다. 이때 계산한 "migration 파일 포함 여부"는 여기서 버리지 않는다 — 아래 리뷰어 tier 선택에도 그대로 전달해, churn(변경 파일 수·라인 수)이 작아도 migration/destructive 신호가 있으면 최저 tier로 떨어지지 않게 한다:
 
 ```bash
 migration_files=( <diff에 포함된 migration 파일 경로...> )   # 각 경로를 개별 quoted 원소로 (배열 — bash/zsh 공통, unquoted 문자열 확장 금지: zsh는 word-split하지 않아 파일 2개 이상이면 인자 1개로 뭉개지고, bash/sh는 반대로 공백 있는 경로가 쪼개진다)
@@ -138,7 +137,7 @@ diff_shortstat="$(git diff --shortstat "$(git merge-base origin/main HEAD)"...HE
 # 정보가 전혀 없을 때만 `command -v codex`로 바이너리 존재를 보조 확인한다(토큰/쿼터까지는 증명 못함).
 codex_available=false   # quota check로 hard-exclude 아님을 확인하면 true로 바꿀 것
 # migration_files_present: 위에서 이미 계산해 둔 것을 그대로 넘긴다 — churn이 작아도 migration
-# 파일이 있으면 최저 tier로 떨어지지 않는다(round1 Finding 2 수정).
+# 파일이 있으면 최저 tier로 떨어지지 않는다.
 reviewer_json="$(python3 <skill-dir>/scripts/select_reviewer.py --shortstat "$diff_shortstat" \
   $( [ "$codex_available" = true ] && echo --codex-available || echo --no-codex-available ) \
   $( [ "$migration_files_present" = true ] && echo --high-risk-signal ))"
@@ -165,9 +164,7 @@ orca_call_with_retry "orca-evaluate" "code-review" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-evaluate" "code-review" -- \
   orca orchestration dispatch --task <task_id> --to <review-handle> --retry-request "$(uuidgen)" --inject --json
-# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43, positive-confirmation
-# 방식으로 issue #58에서 교체): 15초 뒤 재-read해서 $spec_text 앞부분이 tail에서 확인 안 되면 Enter만
-# 재전송, 그래도 확인 안 되면 spawn-failures.md로.
+# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43·#58).
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로.
 #  logging.md §1 assign 이벤트: role="code-review", issue=<issue-num>, task_id=<task_id>, provider=$reviewer_provider,
 #    model=$reviewer_model, effort=$reviewer_effort, advisor=${reviewer_advisor:-}, terminal=<review-handle>,

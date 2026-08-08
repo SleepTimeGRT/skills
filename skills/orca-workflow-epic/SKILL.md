@@ -28,9 +28,9 @@ epic issue 하나를 받아 child 큐를 만들고, task마다 `orca-workflow-ta
 
   ```bash
   install -d -m 700 ~/.local/state/orca-workflows/logs
-  run_json="$(orca orchestration run-create --objective "<epic 번호> task-coordinator relay" --from <자기 handle> --json)"
-  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<epic 번호>.txt"
-  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<epic 번호>.txt"
+  run_json="$(orca orchestration run-create --objective "<root-num> task-coordinator relay" --from <자기 handle> --json)"
+  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<root-num>.txt"
+  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<root-num>.txt"
   ```
 
 ## 1. issue-drain
@@ -61,7 +61,7 @@ ready task마다 아래를 실행하고, worker_done 수신 후 다음 task로 �
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 source ~/.agents/orca-workflows/scripts/log_dispatch.sh
-RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<epic 번호>.txt")"
+RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<root-num>.txt")"
 # provider: model-selection.md 기준 — 판단·orchestration 작업. REPL 필수(one-shot은 dispatch --inject
 # 수신 불가), agy 제외(models/agy.md).
 orca_call_with_retry "orca-workflow-epic" "task-coordinator" -- \

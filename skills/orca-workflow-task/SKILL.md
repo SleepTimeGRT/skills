@@ -70,12 +70,11 @@ elif jq -e '[.unresolved_reasons[].target] | index("ac_fidelity")' "<CONTRACT_DI
 else
   # plan_coverage 이견만 남음 — 검증 방법 이견은 §3 리뷰·e2e가 최종 AC 기준으로 재검증하므로 진행.
   # logging.md §1 outcome 레시피대로 outcome=CONTRACT_FINALIZED_BY_GENERATOR,
-  # round=<도달한 라운드 수>를 남기고 §2로 (issue #63 — 이전엔 이 분기가 outcome 이벤트를 전혀
-  # 남기지 않아 세션마다 즉석 문자열을 만들거나 로그를 누락했다).
+  # round=<도달한 라운드 수>를 남기고 §2로 (issue #63).
 fi
 ```
 
-**라운드 1에서 곧장 승인된 시점에도** — 마찬가지로 §2로 넘어가기 전에 — 같은 레시피대로 `outcome=CONTRACT_APPROVED_ROUND1`, `round=1`을 남긴다(issue #69 — 이전엔 이 분기가 outcome 이벤트를 생략하거나 즉석 문자열을 발명했다).
+**라운드 1에서 곧장 승인된 시점에도** — 마찬가지로 §2로 넘어가기 전에 — 같은 레시피대로 `outcome=CONTRACT_APPROVED_ROUND1`, `round=1`을 남긴다(issue #69).
 
 **"호출"의 실체**: `orca-task-runner`/`orca-evaluate`는 이 스킬(orca-workflow-task)과 같은 세션에서 도는 게 아니라, 각각 orchestration으로 별도 터미널을 띄워서 넘기는 것이다 — 그래야 이 스킬이 "diff나 report 본문을 직접 읽지 않는다"는 원칙이 실제로 지켜진다.
 
@@ -91,13 +90,11 @@ orca_call_with_retry "orca-workflow-task" "task-runner" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
   orca orchestration dispatch --task <task_id> --to <run-handle> --retry-request "$(uuidgen)" --inject --json
-# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43, positive-confirmation
-# 방식으로 issue #58에서 교체): 15초 뒤 재-read해서 $spec_text 앞부분이 tail에서 확인 안 되면 Enter만
-# 재전송, 그래도 확인 안 되면 spawn-failures.md로. 이 확인은 자기가 주입한 문자열의 존재만 보는
-# 불투명 비교라 위 "diff/report 본문을 직접 읽지 않는다" 원칙과 충돌하지 않는다.
+# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43·#58 — "diff/report
+# 본문을 직접 읽지 않는다" 원칙과 충돌하지 않는 근거도 그 문서에 있다).
 # 로그 — logging.md §1 assign + §2 meta/sent를 log_dispatch()가 한 호출로 원자적으로 기록한다(issue #68).
 #   이 터미널에 대한 유일한 read는 위 dispatch-verify.md의 liveness probe(불투명 payload-echo 확인 —
-#   issue #58)뿐이므로 recv는 기록하지 않는다(logging.md의 carve-out 규칙, 헬퍼 전환 후에도 유지 — 실제
+#   issue #58)뿐이므로 recv는 기록하지 않는다(logging.md의 carve-out 규칙 — 실제
 #   결과는 이 스킬이 직접 읽지 않고 다른 채널로 도착한다). term-<run-handle>.jsonl은 orca-workflow-task
 #   자신이 소유하는 파일이다 — task-runner 자신의 왕복 내용은 그쪽이 스폰한 term-<impl_handle>.jsonl들에
 #   이미 남는다.
@@ -121,10 +118,7 @@ orca_call_with_retry "orca-workflow-task" "evaluator" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-task" "evaluator" -- \
   orca orchestration dispatch --task <task_id> --to <evaluate-handle> --retry-request "$(uuidgen)" --inject --json
-# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43, positive-confirmation
-# 방식으로 issue #58에서 교체): 15초 뒤 재-read해서 $spec_text 앞부분이 tail에서 확인 안 되면 Enter만
-# 재전송, 그래도 확인 안 되면 spawn-failures.md로. (이 이슈의 실제 발생 사례가 바로 이 dispatch 대상
-# 터미널 — task-evaluate-411 — 이었다.)
+# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43·#58).
 # 로그 — logging.md §1 assign + §2 meta/sent를 log_dispatch()가 한 호출로 원자적으로 기록한다(issue #68).
 #   이 터미널에 대한 유일한 read도 마찬가지로 dispatch-verify.md의 liveness probe뿐이라
 #   recv는 기록하지 않는다(위 task-runner 사이트와 같은 이유).
@@ -159,9 +153,7 @@ orca_call_with_retry "orca-workflow-task" "contract-round" -- \
   --terminal <재-engage 대상 handle> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(worker-start에도 동일하게 필요).
 # 로그 — logging.md §1 assign + §2 meta/sent를 log_dispatch()가 한 호출로 원자적으로 기록한다(issue #68).
-#   task_id가 실제 존재하므로(매 라운드 새 task-create) §1의 relay:true/omit 규칙은 이 사이트엔 적용되지
-#   않는다(issue #64로 해소, 변경 없음). 이 사이트도 헬퍼 전환 후 recv는 기록하지 않는다(위 두 사이트와
-#   같은 이유 — 결과는 check --wait으로 수신).
+#   이 사이트도 recv는 기록하지 않는다(위 두 사이트와 같은 이유 — 결과는 check --wait으로 수신).
 log_dispatch --skill "orca-workflow-task" --role "contract-round" --issue "<issue-num>" \
   --task-id "<방금 만든 task_id>" --terminal "<재-engage 대상 handle>" --worktree "<worktree 경로>" \
   --provider "<라운드 1에서 resolve한 provider — 재-resolve 없이 재사용>" \
@@ -239,7 +231,7 @@ log_dispatch --skill "orca-workflow-task" --role "contract-round" --issue "<issu
   # 마지막 state와 실패 check 이름·링크(gh pr checks "$pr_num")를 §5 보고에 첨부한다.
   ```
 
-  머지 성공 시(`merged=true`) **`is_open(task-issue-num)`이 true면 `close_issue(task-issue-num, "Merged via PR #$pr_num")`를 호출**한다 — 코드호스팅(PR 머지)은 GitHub 전용이라 미변경이고, issue 종료는 트래커 무관하게 이 한 경로로 처리된다: GitHub는 위 `link_pr_for_close`가 보통 이미 닫아둬서 여기선 안전망(no-op)이고, Jira 등 merge-magic이 없는 트래커는 이 호출이 유일한 종료 경로다. (`is_open`/`close_issue`/`link_pr_for_close`는 실제 셸 커맨드가 아니라 tracker adapter 오퍼레이션이다 — 문자 그대로 셸에 붙여넣지 말 것.)
+  머지 성공 시(`merged=true`) **`is_open(task-issue-num)`이 true면 `close_issue(task-issue-num, "Merged via PR #$pr_num")`를 호출**한다 — 코드호스팅(PR 머지)은 GitHub 전용이라 미변경이고, issue 종료는 트래커 무관하게 이 한 경로로 처리된다: GitHub는 위 `link_pr_for_close`가 보통 이미 닫아둬서 여기선 안전망(no-op)이고, Jira 등 merge-magic이 없는 트래커는 이 호출이 유일한 종료 경로다. (`is_open`/`close_issue`/`link_pr_for_close`는 실제 셸 커맨드가 아니라 tracker adapter 오퍼레이션이다 — 문자 그대로 셸에 붙여넣지 말 것.) `close_issue`가 "완료" transition을 찾지 못하면 그 시점에서 `outcome=NO_DONE_TRANSITION`을 직접 로깅하고 §5로 간다.
 
   task 종료(`merge_outcome`이 남은 경우는 예외 — 아래 CI_GATE_FAIL/CI_GATE_TIMEOUT/MERGE_CONFLICT 참고, task 종료가 아니라 §5로 간다).
 - FAIL → 재시도 카운터 확인. **2회 미만이면** `orca-task-runner`에 재-dispatch(§2로 — spec에 방금 FAIL한 attempt 번호만 넣는다; feedback 정본은 `eval-report-a<attempt>.json`이고 generator가 직접 읽는다, §1 라운드 2+ relay와 같은 원칙). **2회 도달하면** §5로.
@@ -262,7 +254,7 @@ log_dispatch --skill "orca-workflow-task" --role "contract-round" --issue "<issu
 그 외 outcome(FAIL 한도 도달·ESCALATE·GATE_FAIL·CONTRACT_ESCALATE·CI_GATE_FAIL·CI_GATE_TIMEOUT·
 MERGE_CONFLICT·NO_DONE_TRANSITION)이면 아래 보고 내용을 조립한 뒤 mode로 분기한다:
 
-보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/CONTRACT_ESCALATE/CI_GATE_FAIL/CI_GATE_TIMEOUT/MERGE_CONFLICT/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **CONTRACT_ESCALATE**는 contract 협상이 라운드 한도에도 `ac_fidelity` 이견으로 끝났다는 뜻이다 — 코드 생성 전이므로 diff가 없다. `override.json`의 `unresolved_reasons`를 그대로 표시한다(무엇을 만들지에 대한 generator/evaluator의 이견 — 사람이 issue를 명확히 하거나 방향을 정한다). §1의 fail-closed 분기(override.json 자체가 없음)로 온 경우면 이견 내용 대신 그 사실 — generator가 기록 없이 라운드 한도에 도달함 — 을 표시한다. **CI_GATE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 repo의 CI required check가 merge를 막았다는 뜻이므로, 실패한 check 이름과 로그 링크(`gh pr checks <pr_num>`)를 그대로 표시한다 — 사람이 다시 조회하지 않게. **CI_GATE_TIMEOUT**은 budget 안에 check가 완주하지 못했거나 merge 거부 원인이 판별되지 않았다는 뜻이므로(코드 실패로 확정 아님), 마지막 `mergeStateStatus`와 check 상태 스냅샷을 표시한다. **MERGE_CONFLICT**는 base와의 충돌로 자동 merge가 불가능하다는 뜻이다 — 충돌 지점 정보를 표시하고, rebase/충돌 해소 여부는 사람이 결정한다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음). 이 outcome은 §4를 거치지 않고 발생하므로(GATE_FAIL과 같은 이유), 발생 시점에서 즉시 위 outcome 로그 라인을 해당 outcome 값으로 직접 남긴다.
+보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/CONTRACT_ESCALATE/CI_GATE_FAIL/CI_GATE_TIMEOUT/MERGE_CONFLICT/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **CONTRACT_ESCALATE**는 contract 협상이 라운드 한도에도 `ac_fidelity` 이견으로 끝났다는 뜻이다 — 코드 생성 전이므로 diff가 없다. `override.json`의 `unresolved_reasons`를 그대로 표시한다(무엇을 만들지에 대한 generator/evaluator의 이견 — 사람이 issue를 명확히 하거나 방향을 정한다). §1의 fail-closed 분기(override.json 자체가 없음)로 온 경우면 이견 내용 대신 그 사실 — generator가 기록 없이 라운드 한도에 도달함 — 을 표시한다. **CI_GATE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 repo의 CI required check가 merge를 막았다는 뜻이므로, 실패한 check 이름과 로그 링크(`gh pr checks <pr_num>`)를 그대로 표시한다 — 사람이 다시 조회하지 않게. **CI_GATE_TIMEOUT**은 budget 안에 check가 완주하지 못했거나 merge 거부 원인이 판별되지 않았다는 뜻이므로(코드 실패로 확정 아님), 마지막 `mergeStateStatus`와 check 상태 스냅샷을 표시한다. **MERGE_CONFLICT**는 base와의 충돌로 자동 merge가 불가능하다는 뜻이다 — 충돌 지점 정보를 표시하고, rebase/충돌 해소 여부는 사람이 결정한다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음) — 발생 지점은 §4의 merge 성공 후 close 단계이고, outcome 로깅은 그 시점에 §4가 직접 한다.
 
 - **hitl** — 질문을 올리고 응답까지 block한다: entry 세션이면 사람에게 직접, spawn된 세션이면
   ask(decision gate)로 호출자에게(§0 보고 채널). 선택지: 계속(응답의 피드백을 반영해 §2부터 재시도 —

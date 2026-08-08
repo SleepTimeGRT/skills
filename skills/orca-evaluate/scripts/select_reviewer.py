@@ -60,10 +60,10 @@ def classify_tier(stats: DiffStats, *, high_risk_signal: bool = False) -> str:
     for this call site is Routine..High Risk, not Simple..High Risk.
 
     high_risk_signal lets the caller pass through a High-Risk indicator it has *already computed*
-    for an unrelated reason (round1 Finding 2: §3 already runs a migration/schema-file check
-    before spawning the reviewer, to decide whether to run the destructive-op linter — throwing
-    that result away here let a small-churn migration diff fall to the cheapest reviewer tier,
-    with no later local gate to catch it: merge-time verification is delegated to repo CI). This is
+    for an unrelated reason (§3 already runs a migration/schema-file check before spawning the
+    reviewer, to decide whether to run the destructive-op linter — without this passthrough, a
+    small-churn migration diff would fall to the cheapest reviewer tier with no later local gate
+    to catch it: merge-time verification is delegated to repo CI). This is
     still not path matching: the caller decides what counts as a "known high-risk kind" using
     whatever pre-existing check it already ran (migration-lint's own file list here); this
     function and its caller never introduce a new static path list to satisfy it — the boolean is

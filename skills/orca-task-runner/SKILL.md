@@ -104,7 +104,7 @@ subtask spec 필수 항목: ①구체적 작업 내용(코드 블록 포함 그�
 
 ## 3. Wave 준비
 
-wave 크기 상한은 임시로 없다(§5 wave telemetry로 데이터를 쌓아 재계측 중) — 그렇다고 무제한으로 키우지는 않는다: 머신 리소스 상황을 보며 판단하고, 한 wave에서 스폰 실패·timeout 재시도가 2회 이상 발생하면 그 즉시 wave 크기를 3 이하로 되돌리고 사용자에게 보고한다. provider는 자유 선택(claude/codex/agy 아무거나, 토큰 효율을 위해 섞어도 됨) — 단 `model-selection.md`의 "Quota check before pinning"에서 제외된 provider는 후보에서 뺀다. 모델·effort는 subtask 성격에 맞게 provider 문서에서 고른다.
+wave 크기는 고정 상한 없이 머신 리소스 상황을 보며 판단한다(§5 wave telemetry가 적정치 계측의 근거 데이터다) — 단 무제한이 아니다: 한 wave에서 스폰 실패·timeout 재시도가 2회 이상 발생하면 그 즉시 wave 크기를 3 이하로 제한하고 사용자에게 보고한다. provider는 자유 선택(claude/codex/agy 아무거나, 토큰 효율을 위해 섞어도 됨) — 단 `model-selection.md`의 "Quota check before pinning"에서 제외된 provider는 후보에서 뺀다. 모델·effort는 subtask 성격에 맞게 provider 문서에서 고른다.
 
 **스폰 커맨드는 아래 템플릿을 verbatim 복사한다 — 손으로 재타이핑·재조립하지 않는다.** placeholder(`<model>`/`<effort>`/`<n>`) 치환 외의 어떤 변형도 금지: 재조립 과정에서 플래그가 누락·변형된 실측 사례가 spawn-failures.md에 known signature로 등록돼 있다(issue #40 — `--permission-mode acceptEdits`로 틀어진 채 `--effort` 누락). 같은 이유로 빈 fallback shell을 만들어 거기에 커맨드를 쳐 넣는 경로를 쓰지 않는다 — 터미널은 항상 아래처럼 `terminal create --command`로 launch 문법을 함께 넘겨 생성한다.
 
@@ -135,7 +135,7 @@ orca terminal wait --terminal <impl-handle> --for tui-idle --timeout-ms 60000 --
 ```bash
 # wave_start 로그 — ~/.agents/orca-workflows/logging.md §1 절차대로 waves-<오늘 UTC 날짜>.jsonl에 기록.
 # event="wave_start", issue=<issue-num>, wave_index=<n>, wave_size=<이 wave 터미널 수>,
-# nproc=$(sysctl -n hw.ncpu 2>/dev/null || nproc), ts_epoch=$(date -u +%s) — 필드는 기존과 동일, 경로만 변경.
+# nproc=$(sysctl -n hw.ncpu 2>/dev/null || nproc), ts_epoch=$(date -u +%s)
 ```
 
 `nproc`(가용 코어 수)을 같이 남기는 이유: wave_size와 소요시간만으로는 CPU 경합 여부를 판단할 수 없다 — 같은 wave_size라도 머신 코어 수·provider 구성(§5 `assign` 로그의 `wave_index`와 join)에 따라 경합 여부가 달라지기 때문이다.
@@ -160,20 +160,16 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
 spec_sidecar="$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"   # §2에서 남긴 사이드카
 spec_text="$(cat "$spec_sidecar")"   # 지금 재구성하지 않는다 — §2에서 남긴 원문 그대로
 orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
-  orca orchestration worker-start --task <task_id> --worktree active --terminal <impl_handle> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json   # wave 크기만큼 병렬 — 상한 임시 해제, §3 참고
-# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43, positive-confirmation
-# 방식으로 issue #58에서 교체 — worker-start에도 동일하게 필요: stage:"input_accepted"는 실제 제출을
-# 보장하지 않는다, 실측): 15초 뒤 재-read해서 $spec_text 앞부분이 tail에서 확인 안 되면 Enter만
-# 재전송, 그래도 확인 안 되면 spawn-failures.md로.
+  orca orchestration worker-start --task <task_id> --worktree active --terminal <impl_handle> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json   # wave 크기만큼 병렬 — 크기 규칙은 §3
+# 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43·#58 — worker-start에도
+# 동일하게 필요: stage:"input_accepted"는 실제 제출을 보장하지 않는다, 실측).
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. dispatch와 같은 블록에서 즉시 실행(누락 방지).
 #  logging.md §1 assign 이벤트: role="subtask-impl", issue=<issue-num>, task_id=<task_id>, wave_index=<n>,
 #    subtask_type=<전사|통합|아키텍처>, provider/model/effort=resolved 값, terminal=<impl_handle>,
 #    worktree=<worktree 경로>. wave_index는 §3 wave_start 로그와 join한다.
 #  logging.md §2 term 로그: skill="orca-task-runner", role="subtask-impl", terminal=<impl_handle>,
 #    meta 기록 후 sent.content=$spec_text(위 사이드카에서 로드한 값). recv는 아래 close 직전에
-#    기록한다(§5 마지막 블록). 사이드카는 여기서 지우지 않는다 — 스폰 실패 재시도나 worker_done
-#    유실 수동 복구가 같은 task_id로 이 블록을 다시 태울 수 있어, 삭제는 터미널이 실제로 닫히는
-#    시점(§5 마지막 블록)으로 미룬다.
+#    기록한다(§5 마지막 블록). 사이드카는 여기서 지우지 않는다 — 삭제 시점·이유는 §5 마지막 블록.
 ```
 
 - **완료 대기와 self-recovery**: `~/.agents/orca-workflows/self-recovery.md`의 wait/recovery 루프를 그대로 따른다 — 이 wave의 각 subtask `task_id`를 pending set에 넣고, `check --wait`(+`--ack`)로 기다리다 타임아웃되면 그 파일의 alive/stuck_draft/dead 분기(`worker-abandon`→`worker-start --retry-of`)로 복구한다. `dead` 판정 후 재시도할 때는 새 worker 터미널을 §3의 launch 템플릿으로 다시 띄운다(모델·effort는 같은 subtask이므로 재-resolve 없이 그대로 재사용).
@@ -185,7 +181,7 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
   read_json="$(orca terminal read --terminal <impl_handle> --json)"
   # recv 이벤트 — logging.md §2 "첫 read" 레시피대로 $read_json에서 tail/nextCursor를 뽑아
   # term-<impl_handle>.jsonl에 append(이 터미널은 §5에서 sent만 기록했고 이후 한 번도 read하지
-  # 않았으므로, 이 read가 곧 유일한 recv). 예전처럼 별도 .json 스냅샷 파일은 만들지 않는다.
+  # 않았으므로, 이 read가 곧 유일한 recv).
   orca terminal close --terminal <impl_handle> --tab --json
   rm -f "$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"   # 사이드카 회수는 여기서
   # 한다 — §5 dispatch 블록에서 즉시 지우면, 같은 task_id를 재스폰하는 스폰 실패 재시도나
@@ -210,7 +206,7 @@ fi
 # wave_end 로그 — ~/.agents/orca-workflows/logging.md §1 절차대로 waves-<오늘 UTC 날짜>.jsonl에 기록.
 # event="wave_end", issue=<issue-num>, wave_index=<n>, wave_size=<이 wave 터미널 수>,
 # retry_count=<이 wave에서 발생한 스폰 실패·timeout 재시도 총 횟수, 알 수 없으면 null>,
-# elapsed_ms=$elapsed_ms, outcome="completed" — 필드는 기존과 동일, 경로만 변경.
+# elapsed_ms=$elapsed_ms, outcome="completed"
 ```
 
 (§0에서 orphan wave를 복구하는 경우는 `outcome`을 `"crash_recovered"`로, `retry_count`를 모르면 `null`로 채운다 — 그 외 필드는 동일 포맷.)
