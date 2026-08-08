@@ -73,7 +73,9 @@ else
   # round=<도달한 라운드 수>를 남기고 §2로 (issue #63 — 이전엔 이 분기가 outcome 이벤트를 전혀
   # 남기지 않아 세션마다 즉석 문자열을 만들거나 로그를 누락했다).
 fi
-``` **라운드 1에서 곧장 승인된 시점에도** — 마찬가지로 §2로 넘어가기 전에 — 같은 레시피대로 `outcome=CONTRACT_APPROVED_ROUND1`, `round=1`을 남긴다(issue #69 — 이전엔 이 분기가 outcome 이벤트를 생략하거나 즉석 문자열을 발명했다).
+```
+
+**라운드 1에서 곧장 승인된 시점에도** — 마찬가지로 §2로 넘어가기 전에 — 같은 레시피대로 `outcome=CONTRACT_APPROVED_ROUND1`, `round=1`을 남긴다(issue #69 — 이전엔 이 분기가 outcome 이벤트를 생략하거나 즉석 문자열을 발명했다).
 
 **"호출"의 실체**: `orca-task-runner`/`orca-evaluate`는 이 스킬(orca-workflow-task)과 같은 세션에서 도는 게 아니라, 각각 orchestration으로 별도 터미널을 띄워서 넘기는 것이다 — 그래야 이 스킬이 "diff나 report 본문을 직접 읽지 않는다"는 원칙이 실제로 지켜진다.
 
