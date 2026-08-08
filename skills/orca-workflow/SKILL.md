@@ -14,7 +14,7 @@ description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-ma
 - **이슈 타입 판별** — `get_issue_type(issue-num)`으로 epic/task를 판별해 아래 "1. Epic 경로"/"2. Task 경로"로 분기한다.
 - **Contract 디렉토리**(실행 시작 시 1회) — `~/.agents/orca-workflows/contract-schema.md`의 규칙대로 `CONTRACT_DIR`를 계산·생성(`install -d -m 700`)해 §2a의 두 spec_text에 절대경로로 넣는다. acceptance criteria는 issue 본문의 사전 섹션이 아니라 §2a 협상에서 초안·승인된다 — 산출물 파일(proposal/verdict/override)과 확정 AC의 정본 위치는 같은 문서가 정의한다.
 - **온보딩** — selection.md가 "문서 없음 + GitHub 형식이 아닌 이슈 ID"로 판정하면, 곧바로 GitHub로 넘어가지 않고 사용자에게 직접 묻는다: ①어떤 tracker를 쓰는지 + 그 API를 부르는 데 필요한 최소 정보(Jira라면 site·cloudId·project key) ②"완료" transition/상태 이름. 받은 답으로 `docs/agents/issue-tracker.md` 형식의 초안을 작성해 보여주고, 승인되면 별도의 작은 커밋으로 대상 repo에 반영한 뒤 이번 실행을 이어간다. 이후 실행부터는 문서가 있으므로 다시 트리거되지 않는다.
-- CLI 기반 coordinator(Codex/agy)는 launch 시 approval·sandbox를 명시한다. 기본 posture는 `-a never -s workspace-write`.
+- CLI 기반 coordinator(Codex/agy)는 launch 시 approval·sandbox를 명시한다. codex posture는 `--dangerously-bypass-approvals-and-sandbox` — 근거·예외(headless read-only 등)는 `~/.agents/orca-workflows/models/codex.md`가 정본이다(sandbox 하 worker_done 유실·CONTRACT_DIR 워크스페이스 밖 쓰기). 안전 전제는 워크트리 격리다.
 - 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 —
   `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다. §2a의 두 `terminal create` 호출
   모두에 적용된다.

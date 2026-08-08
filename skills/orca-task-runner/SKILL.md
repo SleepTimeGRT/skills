@@ -11,7 +11,7 @@ description: Use when generating the implementation for one task (issue) — pro
 
 - `orca status --json` ready. 실패 시 아래 "폴백".
 - feature worktree에서 실행 중이어야 한다(main 체크아웃에서 금지). 워커는 전부 `--worktree active`에 생성.
-- CLI 기반 coordinator(Codex/agy)는 launch 시 approval·sandbox를 명시한다. 기본 posture는 `-a never -s workspace-write`이며, 필요한 권한이 이를 넘으면 조용히 완화하지 말고 작업 범위와 권한을 다시 확인한다.
+- CLI 기반 coordinator(Codex/agy)는 launch 시 approval·sandbox를 명시한다. codex posture는 `--dangerously-bypass-approvals-and-sandbox` — 근거·예외(headless read-only 등)는 `~/.agents/orca-workflows/models/codex.md`가 정본이다(sandbox 하 worker_done 유실·CONTRACT_DIR 워크스페이스 밖 쓰기). 안전 전제는 워크트리 격리이므로(§0 첫 불릿의 main 체크아웃 금지와 같은 전제), 격리 밖에서 이 posture로 launch하지 않는다.
 - 모델·effort는 매 launch 전 아래 문서에서 subtask 유형(전사·기계적 / 통합·판단 / 아키텍처)에 맞게 고른다. 값을 이 스킬에 복제하지 않는다.
   - `~/.agents/orca-workflows/model-selection.md`
   - `~/.agents/orca-workflows/models/claude-code.md`
@@ -117,7 +117,7 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
 # codex
 orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
   orca terminal create --worktree active --title task-impl-<n> \
-  --command "codex --model <model> -c model_reasoning_effort=<effort> -s workspace-write -a never" --json
+  --command "codex --model <model> -c model_reasoning_effort=<effort> --dangerously-bypass-approvals-and-sandbox" --json
 # agy — 프롬프트는 파일에 먼저 쓰고 command substitution으로 전달한다(인라인 '<...>' quoting은
 # 괄호·따옴표·개행이 있는 프롬프트에서 라이브 셸 파싱 에러를 낸다 — orca-workflows/spawn-failures.md)
 prompt_file="$(mktemp "${TMPDIR:-/tmp}/agy-prompt-XXXXXX.txt")"

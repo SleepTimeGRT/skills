@@ -18,6 +18,28 @@ check that can, without depending on any provider-specific UI marker (Claude Cod
 indicators vs. Codex's own REPL chrome — a marker-based check would need a parallel definition per provider
 with no shared primitive to keep them in sync).
 
+## Pre-dispatch — freshly launched REPL은 boot-quiesce 확인 후에만 inject (issue #84)
+
+`terminal wait --for tui-idle`은 `dispatch --inject`의 충분조건이 아니다 — codex는 tui-idle이
+satisfied된 뒤에도 MCP 서버 부팅이 계속되며(실측 2026-08-08: tui-idle 만족 시점에 `Starting MCP
+servers (4/5)` 스피너가 여전히 동작 중), 그 구간에 주입된 bracketed-paste 텍스트는 일부 또는 전부
+유실된다. 유실되면 아래 사후 확인의 Enter-only 재시도도 무의미하다 — 재전송할 초안 자체가 없다.
+
+**freshly launched REPL(터미널 생성 직후의 첫 dispatch)**에는 tui-idle 이후 다음을 추가로 요구한다:
+
+```bash
+cur="$(orca terminal read --terminal <handle> --json | jq -r '.result.terminal.latestCursor')"
+sleep 12
+new="$(orca terminal read --terminal <handle> --cursor "$cur" --json | jq -r '.result.terminal.returnedLineCount')"
+# new가 0이면 boot 출력이 정지(quiesce)한 것 — dispatch --inject 진행.
+# 0이 아니면 아직 부팅 중 — cur를 최신 latestCursor로 갱신해 반복(상한은 호출부의 스폰 timeout 예산).
+```
+
+scrollback 전체를 문자열 grep하는 방식은 쓰지 않는다 — TUI 리페인트 잔재가 과거 `Starting MCP
+servers` 프레임에 계속 매칭돼 "아직 부팅 중"으로 오판한다(실측). cursor-scoped 신규-출력 카운트만이
+애니메이션 정지를 정확히 판별한다. 이미 dispatch를 한 번 이상 정상 처리한 터미널(라운드 2+ 재-engage
+등)에는 이 검사가 필요 없다 — boot 구간이 이미 지났다.
+
 ## Procedure — run immediately after every `dispatch --inject`
 
 **This is a positive-confirmation check, not a tail-changed check.** An earlier version treated "tail

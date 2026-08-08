@@ -21,7 +21,8 @@ install -d -m 700 "$CONTRACT_DIR"
 - 파일은 라운드별 append-only — r1 파일을 r2에서 수정하지 않는다. 파일은 `chmod 600`.
 - **launch posture 전제**: 이 경로는 워크스페이스 밖이므로, contract 파일을 쓰는 역할
   (task-runner/evaluator)을 codex로 띄울 때 `-s workspace-write` 샌드박스로는 쓸 수 없다 —
-  워크스페이스 밖 쓰기가 가능한 posture여야 한다.
+  워크스페이스 밖 쓰기가 가능한 posture여야 한다. 현행 codex posture
+  (`--dangerously-bypass-approvals-and-sandbox`, `models/codex.md`)가 이를 충족한다.
 
 ## Files
 
