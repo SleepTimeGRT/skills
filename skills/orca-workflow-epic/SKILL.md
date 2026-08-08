@@ -7,7 +7,8 @@ description: Queue coordinator for an epic issue — invoked in-session by `orca
 
 epic issue 하나를 받아 child 큐를 만들고, task마다 `orca-workflow-task` coordinator를 직렬로 띄운다.
 **task 처리 내부를 전혀 모른다** — 이 스킬이 소비하는 신호는
-{PASS, escalation outcome, 질문} 셋뿐이고, 왜 escalate했는지는 `-task`의 보고 파일·로그가 담는다.
+{PASS, escalation outcome, 질문} 셋뿐이고, 왜 escalate했는지는 `-task`의 outcome 로그와
+CONTRACT_DIR 산출물이 담는다.
 
 ## 0. 전제
 
@@ -35,7 +36,10 @@ epic issue 하나를 받아 child 큐를 만들고, task마다 `orca-workflow-ta
 
 ## 1. issue-drain
 
-별도 subagent(이 세션과 다른, 별도로 뜬 세션)에게 큐의 issue 전체 검증을 맡긴다:
+별도로 뜬 세션(이 세션과 다른)에 큐의 issue 전체 검증을 맡긴다. 스폰·수신은 §3 레시피를 그대로
+재사용한다 — `terminal create` → `task-create` → `dispatch --inject` → 미전송 확인 → `log_dispatch`,
+role은 `"issue-drain"`, provider·REPL 제약과 retry 래핑·ORPHANED_RESULT 계약도 §3과 동일, 결과는
+`worker_done`으로 수신 후 터미널 close. spec_text에는 root-num·대상 repo와 아래 검증 기준을 넣는다:
 
 - 큐의 각 issue가 self-contained한지("무엇을 만들지"가 본문에 있고, 본문만으로 acceptance-criteria 초안을 쓸 수 있을 만큼 요구가 구체적인지 — AC 자체는 이 스킬 밖에서 초안된다)
 - 의존 관계가 있다면(`get_child_order`가 참고하는 것과 같은 그래프) 그게 실제로 존재하고 방향이 맞는지 — 의존 링크 자체가 없는 건 실패가 아니다

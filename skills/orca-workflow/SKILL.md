@@ -40,13 +40,12 @@ entry point 라우터다. 이슈 하나를 받아 타입을 판별해 `orca-work
 `orca-workflow-task`를 이 세션에서 로드해 그대로 따른다(별도 스폰 아님 — entry 세션이므로 두 스킬의
 보고 채널은 "사람"이다). mode를 전달한다.
 
-## 2. Retro (best-effort, invocation 종료 시 — 항상)
+## 2. Retro (best-effort — §1 라우팅이 실행된 invocation마다 1회)
 
-이 "항상"은 §1 라우팅이 실제로 하위 스킬을 실행한 invocation에 대한 것이다 — §0에서 끝난 실행(트래커
-해석 실패, 온보딩 중단 등)은 분석할 하위 실행 로그 자체가 없으므로 retro 없이 그 사실만 사용자에게
-보고하고 종료한다. 라우팅이 실행됐다면 하위 스킬이 어떻게 끝났든(§5 보고가 완료든 parked/escalation
-이든) invocation 종료 시 1회 실행한다. 방금 끝난 실행의 로그를 분석해 스킬 결함 이슈를 만들도록 retro
-터미널 1개를 띄워 `orca-retro`를
+§1이 하위 스킬을 실제로 실행했다면, 하위 스킬이 어떻게 끝났든(§5 보고가 완료든 parked/escalation
+이든) invocation 종료 시 retro를 1회 실행한다. §0에서 끝난 실행(트래커 해석 실패, 온보딩 중단 등)은
+분석할 하위 실행 로그 자체가 없다 — retro 없이 그 사실만 사용자에게 보고하고 종료한다.
+방금 끝난 실행의 로그를 분석해 스킬 결함 이슈를 만들도록 retro 터미널 1개를 띄워 `orca-retro`를
 실행시킨다. close 시도가 모두 끝난 뒤에 실행한다 — close 전에 돌리다 coordinator가 죽으면 일이 다
 끝난 root issue가 열린 채 남는다. retro의 어떤 실패(스폰·dispatch·분석·gh)도 이 워크플로를 실패시키지
 않는다: `RETRO_FAIL` outcome만 남기고 정상 종료한다. 이 스킬은 여기서도 로그 본문을 직접 분석하지
@@ -55,7 +54,7 @@ entry point 라우터다. 이슈 하나를 받아 타입을 판별해 `orca-work
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 # provider는 model-selection.md 기준 resolve — 판단(judgment) 작업. REPL 필수, agy 제외
-# (하위 스킬의 evaluate 사이트와 같은 제약, 같은 이유).
+# (`orca-workflow-task` §1의 evaluate 스폰과 같은 제약 — 사유는 `~/.agents/orca-workflows/models/agy.md`).
 orca_call_with_retry "orca-workflow" "retro" -- \
   orca terminal create --worktree active --title retro-<root-issue-num> \
   --command "<REPL 가능, agy 제외 provider의 launch 문법 — provider 문서에서 resolve>" --json
