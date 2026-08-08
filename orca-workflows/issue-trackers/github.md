@@ -73,7 +73,7 @@ Closes #<id>"
 
 끝 경계 `([^0-9]|$)`는 `id=12`가 `#123`에 잘못 매칭되는 것을 막는다. 키워드가 확인/보강되면 그걸로
 충분하다. 단 base가 default branch가 아니면 키워드가 동작하지 않으므로,
-`close_issue`로 머지 후 상태를 한 번 더 확인하는 것이 안전망이 된다(호출자인 `orca-workflow` §2d 참고).
+`close_issue`로 머지 후 상태를 한 번 더 확인하는 것이 안전망이 된다(호출자인 `orca-workflow-task` §4 참고).
 
 ## acceptance criteria
 

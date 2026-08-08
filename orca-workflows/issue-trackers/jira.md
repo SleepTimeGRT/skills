@@ -64,8 +64,8 @@ Duplicate/Won't Do). **repo 문서의 워크플로 표에 없는 transition은 �
 사람이 티켓을 나중에 리뷰하며 "더 이상 안 한다"고 판단할 때 쓰는 것이라, agent의 완료 처리 후보가 아니다 —
 매 완료 처리마다 여럿 중 고를 문제가 아니다.
 
-다음 두 실패 케이스에서는 조용히 아무거나 고르지 않고 멈춘다 — 둘 다 `orca-workflow`의 "3. Inspecting"
-체크포인트로 보고한다(outcome: `NO_DONE_TRANSITION`), 사람 확인 없이 진행하지 않는다:
+다음 두 실패 케이스에서는 조용히 아무거나 고르지 않고 멈춘다 — 둘 다 `orca-workflow-task` §5
+(Escalation·보고)로 보고한다(outcome: `NO_DONE_TRANSITION`), 사람 확인 없이 진행하지 않는다:
 - repo 문서의 워크플로 표 자체가 없거나 "완료"에 해당하는 transition 이름이 명시돼 있지 않을 때
 - repo 문서가 "완료" 이름을 명시하지만, 그 이름이 `getTransitionsForJiraIssue`가 반환한 현재 상태 기준
   available transition 목록에 없을 때(Jira transition은 현재 status에 따라 달라지므로 발생 가능) —
@@ -74,6 +74,6 @@ Duplicate/Won't Do). **repo 문서의 워크플로 표에 없는 transition은 �
 ## `link_pr_for_close(pr_number, id)`
 
 **merge-magic 없음** — GitHub PR 머지로 Jira 티켓이 자동으로 닫히지 않는다. 이 오퍼레이션 자체는
-**no-op**이다(아무것도 하지 않는다). 종료는 이 오퍼레이션이 아니라 호출자(`orca-workflow` §2d)가
+**no-op**이다(아무것도 하지 않는다). 종료는 이 오퍼레이션이 아니라 호출자(`orca-workflow-task` §4)가
 머지 성공 확인 후 별도로 `close_issue(id, note)`를 호출해서 처리한다(`note` 예:
 `"Merged via PR #<pr_number>"`).
