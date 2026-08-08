@@ -30,7 +30,9 @@ entry point 라우터다. 이슈 하나를 받아 타입을 판별해 `orca-work
 - **Mode 인자** — `afk`|`hitl`, 생략 시 `hitl`. 하위 스킬에 그대로 전달한다. 의미 정의는
   `orca-workflow-task` §5가 정본이다.
 - 이 스킬은 Run을 만들지 않는다 — §2 retro의 task-create/dispatch는 하위 스킬이 이 세션에 바인딩한
-  Run을 상속한다(`--run` 생략 시 호출 터미널 바인딩 상속, 실측).
+  Run을 상속한다(`--run` 생략 시 호출 터미널 바인딩 상속, 실측). 하위 스킬이 Run을 바인딩하기 전에
+  종료된 경우 §2의 task-create/dispatch는 실패할 수 있다 — 그 경우도 §2의 best-effort 규칙대로
+  `RETRO_FAIL` outcome만 남기고 정상 종료한다(라우터가 Run을 만들어 복구하지 않는다).
 
 ## 1. 라우팅
 
@@ -40,8 +42,11 @@ entry point 라우터다. 이슈 하나를 받아 타입을 판별해 `orca-work
 
 ## 2. Retro (best-effort, invocation 종료 시 — 항상)
 
-하위 스킬이 어떻게 끝났든(§5 보고가 완료든 parked/escalation이든) invocation 종료 시 1회 실행한다.
-방금 끝난 실행의 로그를 분석해 스킬 결함 이슈를 만들도록 retro 터미널 1개를 띄워 `orca-retro`를
+이 "항상"은 §1 라우팅이 실제로 하위 스킬을 실행한 invocation에 대한 것이다 — §0에서 끝난 실행(트래커
+해석 실패, 온보딩 중단 등)은 분석할 하위 실행 로그 자체가 없으므로 retro 없이 그 사실만 사용자에게
+보고하고 종료한다. 라우팅이 실행됐다면 하위 스킬이 어떻게 끝났든(§5 보고가 완료든 parked/escalation
+이든) invocation 종료 시 1회 실행한다. 방금 끝난 실행의 로그를 분석해 스킬 결함 이슈를 만들도록 retro
+터미널 1개를 띄워 `orca-retro`를
 실행시킨다. close 시도가 모두 끝난 뒤에 실행한다 — close 전에 돌리다 coordinator가 죽으면 일이 다
 끝난 root issue가 열린 채 남는다. retro의 어떤 실패(스폰·dispatch·분석·gh)도 이 워크플로를 실패시키지
 않는다: `RETRO_FAIL` outcome만 남기고 정상 종료한다. 이 스킬은 여기서도 로그 본문을 직접 분석하지
