@@ -91,7 +91,7 @@ task-runner(generator) 쪽 결정이 그대로 확정된 경우다(라운드 한
 `ac_fidelity` 이견이 남았으면 아래 `CONTRACT_ESCALATE`로 간다) — PASS/FAIL/ESCALATE 어느 것도 아닌 정상 분기이므로,
 이 결과에 도달했을 때 outcome 이벤트 자체를 생략하지 말고 반드시 이 값으로 남긴다(observed in practice:
 issue #62). 이 라인은 per-call-site 추가 필드 규칙에 따라 `round`(도달한 계약 협상 라운드 수)를 더해
-남긴다 — `retry`는 §2 하단의 task-level FAIL 재-dispatch 횟수를 세는 별개 필드이므로, 라운드 수를 `retry`에
+남긴다 — `retry`는 `orca-workflow-task` §4의 task-level FAIL 재-dispatch 횟수를 세는 별개 필드이므로, 라운드 수를 `retry`에
 넣지 않는다.
 
 `CONTRACT_ESCALATE`는 contract 협상이 라운드 한도에 도달했고 `override.json`의 `unresolved_reasons`에
