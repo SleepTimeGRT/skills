@@ -80,7 +80,7 @@ orca_call_with_retry "orca-workflow-epic" "task-coordinator" -- \
 # 미전송 확인 — dispatch-verify.md 절차. 로그 — log_dispatch가 §1 assign + §2 meta/sent를 원자 기록:
 log_dispatch --skill "orca-workflow-epic" --role "task-coordinator" --issue "<task-issue-num>" \
   --task-id "<task_id>" --terminal "<coord-handle>" --worktree "<worktree 경로>" \
-  --provider "<resolved provider>" --model "<resolved model>" --effort "<resolved effort>" \
+  --provider "<resolved provider (claude-code/codex/agy)>" --model "<resolved model>" --effort "<resolved effort>" \
   --spec-text "$spec_text"
 # 이 터미널의 유일한 read는 dispatch-verify probe뿐 — recv는 기록하지 않는다(결과는 check --wait로).
 ```

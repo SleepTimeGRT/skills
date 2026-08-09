@@ -106,7 +106,7 @@ orca_call_with_retry "orca-workflow-task" "task-runner" -- \
 #   자신이 소유하는 파일이다 — task-runner 자신의 왕복 내용은 그쪽이 스폰한 term-<impl_handle>.jsonl들에
 #   이미 남는다.
 log_dispatch --skill "orca-workflow-task" --role "task-runner" --issue "<issue-num>" --task-id "<task_id>" \
-  --terminal "<run-handle>" --worktree "<worktree 경로>" --provider "<resolved provider>" \
+  --terminal "<run-handle>" --worktree "<worktree 경로>" --provider "<resolved provider (claude-code/codex/agy)>" \
   --model "<resolved model>" --effort "<resolved effort>" --spec-text "$spec_text"
 
 # evaluate 호출 — REPL 필수(one-shot은 이후 dispatch --inject를 못 받음), agy는 제외한다
@@ -129,7 +129,7 @@ orca_call_with_retry "orca-workflow-task" "evaluator" -- \
 #   이 터미널에 대한 유일한 read도 마찬가지로 dispatch-verify.md의 liveness probe뿐이라
 #   recv는 기록하지 않는다(위 task-runner 사이트와 같은 이유).
 log_dispatch --skill "orca-workflow-task" --role "evaluator" --issue "<issue-num>" --task-id "<task_id>" \
-  --terminal "<evaluate-handle>" --worktree "<worktree 경로>" --provider "<resolved provider>" \
+  --terminal "<evaluate-handle>" --worktree "<worktree 경로>" --provider "<resolved provider (claude-code/codex/agy)>" \
   --model "<resolved model>" --effort "<resolved effort>" --spec-text "$spec_text"
 ```
 
@@ -162,7 +162,7 @@ orca_call_with_retry "orca-workflow-task" "contract-round" -- \
 #   이 사이트도 recv는 기록하지 않는다(위 두 사이트와 같은 이유 — 결과는 check --wait으로 수신).
 log_dispatch --skill "orca-workflow-task" --role "contract-round" --issue "<issue-num>" \
   --task-id "<방금 만든 task_id>" --terminal "<재-engage 대상 handle>" --worktree "<worktree 경로>" \
-  --provider "<라운드 1에서 resolve한 provider — 재-resolve 없이 재사용>" \
+  --provider "<라운드 1에서 resolve한 provider (claude-code/codex/agy) — 재-resolve 없이 재사용>" \
   --model "<라운드 1에서 resolve한 model — 재사용>" --effort "<라운드 1에서 resolve한 effort — 재사용>" \
   --spec-text "$spec_text"
 ```
