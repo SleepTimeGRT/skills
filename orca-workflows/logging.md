@@ -134,7 +134,7 @@ wait/recovery loop):
 install -d -m 700 ~/.local/state/orca-workflows/logs
 target="$HOME/.local/state/orca-workflows/logs/waves-$(date -u +%F).jsonl"   # orca-task-runner
 # or: target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"   # orca-workflow-task / orca-workflow-epic
-printf '{"ts":"%s","event":"self_recovery","skill":"<skill>","issue":"<issue-num>","task_id":"<task_id>","dispatch_id":"<dispatch_id>","terminal":"<handle>","waited_ms":<n>,"terminal_status":"<alive|dead|stuck_draft>","action_taken":"<resumed_wait|retried_enter|worker_abandon_retry|escalated_spawn_failure|none_decision_gate_self_timed_out_worker_proceeded|UNMAPPED_BRANCH>","new_dispatch_id":"<new dispatch_id-or-omit, only when action_taken=worker_abandon_retry>","raw_action":"<raw_action-or-omit, only when action_taken=UNMAPPED_BRANCH>","schema_gap_issue":"<schema_gap_issue-or-omit, only when action_taken=UNMAPPED_BRANCH>"}\n' \
+printf '{"ts":"%s","event":"self_recovery","skill":"<skill>","issue":"<issue-num>","task_id":"<task_id>","dispatch_id":"<dispatch_id>","terminal":"<handle>","waited_ms":<n>,"terminal_status":"<alive|dead|stuck_draft>","action_taken":"<resumed_wait|retried_enter|worker_abandon_retry|task_recreate_retry|escalated_spawn_failure|none_decision_gate_self_timed_out_worker_proceeded|UNMAPPED_BRANCH>","new_dispatch_id":"<new dispatch_id-or-omit, only when action_taken=worker_abandon_retry or action_taken=task_recreate_retry>","raw_action":"<raw_action-or-omit, only when action_taken=UNMAPPED_BRANCH>","schema_gap_issue":"<schema_gap_issue-or-omit, only when action_taken=UNMAPPED_BRANCH>"}\n' \
   "$(date -u +%FT%TZ)" >> "$target"
 chmod 600 "$target"
 ```
