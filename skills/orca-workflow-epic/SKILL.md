@@ -30,8 +30,8 @@ CONTRACT_DIR 산출물이 담는다.
   ```bash
   install -d -m 700 ~/.local/state/orca-workflows/logs
   run_json="$(orca orchestration run-create --objective "<root-num> task-coordinator relay" --from <자기 handle> --json)"
-  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<root-num>.txt"
-  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<root-num>.txt"
+  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<root-num>-orca-workflow-epic.txt"
+  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<root-num>-orca-workflow-epic.txt"
   ```
 
 ## 1. issue-drain
@@ -65,7 +65,7 @@ ready task마다 아래를 실행하고, worker_done 수신 후 다음 task로 �
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 source ~/.agents/orca-workflows/scripts/log_dispatch.sh
-RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<root-num>.txt")"
+RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<root-num>-orca-workflow-epic.txt")"
 # provider: model-selection.md 기준 — 판단·orchestration 작업. REPL 필수(one-shot은 dispatch --inject
 # 수신 불가), agy 제외(models/agy.md).
 orca_call_with_retry "orca-workflow-epic" "task-coordinator" -- \
