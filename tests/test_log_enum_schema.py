@@ -211,6 +211,9 @@ def test_orca_retro_lens1_splits_unmapped_branch_with_and_without_schema_gap_iss
 
 
 def test_orca_set_version_bumped():
+    # Version constant updated per issue #87 ac11 (orca-set.version v1.1.2 -> v1.1.3, set members
+    # orca-workflow-epic/orca-workflow-task/orca-evaluate touched by that issue's proposal-r2.json
+    # scope). Invariant unchanged: exact version string + 6-member list are still both enforced.
     lines = [l for l in SET_VERSION.read_text().splitlines() if l.strip()]
     assert lines[0] == "v1.1.3"
     assert sorted(lines[1:]) == sorted(
