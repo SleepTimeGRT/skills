@@ -97,6 +97,7 @@ orca_call_with_retry "orca-workflow-task" "task-runner" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
   orca orchestration dispatch --task <task_id> --to <run-handle> --retry-request "$(uuidgen)" --inject --json
+DISPATCH_CREATED_VIA=dispatch-inject   # self-recovery.md wait 루프의 dead-case 분기 입력
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43·#58 — "diff/report
 # 본문을 직접 읽지 않는다" 원칙과 충돌하지 않는 근거도 그 문서에 있다).
 # 로그 — logging.md §1 assign + §2 meta/sent를 log_dispatch()가 한 호출로 원자적으로 기록한다(issue #68).
@@ -108,6 +109,17 @@ orca_call_with_retry "orca-workflow-task" "task-runner" -- \
 log_dispatch --skill "orca-workflow-task" --role "task-runner" --issue "<issue-num>" --task-id "<task_id>" \
   --terminal "<run-handle>" --worktree "<worktree 경로>" --provider "<resolved provider (claude-code/codex/agy)>" \
   --model "<resolved model>" --effort "<resolved effort>" --spec-text "$spec_text"
+# SPEC_TEXT 사이드카 — self-recovery.md wait 루프가 이 dispatch의 dead-case 복구 시 참조하는 값을
+# 이 dispatch 자신의 task_id로 키잉된 파일에 즉시 못박는다(공유 스칼라를 evaluator 블록과 재사용/덮어쓰지
+# 않는다 — self-recovery.md:81-94, issue #112 eval-report-a1 critical). jq -ers는 sent 레코드 부재·
+# content가 문자열이 아니거나 빈 문자열이면 실패시켜 리터럴 "null"이 사이드카에 쓰이지 않게 한다
+# (issue #112 eval-report-a1 important 1). 실패/빈 값이면 사이드카를 쓰지 않고 넘어간다 — self-recovery.md
+# wait 루프 자신의 `[ -n "$SPEC_TEXT" ]` 게이트가(첫 mutation 전에 걸리므로 side effect 없이) fail-closed로 잡는다.
+SPEC_TEXT="$(jq -ers 'map(select(.direction=="sent")) | last | select(.content? and (.content|type=="string") and (.content|length>0)) | .content' "$HOME/.local/state/orca-workflows/logs/term-<run-handle>.jsonl")" || SPEC_TEXT=""
+if [ -n "$SPEC_TEXT" ]; then
+  printf '%s' "$SPEC_TEXT" > "$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"
+  chmod 600 "$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"
+fi
 
 # evaluate 호출 — REPL 필수(one-shot은 이후 dispatch --inject를 못 받음), agy는 제외한다
 # (사유는 `~/.agents/orca-workflows/models/agy.md`가 정본). agy는 evaluate 내부 §2(agent e2e)의
@@ -124,6 +136,7 @@ orca_call_with_retry "orca-workflow-task" "evaluator" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-task" "evaluator" -- \
   orca orchestration dispatch --task <task_id> --to <evaluate-handle> --retry-request "$(uuidgen)" --inject --json
+DISPATCH_CREATED_VIA=dispatch-inject   # self-recovery.md wait 루프의 dead-case 분기 입력
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43·#58).
 # 로그 — logging.md §1 assign + §2 meta/sent를 log_dispatch()가 한 호출로 원자적으로 기록한다(issue #68).
 #   이 터미널에 대한 유일한 read도 마찬가지로 dispatch-verify.md의 liveness probe뿐이라
@@ -131,6 +144,17 @@ orca_call_with_retry "orca-workflow-task" "evaluator" -- \
 log_dispatch --skill "orca-workflow-task" --role "evaluator" --issue "<issue-num>" --task-id "<task_id>" \
   --terminal "<evaluate-handle>" --worktree "<worktree 경로>" --provider "<resolved provider (claude-code/codex/agy)>" \
   --model "<resolved model>" --effort "<resolved effort>" --spec-text "$spec_text"
+# SPEC_TEXT 사이드카 — 위 task-runner 블록과 동일한 이유·동일한 파일명 컨벤션(`spec-<task_id>.txt`,
+# orca-task-runner §2의 기존 사이드카와 같은 디렉토리·이름 규칙이지만 task_id가 전역적으로 유일하므로
+# 충돌하지 않는다)이되, 이 블록 자신의 task_id·터미널 handle을 쓴다. 이 블록의 SPEC_TEXT= 대입은 위
+# task-runner 블록의 SPEC_TEXT= 대입과 변수 이름은 같아도 서로 다른 시점에 서로 다른 사이드카로 즉시
+# 못박히므로, 이 대입이 나중에 다른 dispatch의 복구 시 읽히는 값이 되는 경로는 없다(공유 스칼라
+# 재사용이 아니다 — self-recovery.md:81-94, issue #112 eval-report-a1 critical).
+SPEC_TEXT="$(jq -ers 'map(select(.direction=="sent")) | last | select(.content? and (.content|type=="string") and (.content|length>0)) | .content' "$HOME/.local/state/orca-workflows/logs/term-<evaluate-handle>.jsonl")" || SPEC_TEXT=""
+if [ -n "$SPEC_TEXT" ]; then
+  printf '%s' "$SPEC_TEXT" > "$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"
+  chmod 600 "$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"
+fi
 ```
 
 **Contract 협상 relay — 라운드 2+ (반려된 경우만; 승인이면 곧장 §2)**: 라운드 1과 같은 task_id를 재사용하지
@@ -157,6 +181,7 @@ orca_call_with_retry "orca-workflow-task" "contract-round" -- \
 orca_call_with_retry "orca-workflow-task" "contract-round" -- \
   orca orchestration worker-start --task <방금 만든 task_id> --worktree current \
   --terminal <재-engage 대상 handle> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
+DISPATCH_CREATED_VIA=worker-start   # self-recovery.md wait 루프의 dead-case 분기 입력 — SPEC_TEXT는 worker-start 복구 분기가 참조하지 않으므로 배선하지 않는다
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(worker-start에도 동일하게 필요).
 # 로그 — logging.md §1 assign + §2 meta/sent를 log_dispatch()가 한 호출로 원자적으로 기록한다(issue #68).
 #   이 사이트도 recv는 기록하지 않는다(위 두 사이트와 같은 이유 — 결과는 check --wait으로 수신).
