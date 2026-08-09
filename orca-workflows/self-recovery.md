@@ -16,11 +16,16 @@ bit more care). Detect completion via `check --wait` (verified live against Orca
 Diagnose a timeout using the narrowest-scope tool already confirmed to carry a signal: a bounded
 `terminal read` probe (the same one `dispatch-verify.md` already uses), not `worker-show`'s
 `last_heartbeat_at` — every dispatch checked in the design investigation had `last_heartbeat_at: null`,
-so it is not relied on here. Recover via `worker-abandon` (fence, non-destructive) followed by
-`worker-start --retry-of` (tracked retry) — never by reading the terminal and deciding the recovery
-action by hand. Polling survives only as the rare, explicitly-logged fallback for the one thing Orca's
-event system cannot tell you by construction (a worker that will never send anything because it's
-dead) — never as the default.
+so it is not relied on here. Recovery itself branches on how the dispatch was created (Preconditions
+below enumerates both paths, and the `dead` case's two sub-branches implement them): for a dispatch
+created via `worker-start`, recover via `worker-abandon` (fence, non-destructive) followed by
+`worker-start --retry-of` (tracked retry); for a dispatch created via `task-create` + `dispatch --inject`,
+`worker-abandon` returns `dispatch_not_found` for that dispatch id (it only fences `worker-start`-created
+dispatches, confirmed live — issue #89), so recovery instead marks the stuck task `failed` and
+re-dispatches fresh via a new `task-create` + `dispatch --inject`. Neither path decides the recovery
+action by reading the terminal and improvising by hand. Polling survives only as the rare,
+explicitly-logged fallback for the one thing Orca's event system cannot tell you by construction (a
+worker that will never send anything because it's dead) — never as the default.
 
 ## Preconditions
 
@@ -29,22 +34,43 @@ dead) — never as the default.
   a *different* coordinator's Run (e.g. `orca-task-runner` must not reuse `orca-workflow-task`'s Run, and
   vice versa) — mixing Runs cross-delivers `worker_done`/`escalation` messages between unrelated
   mailboxes.
-- The worker terminal has already been dispatched via `orca orchestration worker-start --task
-  <task_id> --worktree <selector> --terminal <handle> --run <run_id> --from <own handle> --json`,
-  followed immediately by `dispatch-verify.md`'s positive-confirmation-and-retry procedure — unchanged,
-  and still required after `worker-start`. A live test found the injected preamble sitting unsubmitted
-  in the input composer for over two minutes despite a `stage: "input_accepted"` response; `worker-start`
-  reports acceptance, not submission.
+- The worker terminal has already been dispatched via one of two Orca primitives — every caller's own
+  call site is fixed to exactly one of the two (see the caller table below), so which one applies to a
+  given dispatch is never ambiguous or probed at runtime:
+  - `orca orchestration worker-start --task <task_id> --worktree <selector> --terminal <handle> --run
+    <run_id> --from <own handle> --json`, or
+  - `orca orchestration task-create --spec <spec> --json` followed by `orca orchestration dispatch --task
+    <task_id> --to <handle> --inject --json` (`task-create` + `dispatch --inject`, for short).
+  Either way, dispatch creation is followed immediately by `dispatch-verify.md`'s
+  positive-confirmation-and-retry procedure — unchanged, and still required after either primitive. A live
+  test found the injected preamble sitting unsubmitted in the input composer for over two minutes despite
+  a `stage: "input_accepted"` response; neither primitive's acceptance response guarantees submission.
+
+## Caller dispatch-creation paths
+
+Each caller's dispatch-creation call site is a fixed constant for that call site — not something derived
+per dispatch. `DISPATCH_CREATED_VIA` (`worker-start` or `dispatch-inject`) below is what the `dead` case
+(`## The wait/recovery loop`) branches on:
+
+| skill | role | call site | `DISPATCH_CREATED_VIA` |
+|---|---|---|---|
+| `orca-workflow-task` | `task-runner` | §1 round 1 (`task-create` + `dispatch --inject`) | `dispatch-inject` |
+| `orca-workflow-task` | `evaluator` | §1 round 1 (`task-create` + `dispatch --inject`) | `dispatch-inject` |
+| `orca-workflow-task` | `contract-round` | §1 round 2+ relay (`task-create` + `worker-start`) | `worker-start` |
+| `orca-workflow-epic` | `task-coordinator` | §3 (`task-create` + `dispatch --inject`) | `dispatch-inject` |
+| `orca-task-runner` | `subtask-impl` | §5 (`worker-start`) | `worker-start` |
 
 ## The wait/recovery loop
 
-Run this once per pending dispatch. `WORKER_HANDLE`/`TASK_ID`/`DISPATCH_ID`/`MY_HANDLE`/`RUN_ID` are
-caller-supplied for that dispatch; `CALLING_SKILL` (`orca-task-runner`, `orca-workflow-task`, or `orca-workflow-epic`) and
-`ISSUE_NUM` are caller-supplied constants for the whole session. A wave has one pending-set entry per
-subtask, keyed by `task_id` (stable across retries — a `worker_abandon_retry` changes `dispatch_id`, so
-update the entry's `dispatch_id` in place rather than adding a second entry). `retry_count` is likewise
-tracked per `task_id` in that same pending-set entry, not as one shell scalar shared across a wave's
-concurrent subtasks. A contract round has exactly one entry.
+Run this once per pending dispatch. `WORKER_HANDLE`/`TASK_ID`/`DISPATCH_ID`/`MY_HANDLE`/`RUN_ID`/
+`DISPATCH_CREATED_VIA` are caller-supplied for that dispatch (see the caller table above for
+`DISPATCH_CREATED_VIA`'s value per call site); `CALLING_SKILL` (`orca-task-runner`, `orca-workflow-task`,
+or `orca-workflow-epic`) and `ISSUE_NUM` are caller-supplied constants for the whole session. A wave has
+one pending-set entry per subtask, keyed by `task_id` (stable across retries — a `worker_abandon_retry` or
+`task_recreate_retry` retry changes `dispatch_id`, so update the entry's `dispatch_id` in place rather
+than adding a second entry). `retry_count` is likewise tracked per `task_id` in that same pending-set
+entry, not as one shell scalar shared across a wave's concurrent subtasks. A contract round has exactly
+one entry.
 
 ```bash
 result="$(orca orchestration check --run "$RUN_ID" --wait \
@@ -75,23 +101,48 @@ if [ "$timed_out" = "true" ]; then
         action_taken=retried_enter
         ;;
       dead)
-        orca orchestration worker-abandon --dispatch "$DISPATCH_ID" --json
-        # Re-launch per the calling skill's own explicit launch template (fresh terminal), or reuse
-        # the existing handle if it is a live process just not answering this dispatch.
-        new_result="$(orca orchestration worker-start --task "$TASK_ID" --worktree active \
-          --terminal "$NEW_OR_SAME_HANDLE" --retry-of "$DISPATCH_ID" --run "$RUN_ID" \
-          --from "$MY_HANDLE" --json)"
-        new_dispatch_id="$(printf '%s' "$new_result" | jq -r '.result.dispatchId')"
-        # Re-run dispatch-verify.md's positive-confirmation procedure against this NEW dispatch.
-        action_taken=worker_abandon_retry
+        if [ "$DISPATCH_CREATED_VIA" = "worker-start" ]; then
+          # --- worker-start sub-branch ---
+          orca orchestration worker-abandon --dispatch "$DISPATCH_ID" --json
+          # Re-launch per the calling skill's own explicit launch template (fresh terminal), or reuse
+          # the existing handle if it is a live process just not answering this dispatch.
+          new_result="$(orca orchestration worker-start --task "$TASK_ID" --worktree active \
+            --terminal "$NEW_OR_SAME_HANDLE" --retry-of "$DISPATCH_ID" --run "$RUN_ID" \
+            --from "$MY_HANDLE" --json)"
+          new_dispatch_id="$(printf '%s' "$new_result" | jq -r '.result.dispatchId')"
+          # Re-run dispatch-verify.md's positive-confirmation procedure against this NEW dispatch.
+          action_taken=worker_abandon_retry
+        else
+          # --- inject sub-branch ---
+          # worker-abandon returns dispatch_not_found for a dispatch created via dispatch --inject
+          # (confirmed live, issue #89) -- it only fences worker-start-created dispatches. Do not call
+          # it here; there is no fence primitive for this path, so recovery goes straight to replacing
+          # the stuck task.
+          orca orchestration task-update --task "$TASK_ID" --status failed --json
+          # $spec_text is the caller's own already-scoped variable (the same text originally passed to
+          # this dispatch's task-create --spec) -- reuse it verbatim unless the caller has a specific
+          # correction to make.
+          new_task_result="$(orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json)"
+          new_task_id="$(printf '%s' "$new_task_result" | jq -r '.result.task.id')"
+          # Fresh terminal per the calling skill's own explicit launch template (its own §3 launch
+          # template — same primitive/model/effort as the original dispatch).
+          orca terminal create --worktree active --title "<caller's own naming convention>" \
+            --command "<caller's own launch template>" --json
+          new_result="$(orca orchestration dispatch --task "$new_task_id" --to "$NEW_OR_SAME_HANDLE" \
+            --retry-request "$(uuidgen)" --inject --json)"
+          new_dispatch_id="$(printf '%s' "$new_result" | jq -r '.result.dispatchId')"
+          # Re-run dispatch-verify.md's positive-confirmation procedure against this NEW dispatch.
+          action_taken=task_recreate_retry
+        fi
         retry_count=$(( ${retry_count:-0} + 1 ))
         ;;
     esac
   fi
   # Log a self_recovery event exactly per logging.md's recipe, regardless of which branch was
   # taken. DISPATCH_ID here is still the dispatch that timed out; new_dispatch_id is only
-  # non-empty when action_taken=worker_abandon_retry (logging.md's schema keeps both fields
-  # distinct so a late completion from the old dispatch can't be confused with the retry).
+  # non-empty when action_taken=worker_abandon_retry or action_taken=task_recreate_retry
+  # (logging.md's schema keeps both fields distinct so a late completion from the old dispatch
+  # can't be confused with the retry).
   # orca-task-runner adds "wave_index":<n> to the JSON object below as an extra field (same
   # per-call-site extra-field convention logging.md §1 already uses for "assign" events) so it
   # joins with that wave's wave_start/wave_end records; orca-workflow-task/orca-workflow-epic omit it (no wave concept).
@@ -136,14 +187,16 @@ issue #93 — 이 문서의 `--types worker_done,escalation` 인자 목록 자�
 기록 주체는 이 상황을 인지한 코디네이터이며, `waited_ms`는 이 루프의 3600000 고정값이 아니라 워커
 자신의 `ask` 타임아웃 예산을 남긴다.
 
-**`UNMAPPED_BRANCH`** — 위 4개 케이스(`resumed_wait`/`retried_enter`/`worker_abandon_retry`/
-`escalated_spawn_failure`), `none_decision_gate_self_timed_out_worker_proceeded` 어디에도 해당하지
-않는 정상 분기를 만나면 즉석 문자열을 발명하지 말고, `sleeptimegrt-skills`에 스키마 구멍 이슈를 열고,
-같은 write에서 `action_taken=UNMAPPED_BRANCH`, `raw_action=<실제 관측 문자열>`,
+**`UNMAPPED_BRANCH`** — 위 5개 케이스(`resumed_wait`/`retried_enter`/`worker_abandon_retry`/
+`task_recreate_retry`/`escalated_spawn_failure`), `none_decision_gate_self_timed_out_worker_proceeded`
+어디에도 해당하지 않는 정상 분기를 만나면 즉석 문자열을 발명하지 말고, `sleeptimegrt-skills`에 스키마
+구멍 이슈를 열고, 같은 write에서 `action_taken=UNMAPPED_BRANCH`, `raw_action=<실제 관측 문자열>`,
 `schema_gap_issue=<추적 이슈 slug>`로 남긴다.
 
-**Retry budget: 2** `worker_abandon_retry` attempts per `task_id`, matching `orca-task-runner` §6's
-task-level-gate retry limit and `orca-workflow-task` §4's FAIL-retry limit.
+**Retry budget: 2** `worker_abandon_retry`-or-`task_recreate_retry` attempts per `task_id` (a shared
+budget across both sub-branches — a `dead`-case retry consumes the same `retry_count` regardless of
+which sub-branch handled it), matching `orca-task-runner` §6's task-level-gate retry limit and
+`orca-workflow-task` §4's FAIL-retry limit.
 
 **1-hour (`--timeout-ms 3600000`) is a starting default**, spot-checked live only up to ~180 seconds
 during the design investigation and once for ~10 minutes during implementation — not proven safe for a
