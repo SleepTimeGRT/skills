@@ -47,6 +47,14 @@ def _self_recovery_own_printf_line(text: str) -> str:
     raise AssertionError("self-recovery.md's own printf recipe line not found")
 
 
+def _min_gap(a: str, b: str, text: str) -> int:
+    a_positions = [m.start() for m in re.finditer(re.escape(a), text)]
+    b_positions = [m.start() for m in re.finditer(re.escape(b), text)]
+    if not a_positions or not b_positions:
+        raise AssertionError(f"{a!r} or {b!r} not found in text")
+    return min(abs(ai - bi) for ai in a_positions for bi in b_positions)
+
+
 # ---------------------------------------------------------------------------
 # ac1 -- CONTRACT_APPROVED_ROUND1 generalized to CONTRACT_APPROVED + variable round
 # ---------------------------------------------------------------------------
@@ -58,11 +66,15 @@ def test_logging_md_generalizes_contract_approved():
     assert len(re.findall(r"CONTRACT_APPROVED(?!_)", text)) >= 3
     assert "고정" not in text
     assert re.search(r"round=1\b", text) is None
-    # override-absorbed (verdict-r2.json ac1): the replacement text must still say round is
-    # variable, not just delete the fixed-round sentence. Window anchors ("CONTRACT_ESCALATE는
-    # contract 협상이" / "MANUAL_RECOVERY_COMPLETED는") are unchanged by this diff, so this window
-    # is valid both before and after the edit.
-    start = text.index("`CONTRACT_ESCALATE`는 contract 협상이")
+    # override-absorbed (verdict-r2.json ac1), tightened per eval-report-a1.json Finding 3: the
+    # window must be the CONTRACT_APPROVED paragraph itself, not the neighboring CONTRACT_ESCALATE
+    # paragraph -- the latter already says "가변" pre-diff (about its own round field), which let
+    # the original window pass at base commit 47a0a0c for the wrong reason (verified: eval-report
+    # extracted the same wide window from base and found "가변" present there via that unrelated
+    # sentence). Anchoring on "`CONTRACT_APPROVED`는 contract 협상이" instead means this window
+    # cannot exist at all until the CONTRACT_APPROVED_ROUND1 -> CONTRACT_APPROVED rename has
+    # happened, so a false-pass from a neighboring sentence is structurally impossible.
+    start = text.index("`CONTRACT_APPROVED`는 contract 협상이")
     end = text.index("`MANUAL_RECOVERY_COMPLETED`는")
     window = text[start:end]
     assert "가변" in window or "round=<" in window
@@ -82,10 +94,14 @@ def test_orca_workflow_task_skill_generalizes_round():
 
 def test_logging_md_writer_restriction_names_epic():
     text = LOGGING_MD.read_text()
+    # tightened per eval-report-a1.json Finding 4: proposal-r2's verification_plan promised
+    # "'orca-workflow-epic' within 40 characters of 'escalation_parked'", not mere
+    # window-containment (which a paraphrase mentioning both tokens anywhere in the same wide
+    # window would also satisfy without being adjacent).
     w1 = text[text.index("**`outcome`**"):text.index("진행-분기 축")]
-    assert "orca-workflow-epic" in w1 and "escalation_parked" in w1
+    assert _min_gap("orca-workflow-epic", "escalation_parked", w1) <= 40
     w2 = text[text.index("`skill`은 기록 주체다"):text.index("**목록에 없는 정상 분기를 만나면**")]
-    assert "orca-workflow-epic" in w2 and "escalation_parked" in w2
+    assert _min_gap("orca-workflow-epic", "escalation_parked", w2) <= 40
 
 
 def test_logging_md_enum_window_has_escalation_parked():
@@ -227,20 +243,32 @@ AC7_RAW_STRINGS = (
 )
 
 
+_AC7_BULLET_LINE_RE = re.compile(r"^- .*->.*$", re.MULTILINE)
+
+
 def ac7_comment_matches(body: str) -> bool:
     if AC7_MARKER not in body:
         return False
-    matched_lines = 0
+    # eval-report-a1.json Finding 1 (important): the round-2 matcher counted a per-raw-string
+    # match anywhere in the body, so packing all 3 raw strings + one "->" into a single bullet
+    # line satisfied "3 matches" without being "3 distinct lines." Fix: require exactly 3
+    # bullet-shaped lines total, and require the 3 raw strings to resolve to 3 distinct line
+    # indices among them (so no single line can cover more than one raw string's requirement).
+    bullet_lines = _AC7_BULLET_LINE_RE.findall(body)
+    if len(bullet_lines) != 3:
+        return False
+    matched_line_indices = set()
     for raw in AC7_RAW_STRINGS:
-        pattern = re.compile(r"^- .*" + re.escape(raw) + r".*->.*$", re.MULTILINE)
-        matches = pattern.findall(body)
-        if len(matches) != 1:
+        line_index = next((i for i, line in enumerate(bullet_lines) if raw in line), None)
+        if line_index is None:
             return False
-        matched_lines += 1
-    return matched_lines == 3
+        matched_line_indices.add(line_index)
+    return len(matched_line_indices) == 3
 
 
 def test_ac7_matcher_rejects_dotall_style_string_reuse():
+    # round-1-style attack: raw strings and "->" separated across different, non-bulleted
+    # paragraphs -- would satisfy a DOTALL `raw.*?->.*?raw` pattern spanning the whole body.
     adversarial = (
         f"{AC7_MARKER}\n\n"
         "Raw strings observed: CONTRACT_APPROVED_ROUND2, escalation_parked, "
@@ -249,6 +277,33 @@ def test_ac7_matcher_rejects_dotall_style_string_reuse():
         "none_decision_gate_self_timed_out_worker_proceeded.\n"
     )
     assert ac7_comment_matches(adversarial) is False
+
+
+def test_ac7_matcher_rejects_single_bullet_line_covering_all_three_raw_strings():
+    # eval-report-a1.json Finding 1 (important) / .evaluate-review-a1.md Finding 2's exact
+    # reproduction: the round-2 matcher returned True for this, because 3 independent
+    # per-raw-string DOTALL-free searches can each match the *same* single line once.
+    single_line = (
+        f"{AC7_MARKER}\n\n"
+        "- `CONTRACT_APPROVED_ROUND2`,`round:2`,`escalation_parked`,"
+        "`none_decision_gate_self_timed_out_worker_proceeded` -> all three map onto the new "
+        "schema identically\n"
+    )
+    assert ac7_comment_matches(single_line) is False
+
+
+def test_ac7_matcher_rejects_extra_bullet_line():
+    too_many = (
+        f"{AC7_MARKER}\n\n"
+        "- `CONTRACT_APPROVED_ROUND2`,`round:2` (2026-08-08, assignments-2026-08-08.jsonl, "
+        "#513 session) -> `CONTRACT_APPROVED`+`round=2`\n"
+        "- `escalation_parked` (2026-08-08, assignments-2026-08-08.jsonl, #524 session) -> "
+        "identical to the new escalation_parked value\n"
+        "- `none_decision_gate_self_timed_out_worker_proceeded` (2026-08-08, "
+        "waves-2026-08-08.jsonl, #524 session) -> identical to the new value of the same name\n"
+        "- extra decoy bullet line that also happens to contain -> an arrow\n"
+    )
+    assert ac7_comment_matches(too_many) is False
 
 
 def test_ac7_matcher_rejects_missing_marker():

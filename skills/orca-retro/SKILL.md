@@ -64,7 +64,9 @@ done
    `outcome`/`action_taken`이 `UNMAPPED_BRANCH`이고 `schema_gap_issue` 필드가 채워진 레코드는 위반이
    아니라 추적 중인 알려진 구멍으로 읽고 후보에서 제외한다 — `UNMAPPED_BRANCH`이면서 `schema_gap_issue`가
    비어 있거나 없는 레코드, 그리고 enum에 없는 값이 `UNMAPPED_BRANCH` 리터럴 자체가 아닌 레코드는
-   그대로 위반 후보다.
+   그대로 위반 후보다. 예외: `outcome`이 리터럴 `CONTRACT_APPROVED_ROUND1` 또는
+   `CONTRACT_APPROVED_ROUND2`인 레코드는 `schema_gap_issue` 유무와 무관하게 위반 후보에서 제외한다 —
+   `CONTRACT_APPROVED`로의 일반화(#86) 이전에는 그 시점 스키마 기준으로 정상 기록된 legacy 값이다.
 2. **스킬 문구 기인 반복 FAIL** — 같은 FAIL 사유가 task·재시도에 걸쳐 반복되고, term 전사에서
    worker가 스킬 지시를 오독·누락한 정황이 보이는 경우.
 3. **예방 가능했던 ESCALATE·인간 개입** — `ESCALATE`·`*_HUMAN_DECISION` 계열 outcome 중, 전사를 보면
