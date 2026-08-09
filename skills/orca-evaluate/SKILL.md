@@ -148,7 +148,7 @@ reviewer_advisor="$(printf '%s' "$reviewer_json" | jq -r '.advisor // empty')"
 
 case "$reviewer_provider" in
   codex)  launch_cmd="<Codex launch 문법 — models/codex.md에서 model=$reviewer_model effort=$reviewer_effort로 resolve, --dangerously-bypass-approvals-and-sandbox 인라인 포함>" ;;
-  claude) launch_cmd="<Claude Code launch 문법 — models/claude-code.md에서 model=$reviewer_model effort=$reviewer_effort${reviewer_advisor:+, advisor=$reviewer_advisor}로 resolve, --dangerously-skip-permissions 인라인 포함>" ;;
+  claude-code) launch_cmd="<Claude Code launch 문법 — models/claude-code.md에서 model=$reviewer_model effort=$reviewer_effort${reviewer_advisor:+, advisor=$reviewer_advisor}로 resolve, --dangerously-skip-permissions 인라인 포함>" ;;
   *)      echo "select_reviewer.py did not return a known provider (jq/script failure?): $reviewer_json" >&2; exit 1 ;;
 esac
 

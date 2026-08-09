@@ -86,7 +86,7 @@ def test_select_reviewer_routine_prefers_codex_terra_when_available():
 
 def test_select_reviewer_routine_falls_back_to_sonnet_with_advisor_when_codex_unavailable():
     choice = select_reviewer(DiffStats(1, 10), codex_available=False)
-    assert choice == ReviewerChoice("claude", "claude-sonnet-5", "high", advisor="opus")
+    assert choice == ReviewerChoice("claude-code", "claude-sonnet-5", "high", advisor="opus")
 
 
 def test_select_reviewer_high_risk_prefers_codex_sol_xhigh_when_available():
@@ -96,7 +96,7 @@ def test_select_reviewer_high_risk_prefers_codex_sol_xhigh_when_available():
 
 def test_select_reviewer_high_risk_falls_back_to_opus_xhigh_when_codex_unavailable():
     choice = select_reviewer(DiffStats(50, 1000), codex_available=False)
-    assert choice == ReviewerChoice("claude", "claude-opus-5", "xhigh")
+    assert choice == ReviewerChoice("claude-code", "claude-opus-5", "xhigh")
 
 
 def test_select_reviewer_default_codex_available_is_true():
@@ -132,7 +132,7 @@ def test_select_reviewer_small_migration_diff_is_no_longer_lowest_tier_when_code
 def test_select_reviewer_small_migration_diff_is_no_longer_lowest_tier_when_codex_unavailable():
     small_migration_diff = DiffStats(files_changed=1, lines_changed=5)
     choice = select_reviewer(small_migration_diff, codex_available=False, high_risk_signal=True)
-    assert choice == ReviewerChoice("claude", "claude-opus-5", "xhigh")
+    assert choice == ReviewerChoice("claude-code", "claude-opus-5", "xhigh")
     assert choice.model != "claude-sonnet-5"
 
 
@@ -198,7 +198,7 @@ def test_cli_no_codex_available_flag_falls_back_to_claude():
         capture_output=True, text=True, check=True,
     )
     payload = json.loads(result.stdout)
-    assert payload == {"provider": "claude", "model": "claude-sonnet-5", "effort": "high", "advisor": "opus"}
+    assert payload == {"provider": "claude-code", "model": "claude-sonnet-5", "effort": "high", "advisor": "opus"}
 
 
 def test_cli_high_risk_diff_selects_sol():
