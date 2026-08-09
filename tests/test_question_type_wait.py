@@ -92,3 +92,8 @@ def test_stale_paragraph_corrected():
     assert "이 값이 다시 발생하는 경로를 차단한다" not in window
     assert "여전히 유효하다" in window
     assert "다시 기록될 수 있다" in window
+    # eval-report-a1.json Finding 1's 부수 지적: 정의문 자체가 과거형("...진행한 경우였다")으로
+    # 바뀌면 이 값이 은퇴한 것처럼 읽혀, 재관측 시 코디네이터가 UNMAPPED_BRANCH로 오분류해
+    # 불필요한 스키마-갭 이슈를 열 위험이 있다(fail-open). 정의문은 현재형을 유지해야 한다.
+    assert "진행한 경우다" in window
+    assert "진행한 경우였다" not in window
