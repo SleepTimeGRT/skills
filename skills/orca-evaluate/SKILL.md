@@ -25,7 +25,7 @@ dispatch spec마다 그때그때 예방 문구를 덧붙이는 방식은 막지 
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 orca_call_with_retry "orca-workflow-task" "evaluator" -- \
   orca terminal create --worktree active --title task-evaluate-<n> \
-  --command "<REPL이 가능한, agy 제외 provider의 launch 문법 — provider 문서에서 resolve>" --json
+  --command "<REPL이 가능한, agy 제외 provider의 launch 문법 — provider 문서에서 resolve하되, 인라인 permission-bypass 플래그 필수: claude → --dangerously-skip-permissions, codex → --dangerously-bypass-approvals-and-sandbox>" --json
 orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json
 # 해당 provider가 최초 launch 시 신뢰/승인류 재프롬프트를 요구하면 그 provider 문서가 정의하는 절차를 따른다
 # (agy처럼 자동 확정 가능한 provider도 있고 아닐 수도 있다 — 여기서 agy 전용 시퀀스를 가정하지 않는다).
@@ -49,7 +49,7 @@ source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 # 세션으로 띄운다(provider 이름에 종속되지 않는 공통 원칙)
 orca_call_with_retry "orca-evaluate" "contract-review" -- \
   orca terminal create --worktree active --title eval-contract \
-  --command "<강한 reasoning provider의 launch 문법 — provider 문서에서 resolve>" --json
+  --command "<강한 reasoning provider의 launch 문법 — provider 문서에서 resolve하되, 인라인 permission-bypass 플래그 필수: claude → --dangerously-skip-permissions, codex → --dangerously-bypass-approvals-and-sandbox>" --json
 orca terminal wait --terminal <contract-handle> --for tui-idle --timeout-ms 60000 --json
 spec_text="<proposal-r<n>.json 경로 + 원본 issue 전문 + contract-schema.md의 '적대적 판정 지침' 그대로 + verdict-r<n>.json을 스키마·불변식대로 CONTRACT_DIR에 쓰라는 지시(반려 시 reasons에 target·대상 ac_id 명시) + (라운드 2면) 같은 문서의 '라운드 2 입력 격리' 규칙 그대로 + 판정 결과를 보낼 orchestration 호출은 orca_call_with_retry로 감싸고 연결 실패를 즉시 사람에게 알리지 말라는 지시>"
 orca_call_with_retry "orca-evaluate" "contract-review" -- \
@@ -147,8 +147,8 @@ reviewer_effort="$(printf '%s' "$reviewer_json" | jq -r .effort)"
 reviewer_advisor="$(printf '%s' "$reviewer_json" | jq -r '.advisor // empty')"
 
 case "$reviewer_provider" in
-  codex)  launch_cmd="<Codex launch 문법 — models/codex.md에서 model=$reviewer_model effort=$reviewer_effort로 resolve>" ;;
-  claude) launch_cmd="<Claude Code launch 문법 — models/claude-code.md에서 model=$reviewer_model effort=$reviewer_effort${reviewer_advisor:+, advisor=$reviewer_advisor}로 resolve>" ;;
+  codex)  launch_cmd="<Codex launch 문법 — models/codex.md에서 model=$reviewer_model effort=$reviewer_effort로 resolve, --dangerously-bypass-approvals-and-sandbox 인라인 포함>" ;;
+  claude) launch_cmd="<Claude Code launch 문법 — models/claude-code.md에서 model=$reviewer_model effort=$reviewer_effort${reviewer_advisor:+, advisor=$reviewer_advisor}로 resolve, --dangerously-skip-permissions 인라인 포함>" ;;
   *)      echo "select_reviewer.py did not return a known provider (jq/script failure?): $reviewer_json" >&2; exit 1 ;;
 esac
 

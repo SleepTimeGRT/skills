@@ -91,7 +91,7 @@ source ~/.agents/orca-workflows/scripts/log_dispatch.sh
 # task-runner 호출 (provider는 model-selection.md 기준 선택 — 코드 생성이라 Routine/High-Risk tier)
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
   orca terminal create --worktree active --title task-run-<n> \
-  --command "<provider의 launch 문법 — provider 문서에서 resolve>" --json
+  --command "<provider의 launch 문법 — provider 문서에서 resolve하되, 인라인 permission-bypass 플래그 필수: claude → --dangerously-skip-permissions, codex → --dangerously-bypass-approvals-and-sandbox>" --json
 spec_text="<issue 번호 + CONTRACT_DIR 절대경로 + 제안서/구현 모드(제안서 모드면: contract-schema.md 스키마대로 AC 초안을 포함한 proposal-r<라운드>.json을 CONTRACT_DIR에 작성) + orphan-폴백 계약(§0) 전문>"
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
@@ -115,7 +115,7 @@ log_dispatch --skill "orca-workflow-task" --role "task-runner" --issue "<issue-n
 # launch 시 resolve.
 orca_call_with_retry "orca-workflow-task" "evaluator" -- \
   orca terminal create --worktree active --title task-evaluate-<n> \
-  --command "<REPL이 가능한, agy 제외 provider의 launch 문법 — provider 문서에서 resolve>" --json
+  --command "<REPL이 가능한, agy 제외 provider의 launch 문법 — provider 문서에서 resolve하되, 인라인 permission-bypass 플래그 필수: claude → --dangerously-skip-permissions, codex → --dangerously-bypass-approvals-and-sandbox>" --json
 orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json
 # 해당 provider가 최초 launch 시 신뢰/승인류 재프롬프트를 요구하면 그 provider 문서가 정의하는
 # 절차를 따른다(agy 전용 시퀀스를 여기서 가정하지 않는다).
