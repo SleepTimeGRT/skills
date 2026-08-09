@@ -48,12 +48,12 @@ description: Use when generating the implementation for one task (issue) — pro
   ```bash
   install -d -m 700 ~/.local/state/orca-workflows/logs
   run_json="$(orca orchestration run-create --objective "<issue 번호> task implementation" --from <자기 handle> --json)"
-  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt"
-  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt"
+  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-task-runner.txt"
+  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-task-runner.txt"
   ```
 
   이후 §5의 모든 `worker-start`/`check --wait`/`--ack` 호출 앞에서
-  `RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt")"`로 다시 읽는다.
+  `RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-task-runner.txt")"`로 다시 읽는다.
   `orca-workflow-task`가 이 세션을 스폰할 때 자기 Run을 갖고 있더라도 그건 재사용하지 않는다(Run이 섞이면
   서로 다른 세션의 `worker_done`이 잘못된 mailbox로 전달된다 — `~/.agents/orca-workflows/self-recovery.md`
   참고).
@@ -154,7 +154,9 @@ subtask가 worker_done을 보내기 전에 스스로 실행: typecheck, unit tes
 
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
-RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>.txt")"   # §0에서 남긴 사이드카
+sidecar="$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-task-runner.txt"
+[ -s "$sidecar" ] || { echo "orca-task-runner §0 Run 생성이 실행되지 않음 — 사이드카 없음: $sidecar" >&2; exit 1; }
+RUN_ID="$(cat "$sidecar")"   # §0에서 남긴 사이드카
 orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
   orca orchestration task-list --ready --brief --json
 spec_sidecar="$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"   # §2에서 남긴 사이드카

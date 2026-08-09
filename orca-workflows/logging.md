@@ -305,3 +305,16 @@ captured response in this environment — not assumed.
   over.
 - `dropped:true` is recorded and logging continues normally — no retry or reconstruction of the missing
   span.
+
+## §3. Run-id sidecars (`run-<issue>-<skill>.txt`)
+
+Like the logs in §1 and the transcripts in §2, these sidecar files live under
+`~/.local/state/orca-workflows/logs/` and are git-untracked.
+
+Naming: `run-<issue-num-or-root-num>-<skill-dir-name>.txt`, where `<skill-dir-name>` is the directory name
+of the skill writing the sidecar, exactly as it appears under `skills/` — one of `orca-workflow-task`,
+`orca-task-runner`, or `orca-workflow-epic`.
+
+Each skill writes and reads only its own sidecar; it does not read a sidecar written by another skill.
+
+Same `install -d -m 700`/`chmod 600` convention as §1.
