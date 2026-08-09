@@ -212,7 +212,7 @@ def test_orca_retro_lens1_splits_unmapped_branch_with_and_without_schema_gap_iss
 
 def test_orca_set_version_bumped():
     lines = [l for l in SET_VERSION.read_text().splitlines() if l.strip()]
-    assert lines[0] == "v1.1.2"
+    assert lines[0] == "v1.1.3"
     assert sorted(lines[1:]) == sorted(
         [
             "orca-evaluate",
