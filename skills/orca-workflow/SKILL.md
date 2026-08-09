@@ -66,7 +66,7 @@ orca_call_with_retry "orca-workflow" "retro" -- \
   orca orchestration dispatch --task <task_id> --to <retro-handle> --retry-request "$(uuidgen)" --inject --json
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43).
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로, dispatch와 같은 블록에서 즉시:
-#  §1 assign 이벤트: role="retro", issue=<root-issue-num>, task_id=<task_id>, provider/model/effort=resolved 값,
+#  §1 assign 이벤트: role="retro", issue=<root-issue-num>, task_id=<task_id>, provider(claude-code|codex|agy 중 하나)/model/effort=resolved 값,
 #    terminal=<retro-handle>, worktree=<worktree 경로>
 #  §2 term 로그: skill="orca-workflow", role="retro", terminal=<retro-handle>, meta 기록 후
 #    sent.content=$spec_text. 이 사이트는 하위 스킬의 dispatch 사이트들과 달리 요약을 터미널에서

@@ -42,14 +42,14 @@ Claude Code exception:
 
 | Tier | Provider | Model | Effort | Use |
 |---|---|---|---|---|
-| High Risk | Claude | `claude-opus-5` | xhigh | Precision-oriented architecture, security, migration, production review, and final approval |
-| High Risk | Codex | `gpt-5.6-sol` | high; xhigh for security/final gates | Recall-oriented review and demanding implementation; raise effort when missed findings cost more than latency or usage |
-| Routine | Claude | `claude-sonnet-5` | high | Primary generator, including design-heavy implementation; architecture decisions move to High Risk |
-| Routine | Claude | `claude-opus-5` | xhigh, separate session only | Reviewer, not primary generator; advisor-tool effort cannot be selected or verified |
-| Routine | Codex | `gpt-5.6-terra` | medium | Primary generator and bounded first-pass triage; escalate final or high-risk review to Sol |
-| Simple | Claude | `claude-haiku-4-5-20251001` | omit | Transcription, boilerplate, and mechanical edits |
-| Simple | Codex | `gpt-5.6-luna` | max | Short, clear, repeatable work, plus narrow-context Routine subtasks (single file/small bounded diff) — never long-context or large-codebase work, regardless of effort; boot-smoke precondition applies (never dispatched in this repo yet) |
-| Simple | Gemini (agy) | `gemini-3.6-flash-low` | low | Short mechanical work |
+| High Risk | Claude (`claude-code`) | `claude-opus-5` | xhigh | Precision-oriented architecture, security, migration, production review, and final approval |
+| High Risk | Codex (`codex`) | `gpt-5.6-sol` | high; xhigh for security/final gates | Recall-oriented review and demanding implementation; raise effort when missed findings cost more than latency or usage |
+| Routine | Claude (`claude-code`) | `claude-sonnet-5` | high | Primary generator, including design-heavy implementation; architecture decisions move to High Risk |
+| Routine | Claude (`claude-code`) | `claude-opus-5` | xhigh, separate session only | Reviewer, not primary generator; advisor-tool effort cannot be selected or verified |
+| Routine | Codex (`codex`) | `gpt-5.6-terra` | medium | Primary generator and bounded first-pass triage; escalate final or high-risk review to Sol |
+| Simple | Claude (`claude-code`) | `claude-haiku-4-5-20251001` | omit | Transcription, boilerplate, and mechanical edits |
+| Simple | Codex (`codex`) | `gpt-5.6-luna` | max | Short, clear, repeatable work, plus narrow-context Routine subtasks (single file/small bounded diff) — never long-context or large-codebase work, regardless of effort; boot-smoke precondition applies (never dispatched in this repo yet) |
+| Simple | Gemini (`agy`) | `gemini-3.6-flash-low` | low | Short mechanical work |
 
 Do not use `claude-fable-5`. Do not transfer an effort choice between models or providers merely because
 the level has the same name. Provider-specific evidence and unresolved validation are recorded in the

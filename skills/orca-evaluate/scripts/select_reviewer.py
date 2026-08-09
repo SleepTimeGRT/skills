@@ -33,7 +33,7 @@ class DiffStats:
 
 @dataclass(frozen=True)
 class ReviewerChoice:
-    provider: str  # "claude" | "codex"
+    provider: str  # "claude-code" | "codex"
     model: str
     effort: str
     advisor: Optional[str] = None  # e.g. "opus" — only for claude-sonnet-5(+ --advisor opus)
@@ -97,14 +97,14 @@ def select_reviewer(
         # Advisor effort cannot be set or verified (models/claude-code.md) — effort="high" here
         # is the *session's own* pinned effort, so model-selection.md's "launch with an explicit
         # model+effort" invariant still holds; only the advisor's own effort is unverifiable.
-        return ReviewerChoice("claude", "claude-sonnet-5", "high", advisor="opus")
+        return ReviewerChoice("claude-code", "claude-sonnet-5", "high", advisor="opus")
     # high-risk: diff-review-before-merge is exactly the "final review" model-selection.md refers
     # to, so both providers use xhigh here (codex.md's "high; xhigh for security/final gates").
     # (gpt-5.6-terra's own row says to "escalate final or high-risk review to Sol" — this branch
     # is that escalation; terra is never reached once high-risk is decided, by either signal.)
     if codex_available:
         return ReviewerChoice("codex", "gpt-5.6-sol", "xhigh")
-    return ReviewerChoice("claude", "claude-opus-5", "xhigh")
+    return ReviewerChoice("claude-code", "claude-opus-5", "xhigh")
 
 
 _FILES_RE = re.compile(r"(\d+) files? changed")

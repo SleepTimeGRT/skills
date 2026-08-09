@@ -87,7 +87,7 @@ def test_writes_assign_event_with_all_fields(tmp_path, shell):
     assert rec["role"] == "task-runner"
     assert rec["issue"] == "68"
     assert rec["task_id"] == "task_abc"
-    assert rec["provider"] == "claude"
+    assert rec["provider"] == "claude-code"
     assert rec["model"] == "opus"
     assert rec["effort"] == "high"
     assert rec["terminal"] == "term_x"
@@ -229,3 +229,36 @@ def test_written_files_are_chmod_600(tmp_path, shell):
     term_file = _logs_dir(home) / "term-term_x.jsonl"
     assert stat.S_IMODE(assign_file.stat().st_mode) == 0o600
     assert stat.S_IMODE(term_file.stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_provider_value_rejected_outside_canonical_set(tmp_path, shell):
+    script = CALL.replace("--provider claude ", "--provider openai ")
+    result, home = _run(tmp_path, script, shell=shell)
+    assert result.returncode != 0
+    assert not _assign_lines(home)
+    assert not _term_lines(home, "term_x")
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_provider_canonical_values_pass_through(tmp_path, shell):
+    for provider in ("claude-code", "codex", "agy"):
+        script = CALL.replace("--provider claude ", f"--provider {provider} ")
+        sub = tmp_path / provider
+        sub.mkdir()
+        result, home = _run(sub, script, shell=shell)
+        assert result.returncode == 0, result.stderr
+        lines = _assign_lines(home)
+        assert len(lines) == 1
+        assert lines[0]["provider"] == provider
+        assert "deprecated alias" not in result.stderr
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_provider_claude_normalized_with_warning(tmp_path, shell):
+    result, home = _run(tmp_path, CALL, shell=shell)
+    assert result.returncode == 0, result.stderr
+    lines = _assign_lines(home)
+    assert len(lines) == 1
+    assert lines[0]["provider"] == "claude-code"
+    assert "claude" in result.stderr and "claude-code" in result.stderr
