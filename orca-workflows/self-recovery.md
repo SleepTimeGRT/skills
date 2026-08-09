@@ -223,6 +223,32 @@ if [ "$timed_out" = "true" ]; then
               [ -n "$new_terminal_handle" ] || inject_recovery_ok=false
             fi  # terminal create check
             if [ "$inject_recovery_ok" = true ]; then
+              # Freshly launched REPL: `terminal wait --for tui-idle` alone is not a sufficient
+              # precondition for `dispatch --inject` (dispatch-verify.md's "Pre-dispatch -- freshly
+              # launched REPL" section, issue #84 -- codex keeps booting MCP servers past tui-idle,
+              # and bracketed-paste text injected during that window is dropped, partially or wholly,
+              # with no draft left in the composer for a post-dispatch Enter-only retry to recover).
+              # Run tui-idle first, then dispatch-verify.md's cursor-scoped boot-quiesce loop (new
+              # output settles to 0 lines) against $new_terminal_handle before ever dispatching into
+              # it. $NEW_OR_SAME_HANDLE's original launch (worker-start sub-branch above, and every
+              # non-recovery dispatch) goes through the calling skill's own launch template, which
+              # already carries this same wait -- only this sub-branch inlines `terminal create`
+              # directly and so must inline this check too (issue #89 eval-report-a3 finding 1).
+              orca terminal wait --terminal "$new_terminal_handle" --for tui-idle --timeout-ms 60000 --json >/dev/null \
+                || inject_recovery_ok=false
+              if [ "$inject_recovery_ok" = true ]; then
+                quiesced=false
+                cur="$(orca terminal read --terminal "$new_terminal_handle" --json | jq -r '.result.terminal.latestCursor')"
+                for _ in 1 2 3 4 5; do
+                  sleep 12
+                  new_lines="$(orca terminal read --terminal "$new_terminal_handle" --cursor "$cur" --json | jq -r '.result.terminal.returnedLineCount')"
+                  [ "$new_lines" = 0 ] && { quiesced=true; break; }
+                  cur="$(orca terminal read --terminal "$new_terminal_handle" --json | jq -r '.result.terminal.latestCursor')"
+                done
+                [ "$quiesced" = true ] || inject_recovery_ok=false
+              fi  # boot-quiesce loop
+            fi  # tui-idle + boot-quiesce check (issue #89 eval-report-a3 finding 1)
+            if [ "$inject_recovery_ok" = true ]; then
               new_result="$(orca orchestration dispatch --task "$new_task_id" --to "$new_terminal_handle" \
                 --retry-request "$(uuidgen)" --inject --json)"
               # `.result.dispatch.id` is what this exact `dispatch --inject --json` call actually
