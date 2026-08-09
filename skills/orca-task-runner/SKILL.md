@@ -70,7 +70,7 @@ spec으로 받은 `CONTRACT_DIR`에 `proposal-r<라운드>.json`으로,
 - 구현 범위(`scope`) — 무엇을 만들 것인가, 어떤 파일을 건드릴 것인가. **사실 서술만** — "왜
   충분한가"류 정당화는 어떤 필드에도 넣지 않는다(스키마 문서의 "라운드 2 입력 격리" 참고).
 - 검증 방법(`verification_plan`) — 구체적인 파일/함수/테스트로, 항목마다 커버하는 ac id를
-  `covers`로 참조한다. 어떤 항목도 커버하지 않는 ac id가 남으면 반려 대상이다.
+  `covers`로 참조하고 이 항목이 fix 이전에 어떻게 실패하는지(또는 왜 실패할 수 없는지)를 `fails_before_fix`에 적는다. 어떤 항목도 커버하지 않는 ac id가 남거나 `fails_before_fix`가 비어 있거나 없으면 반려 대상이다.
 - 의도된 destructive 오퍼레이션(`destructive_operations`) — 빈 배열이 "명시적 없음"이다. 이 선언은
   나중에 `orca-evaluate` §3가 diff에서 실제로 flag된 destructive-op와 대조하는 근거가 된다.
 - 이 변경으로 red가 되거나 갱신이 필요한 기존 테스트·단언(`existing_tests_affected`, file:line) —

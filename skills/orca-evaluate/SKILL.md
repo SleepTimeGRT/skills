@@ -41,7 +41,7 @@ orca_call_with_retry "orca-workflow-task" "evaluator" -- \
 
 ## 1. Contract 검토 (coding agent 스폰)
 
-`orca-task-runner`가 구현 전 제안서(`proposal-r<n>.json` — AC 초안 + 범위 + 검증 방법, 스키마는 `~/.agents/orca-workflows/contract-schema.md`)를 보내오면, 이 세션(evaluator)이 직접 판단하지 않고 **coding agent 터미널을 스폰**해서 **원본 issue 전문**에 대조 검토를 맡긴다 — 판정은 두 축이다: ①AC 초안이 issue의 요구를 충실히 반영하는가(누락·과소·과대) ②`verification_plan`이 그 AC를 실제로 커버하는가. 제안된 파일 범위·검증 방법이 실제 코드베이스에서 기술적으로 타당한지 보는, 구현 착수 전의 1회성 판단이라 diff 규모 같은 위험도를 낮출 신호가 아직 존재하지 않는 시점이다. 그래서 여기는 고정된 강한 reasoning 모델(`model-selection.md` High Risk tier)을 쓴다 — §3처럼 사후에 diff 통계로 동적으로 낮추지 않는다.
+`orca-task-runner`가 구현 전 제안서(`proposal-r<n>.json` — AC 초안 + 범위 + 검증 방법, 스키마는 `~/.agents/orca-workflows/contract-schema.md`)를 보내오면, 이 세션(evaluator)이 직접 판단하지 않고 **coding agent 터미널을 스폰**해서 **원본 issue 전문**에 대조 검토를 맡긴다 — 판정은 두 축이다: ①AC 초안이 issue의 요구를 충실히 반영하는가(누락·과소·과대) ②`verification_plan`이 그 AC를 실제로 커버하고 각 항목의 `fails_before_fix`가 비어 있지 않으며 fix 전후를 실제로 구분하는가. 제안된 파일 범위·검증 방법이 실제 코드베이스에서 기술적으로 타당한지 보는, 구현 착수 전의 1회성 판단이라 diff 규모 같은 위험도를 낮출 신호가 아직 존재하지 않는 시점이다. 그래서 여기는 고정된 강한 reasoning 모델(`model-selection.md` High Risk tier)을 쓴다 — §3처럼 사후에 diff 통계로 동적으로 낮추지 않는다.
 
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
@@ -51,7 +51,7 @@ orca_call_with_retry "orca-evaluate" "contract-review" -- \
   orca terminal create --worktree active --title eval-contract \
   --command "<강한 reasoning provider의 launch 문법 — provider 문서에서 resolve하되, 인라인 permission-bypass 플래그 필수: claude → --dangerously-skip-permissions, codex → --dangerously-bypass-approvals-and-sandbox>" --json
 orca terminal wait --terminal <contract-handle> --for tui-idle --timeout-ms 60000 --json
-spec_text="<proposal-r<n>.json 경로 + 원본 issue 전문 + contract-schema.md의 '적대적 판정 지침' 그대로 + verdict-r<n>.json을 스키마·불변식대로 CONTRACT_DIR에 쓰라는 지시(반려 시 reasons에 target·대상 ac_id 명시) + (라운드 2면) 같은 문서의 '라운드 2 입력 격리' 규칙 그대로 + 판정 결과를 보낼 orchestration 호출은 orca_call_with_retry로 감싸고 연결 실패를 즉시 사람에게 알리지 말라는 지시>"
+spec_text="<proposal-r<n>.json 경로 + 원본 issue 전문 + contract-schema.md의 '적대적 판정 지침' 그대로 + verdict-r<n>.json을 스키마·불변식대로 CONTRACT_DIR에 쓰라는 지시(반려 시 reasons에 target·대상 ac_id 명시) + (라운드 2면) 같은 문서의 '라운드 2 입력 격리' 규칙 그대로 + verification_plan[]의 각 항목이 fails_before_fix를 비우지 않았고 fix 전후를 실제로 구분함을 확인하라는 지시 + 판정 결과를 보낼 orchestration 호출은 orca_call_with_retry로 감싸고 연결 실패를 즉시 사람에게 알리지 말라는 지시>"
 orca_call_with_retry "orca-evaluate" "contract-review" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-evaluate" "contract-review" -- \

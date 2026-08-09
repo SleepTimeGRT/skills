@@ -216,9 +216,11 @@ def test_orca_set_version_bumped():
     # orca-workflow-task/orca-workflow-epic touched by that issue's proposal-r2.json scope).
     # then again per issue #91 (v1.1.4 -> v1.1.5, set members orca-task-runner/orca-workflow-task/
     # orca-workflow-epic touched by that issue's proposal-r2.json scope).
+    # then again per issue #92 (v1.1.5 -> v1.1.6, set members orca-task-runner/orca-evaluate
+    # touched by that issue's proposal-r2.json scope).
     # Invariant unchanged: exact version string + 6-member list are still both enforced.
     lines = [l for l in SET_VERSION.read_text().splitlines() if l.strip()]
-    assert lines[0] == "v1.1.5"
+    assert lines[0] == "v1.1.6"
     assert sorted(lines[1:]) == sorted(
         [
             "orca-evaluate",
