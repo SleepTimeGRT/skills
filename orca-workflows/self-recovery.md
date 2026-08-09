@@ -48,7 +48,7 @@ concurrent subtasks. A contract round has exactly one entry.
 
 ```bash
 result="$(orca orchestration check --run "$RUN_ID" --wait \
-  --types worker_done,escalation --timeout-ms 3600000 --json)"
+  --types worker_done,escalation,question,decision_gate --timeout-ms 3600000 --json)"
 timed_out="$(printf '%s' "$result" | jq -r '.result.timedOut')"
 
 if [ "$timed_out" = "true" ]; then
@@ -113,7 +113,10 @@ fi
 # for msg in result.messages: worker_done -> remove this task_id from the pending set;
 #                              escalation  -> route immediately (decision_gate reply, or escalate
 #                                             to the coordinator) -- do not wait for the rest of the
-#                                             pending set first.
+#                                             pending set first;
+#                              question/decision_gate -> relay to the caller/human, then reply via
+#                                             `orca orchestration reply --id <msg_id> --body <answer> --json`
+#                                             -- routes immediately, before worker_done's pending-set removal, same as escalation.
 orca orchestration check --run "$RUN_ID" --ack "<result.deliveryId>" --peek --json   # mandatory
 # if pending set non-empty: loop back to the top with the remaining task_ids.
 ```
@@ -129,10 +132,12 @@ The liveness `terminal read` above does not count as "already reads that termina
 
 **`none_decision_gate_self_timed_out_worker_proceeded`** — 이 값은 위 wait/recovery 루프의 timeout
 분기(`alive`/`stuck_draft`/`dead` 케이스)가 아니라, 별개 경로에서 기록된다: 디스패치된 워커가 스스로
-`ask`(decision_gate)를 호출했는데, 이 문서의 `check --wait --types worker_done,escalation` 호출이
-`question` 타입을 듣지 않아 코디네이터에게 전달되지 못하고, 워커 자신의 `ask` 타임아웃(기본 600s)까지
-응답이 오지 않아 워커가 자체 판단으로 진행한 경우다(#524 세션에서 최초 관측, 근본 원인은 별도 추적:
-issue #93 — 이 문서의 `--types worker_done,escalation` 인자 목록 자체는 이 값 도입으로 바뀌지 않는다).
+`ask`(decision_gate)를 호출했는데, 당시(#524 세션, issue #93 수정 이전) 이 문서의
+`check --wait --types worker_done,escalation` 호출이 `question`/`decision_gate` 타입을 듣지 않아
+코디네이터에게 전달되지 못하고, 워커 자신의 `ask` 타임아웃(기본 600s)까지 응답이 오지 않아 워커가
+자체 판단으로 진행한 경우였다
+(근본 원인은 issue #93에서 수정됨 — 이 문서의 `--types` 인자 목록은
+`worker_done,escalation,question,decision_gate`로 갱신되어 이 값이 다시 발생하는 경로를 차단한다).
 기록 주체는 이 상황을 인지한 코디네이터이며, `waited_ms`는 이 루프의 3600000 고정값이 아니라 워커
 자신의 `ask` 타임아웃 예산을 남긴다.
 
