@@ -11,7 +11,7 @@ Launch:
 claude --model <id> --effort <low|medium|high|xhigh|max>
 ```
 
-SDD implementation workers use `--dangerously-skip-permissions` (equivalent to `--permission-mode bypassPermissions`)
+Orca가 스폰하는 모든 무인(unattended) 세션 — implementation worker, coordinator, reviewer 구분 없이 — use `--dangerously-skip-permissions` (equivalent to `--permission-mode bypassPermissions`)
 only inside an isolated worktree.
 `claude-opus-5` requires Claude Code 2.1.219 or newer.
 
