@@ -125,3 +125,17 @@ re-verification against the current version's own `skills get`/`--help` output, 
 
 - Do not run deploy, release, migration, seed, wipe, or other external-write commands merely to measure output.
 - Keep changes to different target repositories in independent commits.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (`SleepTimeGRT/skills`), managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five canonical roles (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout — `CONTEXT.md` + `docs/adr/` at repo root. See `docs/agents/domain.md`.
