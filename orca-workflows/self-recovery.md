@@ -83,7 +83,7 @@ if [ "$timed_out" = "true" ]; then
     terminal_status=n/a
     action_taken=escalated_spawn_failure
     # Retry budget exhausted for this task_id -- go straight to spawn-failures.md's grep-first
-    # procedure instead of attempting a third worker-abandon/worker-start --retry-of.
+    # procedure instead of attempting a third dead-case retry (either sub-branch).
   else
     # The only "polling" in this design: one liveness probe, not a repeated tick.
     read_json="$(orca terminal read --terminal "$WORKER_HANDLE" --json)"
@@ -122,13 +122,15 @@ if [ "$timed_out" = "true" ]; then
           # $spec_text is the caller's own already-scoped variable (the same text originally passed to
           # this dispatch's task-create --spec) -- reuse it verbatim unless the caller has a specific
           # correction to make.
-          new_task_result="$(orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json)"
-          new_task_id="$(printf '%s' "$new_task_result" | jq -r '.result.task.id')"
+          orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
+          # <new_task_id> above is this task-create's task_id -- extracted the same way every
+          # SKILL.md call site in this repo already extracts it from task-create's response; no
+          # jq path is asserted here since task-create --help documents no response shape.
           # Fresh terminal per the calling skill's own explicit launch template (its own §3 launch
           # template — same primitive/model/effort as the original dispatch).
           orca terminal create --worktree active --title "<caller's own naming convention>" \
             --command "<caller's own launch template>" --json
-          new_result="$(orca orchestration dispatch --task "$new_task_id" --to "$NEW_OR_SAME_HANDLE" \
+          new_result="$(orca orchestration dispatch --task <new_task_id> --to "$NEW_OR_SAME_HANDLE" \
             --retry-request "$(uuidgen)" --inject --json)"
           new_dispatch_id="$(printf '%s' "$new_result" | jq -r '.result.dispatchId')"
           # Re-run dispatch-verify.md's positive-confirmation procedure against this NEW dispatch.
