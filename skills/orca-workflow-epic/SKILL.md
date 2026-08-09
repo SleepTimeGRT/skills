@@ -70,7 +70,7 @@ RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<root-num>.txt")"
 # 수신 불가), agy 제외(models/agy.md).
 orca_call_with_retry "orca-workflow-epic" "task-coordinator" -- \
   orca terminal create --worktree active --title task-coord-<task-issue-num> \
-  --command "<REPL 가능, agy 제외 provider의 launch 문법 — provider 문서에서 resolve>" --json
+  --command "<REPL 가능, agy 제외 provider의 launch 문법 — provider 문서에서 resolve하되, 인라인 permission-bypass 플래그 필수: claude → --dangerously-skip-permissions, codex → --dangerously-bypass-approvals-and-sandbox>" --json
 orca terminal wait --terminal <coord-handle> --for tui-idle --timeout-ms 60000 --json
 spec_text="<orca-workflow-task SKILL.md 지침 + task issue 번호 + mode(afk|hitl) + 대상 repo + '너는 spawn된 coordinator다: 최종 outcome은 worker_done으로 보고하고, hitl 질문은 ask(decision gate)로 올려라' + worker_done을 포함해 네가 보내는 orca orchestration/orca terminal 호출은 항상 orca_call_with_retry로 감싸고(issue #42), wrapper가 exhausted를 반환하면 추가 orchestration 호출 없이 .orca-orphaned-result-<task_id>.json에 결과를 저장(커밋 금지)한 뒤 터미널에 ORPHANED_RESULT <task_id> <파일 절대경로> 한 줄을 출력하고 멈추라는 지시(orca-task-runner SKILL.md subtask spec 항목 ⑦과 동일 계약)>"
 orca_call_with_retry "orca-workflow-epic" "task-coordinator" -- \
