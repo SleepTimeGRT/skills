@@ -77,7 +77,18 @@ def test_stale_paragraph_corrected():
     assert "이 값 도입으로 바뀌지 않는다" not in window
     assert "worker_done,escalation,question,decision_gate" in window
     assert "#93" in window
-    # verdict-r2.json plan_coverage/ac4: L135 alone quoting the new value isn't enough -- L132-133's
-    # present-tense claim ("check --wait --types worker_done,escalation 호출이 question 타입을 듣지
-    # 않아") must also be reframed as historical, or the paragraph still contradicts the fixed L51.
-    assert _min_gap("당시", "check --wait --types worker_done,escalation", window) <= 50
+    # verdict-r2.json plan_coverage/ac4: quoting the new --types value alone isn't enough -- the
+    # historical claim ("check --wait --types worker_done,escalation 호출이 ... 듣지 않아") must be
+    # reframed so it no longer describes the current L51 value, or the paragraph still contradicts
+    # the fixed L51.
+    assert _min_gap("이전", "check --wait --types worker_done,escalation", window) <= 50
+    # eval-report-a1.json Finding 1 (important): the round-2 fix over-corrected into a *different*
+    # self-contradiction -- claiming this action_taken value's occurrence path is fully "차단한다"
+    # (blocked) while the very next sentence still gives present-tense recording instructions for
+    # it. That exact false claim must not reappear, and the paragraph must instead say the value
+    # remains valid and can still be recorded (coordinator receives the question but replies too
+    # late for the worker's own `ask` budget) -- consistent with the recording instructions that
+    # follow it in the same paragraph.
+    assert "이 값이 다시 발생하는 경로를 차단한다" not in window
+    assert "여전히 유효하다" in window
+    assert "다시 기록될 수 있다" in window
