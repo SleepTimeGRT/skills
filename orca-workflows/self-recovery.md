@@ -37,12 +37,23 @@ worker that will never send anything because it's dead) — never as the default
 - The worker terminal has already been dispatched via one of two Orca primitives — every caller's own
   call site is fixed to exactly one of the two (see the caller table below), so which primitive applies
   to a given dispatch is a fact about that call site, not something this loop probes or guesses. As of
-  this writing, however, no caller's code actually assigns `DISPATCH_CREATED_VIA`/`SPEC_TEXT` before
-  invoking this loop (wiring them in requires editing `skills/**`, out of this contract's scope — see
-  issue #89 eval-report-a1 finding 1). Until that wiring lands, both variables read empty at runtime, and
-  the `dead` case's fail-closed `else` branch (neither `worker-start` nor `dispatch-inject`) is what
-  actually executes for every caller today, routing straight to `escalated_spawn_failure` instead of
-  attempting either recovery sub-branch:
+  this writing, no caller's code actually assigns `DISPATCH_CREATED_VIA` before invoking this loop
+  (wiring it in per-dispatch requires editing `skills/**`, out of this contract's scope — see issue #89
+  eval-report-a1 finding 1). This loop does not wait on that wiring for the two callers whose call site
+  is already unambiguous, though: `CALLING_SKILL` is a caller-supplied constant these callers already set
+  (loop preamble below), and per the caller table, `orca-task-runner` never uses anything but
+  `worker-start` and `orca-workflow-epic` never uses anything but `dispatch-inject` — so the `dead` case
+  derives `DISPATCH_CREATED_VIA`'s effective value from `CALLING_SKILL` for exactly those two callers
+  when it reads empty, and both recovery sub-branches are reachable for them today without further
+  wiring. `orca-workflow-task` is deliberately excluded from that derivation (its call sites are mixed —
+  `task-runner`/`evaluator` via `dispatch-inject`, `contract-round` via `worker-start`, see the caller
+  table), so for it `DISPATCH_CREATED_VIA` still reads empty and the `dead` case's fail-closed `else`
+  branch (neither `worker-start` nor `dispatch-inject`) still executes, routing straight to
+  `escalated_spawn_failure` instead of attempting either recovery sub-branch — until `orca-workflow-task`
+  wires `DISPATCH_CREATED_VIA` explicitly per dispatch (issue #89 eval-report-a2 finding 4, tracked
+  toward issue #94). `SPEC_TEXT` has no such derivation (there is no analogous per-caller constant for
+  spec text) and must still be wired in by the two `dispatch-inject` callers that need it in the `dead`
+  case, per the loop preamble below:
   - `orca orchestration worker-start --task <task_id> --worktree <selector> --terminal <handle> --run
     <run_id> --from <own handle> --json`, or
   - `orca orchestration task-create --spec <spec> --json` followed by `orca orchestration dispatch --task
@@ -81,9 +92,20 @@ entry at dispatch-creation time — **never** a single shell variable a caller r
 dispatches in one code block. A caller whose own dispatch-creation site assigns a shared `spec_text`
 variable more than once before this loop runs (e.g. `orca-workflow-task` §1 round 1's task-runner dispatch
 at L95 and evaluator dispatch at L122, both created in the same fenced block) must keep each dispatch's
-spec distinctly per pending-set entry. For the two `dispatch-inject` callers that actually need `SPEC_TEXT`
-in the `dead` case (`orca-workflow-task` `task-runner`/`evaluator`, both §1 round 1 — see the caller table
-above), `logging.md` §2's `log_dispatch` already writes that exact spec text into that dispatch's own
+spec distinctly per pending-set entry. Three `dispatch-inject` callers exist per the caller table above
+(`orca-workflow-task` `task-runner`/`evaluator`, both §1 round 1, and `orca-workflow-epic`
+`task-coordinator`, §3) — but only `orca-workflow-epic` `task-coordinator` actually reaches the `dead`
+case's inject sub-branch today: the `CALLING_SKILL`-based derivation above (`## The wait/recovery loop`)
+resolves its effective `DISPATCH_CREATED_VIA` to `dispatch-inject` automatically, while
+`orca-workflow-task`'s two roles stay fail-closed to `escalated_spawn_failure` until `orca-workflow-task`
+wires `DISPATCH_CREATED_VIA` explicitly (issue #89 eval-report-a2 finding 4, tracked toward issue #94) —
+so they cannot reach this sub-branch yet and do not need `SPEC_TEXT` wired for it in the meantime. Until
+`orca-workflow-epic` wires `SPEC_TEXT` for its `task-coordinator` dispatches, this sub-branch's first gate
+(`[ -n "$SPEC_TEXT" ]`, below) fails and the loop escalates — but it fails *before* the first mutation
+(the `task-update --status failed` a few lines down), so that escalation carries zero side effects: no
+task marked failed, no orphan (a direct consequence of moving this precondition ahead of the mutation,
+see below and issue #89 eval-report-a2 finding 3). Once `orca-workflow-epic` wires it,
+`logging.md` §2's `log_dispatch` already writes that exact spec text into that dispatch's own
 `term-<handle>.jsonl` as the `sent` record's `content` field, keyed by the terminal handle this loop
 already has as `WORKER_HANDLE` — reading it back from there is one valid way to satisfy the requirement.
 (`orca-task-runner` §2's `spec-<task_id>.txt` sidecar is a different, `worker-start`-only mechanism used
@@ -120,7 +142,23 @@ if [ "$timed_out" = "true" ]; then
         action_taken=retried_enter
         ;;
       dead)
-        if [ "$DISPATCH_CREATED_VIA" = "worker-start" ]; then
+        # For the two callers whose dispatch-creation call site is unambiguous (see the caller table
+        # above: orca-task-runner only ever uses worker-start; orca-workflow-epic only ever uses
+        # dispatch-inject), derive DISPATCH_CREATED_VIA from CALLING_SKILL when the caller left it
+        # unset -- CALLING_SKILL is already a caller-supplied constant for the whole session (loop
+        # preamble above), so this does not require any skills/** wiring to land first (out of scope,
+        # issue #94). orca-workflow-task's call sites are mixed (dispatch-inject in round 1,
+        # worker-start in round 2+ -- see the caller table), so it is deliberately left out of this
+        # derivation and stays fail-closed to escalation until it wires DISPATCH_CREATED_VIA
+        # explicitly per dispatch (issue #89 eval-report-a2 finding 4).
+        effective_dispatch_created_via="$DISPATCH_CREATED_VIA"
+        if [ -z "$effective_dispatch_created_via" ] && [ "$CALLING_SKILL" = "orca-task-runner" ]; then
+          effective_dispatch_created_via=worker-start
+        fi
+        if [ -z "$effective_dispatch_created_via" ] && [ "$CALLING_SKILL" = "orca-workflow-epic" ]; then
+          effective_dispatch_created_via=dispatch-inject
+        fi
+        if [ "$effective_dispatch_created_via" = "worker-start" ]; then
           # --- worker-start sub-branch ---
           orca orchestration worker-abandon --dispatch "$DISPATCH_ID" --json
           # Re-launch per the calling skill's own explicit launch template (fresh terminal), or reuse
@@ -133,13 +171,14 @@ if [ "$timed_out" = "true" ]; then
           action_taken=worker_abandon_retry
         else
           # --- inject sub-branch ---
-          # This else covers every DISPATCH_CREATED_VIA value that is not exactly "worker-start" --
-          # including unset/empty and anything misspelled. Only the recognized "dispatch-inject"
-          # value below actually runs the inject recovery procedure; every other value fails closed
-          # to escalation instead of silently guessing (issue #89 eval-report-a1 finding 1: a
-          # worker-start-created dispatch recovered via this procedure would skip the required
-          # worker-abandon fence and risk duplicate execution).
-          if [ "$DISPATCH_CREATED_VIA" = "dispatch-inject" ]; then
+          # This else covers every effective_dispatch_created_via value that is not exactly
+          # "worker-start" -- including unset/empty (for orca-workflow-task, which is deliberately
+          # excluded from the derivation above) and anything misspelled. Only the recognized
+          # "dispatch-inject" value below actually runs the inject recovery procedure; every other
+          # value fails closed to escalation instead of silently guessing (issue #89 eval-report-a1
+          # finding 1: a worker-start-created dispatch recovered via this procedure would skip the
+          # required worker-abandon fence and risk duplicate execution).
+          if [ "$effective_dispatch_created_via" = "dispatch-inject" ]; then
             # worker-abandon returns dispatch_not_found for a dispatch created via dispatch --inject
             # (confirmed live, issue #89) -- it only fences worker-start-created dispatches. Do not
             # call it here; there is no fence primitive for this path, so recovery goes straight to
@@ -147,25 +186,21 @@ if [ "$timed_out" = "true" ]; then
             # inject_recovery_ok tracks this so a failure anywhere escalates instead of logging a
             # false task_recreate_retry (finding 2).
             inject_recovery_ok=true
-            orca orchestration task-update --id "$TASK_ID" --status failed --json || inject_recovery_ok=false
             # SPEC_TEXT must be this dispatch's own spec (see the loop preamble above) and non-empty --
             # an empty value here would create a replacement task with no instructions and dispatch a
             # worker at it, silently (issue #89 eval-report-a1 finding 3's failure mode in new clothes).
+            # Checked first, before the first mutation below: it is a pure precondition with no side
+            # effect of its own, so a failure here must not leave $TASK_ID marked failed for nothing
+            # (issue #89 eval-report-a2 finding 3).
             [ -n "$SPEC_TEXT" ] || inject_recovery_ok=false
+            [ "$inject_recovery_ok" = true ] && { orca orchestration task-update --id "$TASK_ID" --status failed --json || inject_recovery_ok=false; }
             if [ "$inject_recovery_ok" = true ]; then
               new_task_result="$(orca orchestration task-create --spec "$SPEC_TEXT" --retry-request "$(uuidgen)" --json)"
-              # task-create's response shape is not documented by `orca orchestration task-create
-              # --help` or `orca skills get orchestration --full` as of Orca 1.4.177, and this exact
-              # call could not be tested live in this session (task-create requires a bound Run, and
-              # the only side-effect-free way to test it is to actually create a task). `.result.task.id`
-              # is not blind guessing, though: every other single-entity orchestration response checked
-              # live this session follows the same "singular key wrapping the entity, entity has a plain
-              # `id` field" shape -- `run-create` returns `.result.run.id`, `dispatch-show` returns
-              # `.result.dispatch.id`. `task-list` (plural) returns each task's id at `.result.tasks[].id`
-              # (no extra "task" wrapper per element), which is why the `.result.taskId` fallback is kept
-              # below rather than dropped. Still UNVERIFIED for task-create specifically -- a future
-              # session with a disposable task to create should confirm and drop this comment
-              # (finding 4).
+              # `.result.task.id` is verified live (Orca 1.4.177 -- `.result | keys == ["mutation",
+              # "task"]`, `.result.task.id` present, `.result.taskId` ABSENT). The `.result.taskId`
+              # fallback is kept anyway since `task-list` (plural) returns each task's id at
+              # `.result.tasks[].id` (no "task" wrapper per element) -- a defensive fallback, not a
+              # claim it fires for this call.
               new_task_id="$(printf '%s' "$new_task_result" | jq -r '.result.task.id // .result.taskId // empty')"
               [ -n "$new_task_id" ] || inject_recovery_ok=false
             fi  # task-create check
@@ -175,18 +210,29 @@ if [ "$timed_out" = "true" ]; then
               # new terminal below, never the dead $NEW_OR_SAME_HANDLE (finding 4).
               new_terminal_result="$(orca terminal create --worktree active --title "<caller's own naming convention>" \
                 --command "<caller's own launch template>" --json)"
-              # agentTerminalHandle / startupTerminal.handle are the two field names orchestration's
-              # own skill guide names for a create response, in that documented preference order
-              # (`orca skills get orchestration --full`, "Messaging" section). If both are empty or
-              # stale, that guide's own fallback is `orca terminal list --worktree active --json`
-              # filtered by the --title set above.
-              new_terminal_handle="$(printf '%s' "$new_terminal_result" | jq -r '.result.agentTerminalHandle // .result.startupTerminal.handle // empty')"
+              # `.result.terminal.handle` is the field this exact `terminal create --json` call
+              # actually returns (verified live, Orca 1.4.177 -- `.result | keys == ["terminal"]`,
+              # handle at `.result.terminal.handle`). The `agentTerminalHandle`/`startupTerminal.handle`
+              # names below were misattributed in an earlier draft: those belong to `worktree create`
+              # (agent-first) responses per `orca skills get orchestration --full`'s "Messaging"
+              # section, not to `terminal create` -- kept only as a defensive fallback in case a future
+              # runtime adds them to this response, never confirmed to fire for this call. If all three
+              # are empty or stale, fall back to `orca terminal list --worktree active --json` filtered
+              # by the --title set above.
+              new_terminal_handle="$(printf '%s' "$new_terminal_result" | jq -r '.result.terminal.handle // .result.agentTerminalHandle // .result.startupTerminal.handle // empty')"
               [ -n "$new_terminal_handle" ] || inject_recovery_ok=false
             fi  # terminal create check
             if [ "$inject_recovery_ok" = true ]; then
               new_result="$(orca orchestration dispatch --task "$new_task_id" --to "$new_terminal_handle" \
                 --retry-request "$(uuidgen)" --inject --json)"
-              new_dispatch_id="$(printf '%s' "$new_result" | jq -r '.result.dispatchId // empty')"
+              # `.result.dispatch.id` is what this exact `dispatch --inject --json` call actually
+              # returns (verified live, Orca 1.4.177 -- `.result | keys == ["dispatch","injected",
+              # "mutation"]`, id at `.result.dispatch.id`); `.result.dispatchId` is kept only as a
+              # defensive fallback, never confirmed to fire for this call. (The worker-start
+              # sub-branch's own `.result.dispatchId` above is a separate, unverified call site --
+              # out of this fix's scope, ac4 requires it stay literally unchanged; see issue #89
+              # eval-report-a2 finding 2.)
+              new_dispatch_id="$(printf '%s' "$new_result" | jq -r '.result.dispatch.id // .result.dispatchId // empty')"
               [ -n "$new_dispatch_id" ] || inject_recovery_ok=false
             fi  # re-dispatch check
             if [ "$inject_recovery_ok" = true ]; then
@@ -194,12 +240,22 @@ if [ "$timed_out" = "true" ]; then
               action_taken=task_recreate_retry
             else
               action_taken=escalated_spawn_failure
+              # Orphan state at this point (task-update above only ran once the SPEC_TEXT precondition
+              # passed): $TASK_ID is now `failed`, and $new_task_id/$new_terminal_handle are non-empty
+              # only as far as their own step succeeded before the failure -- whichever of
+              # task-create/terminal-create/dispatch ran and then a later step failed leaves that
+              # entity orphaned (created, but no dispatch ever points at it). The hand-off below ("hand
+              # off to spawn-failures.md here") must carry $TASK_ID, $new_task_id, and
+              # $new_terminal_handle (each as empty string if that step never ran) so whoever picks up
+              # the escalation knows exactly what to clean up or resume by hand -- this loop does not
+              # attempt automatic compensation (issue #89 eval-report-a2 finding 3).
             fi  # final inject-recovery outcome
           else
-            # DISPATCH_CREATED_VIA is neither "worker-start" nor "dispatch-inject" -- unset, empty,
-            # or an unrecognized value. Fail closed: no recovery is attempted. terminal_status stays
-            # "dead" (already assigned above by the outer case -- that classification is accurate and
-            # logging.md's schema only allows alive|stuck_draft|dead here, not a fourth "n/a" value).
+            # effective_dispatch_created_via is neither "worker-start" nor "dispatch-inject" -- unset
+            # (orca-workflow-task, not covered by the derivation above), empty, or an unrecognized
+            # value. Fail closed: no recovery is attempted. terminal_status stays "dead" (already
+            # assigned above by the outer case -- that classification is accurate and logging.md's
+            # schema only allows alive|stuck_draft|dead here, not a fourth "n/a" value).
             action_taken=escalated_spawn_failure
           fi  # dispatch-inject vs unrecognized
         fi
@@ -225,7 +281,12 @@ if [ "$timed_out" = "true" ]; then
   # If a retry happened, this pending-set entry's dispatch_id moves forward now (see the opening
   # paragraph above: "update the entry's dispatch_id in place").
   [ -n "$new_dispatch_id" ] && DISPATCH_ID="$new_dispatch_id"
-  [ "$action_taken" = escalated_spawn_failure ] && : # hand off to spawn-failures.md here; do not loop back
+  [ "$action_taken" = escalated_spawn_failure ] && : # hand off to spawn-failures.md here; do not loop back.
+  # If this escalation came from the inject sub-branch failing partway through (see that
+  # sub-branch's own final-outcome comment above), the hand-off must include
+  # $TASK_ID/$new_task_id/$new_terminal_handle so the orphan state (original task marked failed,
+  # possibly-orphaned replacement task/terminal) is visible to whoever picks it up -- not just
+  # "escalated_spawn_failure" with no identifiers.
   # Loop back to the top (re-issue check --wait) unless escalated above.
 fi
 
