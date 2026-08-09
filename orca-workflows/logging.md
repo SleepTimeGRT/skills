@@ -60,27 +60,32 @@ Extra fields (`wave_index`, `subtask_type`, `advisor`, ...) are added per call s
 현재 이 사이트엔 이 규칙이 적용되지 않는다 — 다만 진짜 task_id가 없는 다른 relay dispatch에는 이 규칙이
 그대로 적용된다.
 
-**`outcome`** (coordinator 스킬 전용 — task 라우팅 결과는 `orca-workflow-task`, `RETRO_*`는 `orca-workflow`). 값은 두 축으로 나뉜다 — 둘 다 같은
+**`outcome`** (coordinator 스킬 전용 — task 라우팅 결과는 `orca-workflow-task`, parked 라우팅 결과
+(`escalation_parked`)는 `orca-workflow-epic`, `RETRO_*`는 `orca-workflow`). 값은 두 축으로 나뉜다 — 둘 다 같은
 `outcome` JSON 필드에 담기지만 의미가 다르므로 구분해서 읽는다:
 
 - **verdict 축** — task 라우팅 판정: `PASS`|`FAIL`|`ESCALATE`|`GATE_FAIL`|`CONTRACT_ESCALATE`|`CI_GATE_FAIL`
 - **진행-분기 축** — 판정이 아니라 정상적인 워크플로 상태 전이:
-  `NO_DONE_TRANSITION`|`CONTRACT_FINALIZED_BY_GENERATOR`|`CONTRACT_APPROVED_ROUND1`|
-  `MANUAL_RECOVERY_COMPLETED`|`CI_GATE_TIMEOUT`|`MERGE_CONFLICT`|`RETRO_DONE`|`RETRO_FAIL`
+  `NO_DONE_TRANSITION`|`CONTRACT_FINALIZED_BY_GENERATOR`|`CONTRACT_APPROVED`|
+  `MANUAL_RECOVERY_COMPLETED`|`CI_GATE_TIMEOUT`|`MERGE_CONFLICT`|`RETRO_DONE`|`RETRO_FAIL`|
+  `escalation_parked`|`UNMAPPED_BRANCH`
 
 ```bash
 install -d -m 700 ~/.local/state/orca-workflows/logs
 target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
-printf '{"ts":"%s","event":"outcome","skill":"<skill>","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|CONTRACT_ESCALATE|CI_GATE_FAIL|NO_DONE_TRANSITION|CONTRACT_FINALIZED_BY_GENERATOR|CONTRACT_APPROVED_ROUND1|MANUAL_RECOVERY_COMPLETED|CI_GATE_TIMEOUT|MERGE_CONFLICT|RETRO_DONE|RETRO_FAIL>","retry":<n>}\n' \
+printf '{"ts":"%s","event":"outcome","skill":"<skill>","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|CONTRACT_ESCALATE|CI_GATE_FAIL|NO_DONE_TRANSITION|CONTRACT_FINALIZED_BY_GENERATOR|CONTRACT_APPROVED|MANUAL_RECOVERY_COMPLETED|CI_GATE_TIMEOUT|MERGE_CONFLICT|RETRO_DONE|RETRO_FAIL|escalation_parked|UNMAPPED_BRANCH>","retry":<n>,"raw_outcome":"<raw_outcome-or-omit, only when outcome=UNMAPPED_BRANCH>","schema_gap_issue":"<schema_gap_issue-or-omit, only when outcome=UNMAPPED_BRANCH>"}\n' \
   "$(date -u +%FT%TZ)" >> "$target"
 chmod 600 "$target"
 ```
 
-`skill`은 기록 주체다 — task 라우팅 outcome은 `orca-workflow-task`, `RETRO_*`는 `orca-workflow`.
+`skill`은 기록 주체다 — task 라우팅 outcome은 `orca-workflow-task`, parked 라우팅 결과(`escalation_parked`)는
+`orca-workflow-epic`, `RETRO_*`는 `orca-workflow`.
 
-**목록에 없는 정상 분기를 만나면** 즉석 문자열을 발명하거나(issue #62에서 최초 관측된 패턴) outcome
-이벤트 자체를 생략하지 말고, `sleeptimegrt-skills`에 스키마 구멍 이슈를 연다 — 이 규칙 자체가 새 값이
-필요할 때마다 반복되는 드리프트(#62, #69)를 막는 대상이다.
+**목록에 없는 정상 분기를 만나면** 즉석 문자열을 발명하지 말고(issue #62에서 최초 관측된 패턴),
+`sleeptimegrt-skills`에 스키마 구멍 이슈를 열고, 같은 write에서 outcome 이벤트를
+`outcome=UNMAPPED_BRANCH`, `raw_outcome=<실제 관측 문자열>`, `schema_gap_issue=<추적 이슈 slug>`로
+남긴다(outcome 이벤트 자체를 생략하지 않는다) — 이 규칙 자체가 새 값이 필요할 때마다 반복되는
+드리프트(#62, #69, #86)를 막는 대상이다.
 
 `RETRO_DONE`/`RETRO_FAIL`은 task 라우팅이 아니라 retro 결과다 — `orca-workflow` §2(invocation 종료 시의
 retro 사이트)만 쓴다. `RETRO_DONE` 라인은 per-call-site 추가 필드 규칙에 따라 `filed`/`commented`/`discarded`
@@ -100,12 +105,14 @@ issue #62). 이 라인은 per-call-site 추가 필드 규칙에 따라 `round`(�
 `CONTRACT_FINALIZED_BY_GENERATOR`(`plan_coverage`만 남은 경우, 진행)와 상호 배타다. 이 라인은
 per-call-site 추가 필드 규칙에 따라 `round`(도달한 라운드 수)를 더해 남긴다.
 
-`CONTRACT_APPROVED_ROUND1`는 contract 협상이 라운드 1에서 곧장 승인되어 재협상 없이 §2(Generate)로
+`CONTRACT_APPROVED`는 contract 협상이 (몇 라운드에서 승인되든) 승인되어 재협상 없이 §2(Generate)로
 넘어가는 정상 분기다 — PASS/FAIL/ESCALATE 어느 것도 아니므로 outcome 이벤트를 생략하지 말고 이 값으로
-남긴다(issue #69 — 이전엔 이 분기가 즉석 문자열을 발명하거나(#498) 이벤트 자체를 생략했다(#499~#501)).
-`skills/orca-workflow-task/SKILL.md` §1이 이 분기(승인 시점, §2로 넘어가기 전)에서 기록을 지시한다 — 위
-`CONTRACT_FINALIZED_BY_GENERATOR`(라운드 한도 도달) 지시와 대칭. 이 라인은 per-call-site 추가 필드
-규칙에 따라 `round=1`을 고정해 남긴다 — 라운드 한도 도달 케이스의 가변 `round`와 값 자체로 구분된다.
+남긴다(issue #69, #86 — 이전엔 이 분기가 즉석 문자열을 발명하거나(#498) 이벤트 자체를 생략했다(#499~#501),
+또는 `round`를 1로 못박은 라운드-번호-붙박이 값을 즉석 발명했다(#513 세션, #86)). `skills/orca-workflow-task/SKILL.md`
+§1이 이 분기(승인 시점, §2로 넘어가기 전)에서 기록을 지시한다 — 위 `CONTRACT_FINALIZED_BY_GENERATOR`
+(라운드 한도 도달) 지시와 대칭. 이 라인은 per-call-site 추가 필드 규칙에 따라 `round`(승인된 라운드 수,
+가변)를 더해 남긴다 — `CONTRACT_FINALIZED_BY_GENERATOR`/`CONTRACT_ESCALATE`와 같은 필드 구성이며, 값
+이름(`CONTRACT_APPROVED`) 자체로 구분된다.
 
 `MANUAL_RECOVERY_COMPLETED`는 `worker_done`이 Orca 런타임 문제(재시작·연결 끊김 등)로 유실돼
 `self-recovery.md`의 자동 대기/재시도 루프로도 완료 확인이 안 될 때, 코디네이터가 산출물(커밋·아티팩트)을
@@ -127,7 +134,7 @@ wait/recovery loop):
 install -d -m 700 ~/.local/state/orca-workflows/logs
 target="$HOME/.local/state/orca-workflows/logs/waves-$(date -u +%F).jsonl"   # orca-task-runner
 # or: target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"   # orca-workflow-task / orca-workflow-epic
-printf '{"ts":"%s","event":"self_recovery","skill":"<skill>","issue":"<issue-num>","task_id":"<task_id>","dispatch_id":"<dispatch_id>","terminal":"<handle>","waited_ms":<n>,"terminal_status":"<alive|dead|stuck_draft>","action_taken":"<resumed_wait|retried_enter|worker_abandon_retry|escalated_spawn_failure>","new_dispatch_id":"<new dispatch_id-or-omit, only when action_taken=worker_abandon_retry>"}\n' \
+printf '{"ts":"%s","event":"self_recovery","skill":"<skill>","issue":"<issue-num>","task_id":"<task_id>","dispatch_id":"<dispatch_id>","terminal":"<handle>","waited_ms":<n>,"terminal_status":"<alive|dead|stuck_draft>","action_taken":"<resumed_wait|retried_enter|worker_abandon_retry|escalated_spawn_failure|none_decision_gate_self_timed_out_worker_proceeded|UNMAPPED_BRANCH>","new_dispatch_id":"<new dispatch_id-or-omit, only when action_taken=worker_abandon_retry>","raw_action":"<raw_action-or-omit, only when action_taken=UNMAPPED_BRANCH>","schema_gap_issue":"<schema_gap_issue-or-omit, only when action_taken=UNMAPPED_BRANCH>"}\n' \
   "$(date -u +%FT%TZ)" >> "$target"
 chmod 600 "$target"
 ```

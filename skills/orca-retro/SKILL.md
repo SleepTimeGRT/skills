@@ -61,6 +61,10 @@ done
 1. **문서화된 스키마 위반** — 각 스킬과 `~/.agents/orca-workflows/logging.md`가 명시한 스키마(enum
    값, 이벤트명, 필드 타입)를 벗어난 로그 레코드. **이 렌즈만은 issue 필터를 거치지 않고** §1 날짜
    범위의 dated 파일 전체를 스캔한다 — `issue` 필드 자체가 드리프트된 레코드는 필터로 잡히지 않는다.
+   `outcome`/`action_taken`이 `UNMAPPED_BRANCH`이고 `schema_gap_issue` 필드가 채워진 레코드는 위반이
+   아니라 추적 중인 알려진 구멍으로 읽고 후보에서 제외한다 — `UNMAPPED_BRANCH`이면서 `schema_gap_issue`가
+   비어 있거나 없는 레코드, 그리고 enum에 없는 값이 `UNMAPPED_BRANCH` 리터럴 자체가 아닌 레코드는
+   그대로 위반 후보다.
 2. **스킬 문구 기인 반복 FAIL** — 같은 FAIL 사유가 task·재시도에 걸쳐 반복되고, term 전사에서
    worker가 스킬 지시를 오독·누락한 정황이 보이는 경우.
 3. **예방 가능했던 ESCALATE·인간 개입** — `ESCALATE`·`*_HUMAN_DECISION` 계열 outcome 중, 전사를 보면

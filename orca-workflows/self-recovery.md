@@ -98,9 +98,9 @@ if [ "$timed_out" = "true" ]; then
   install -d -m 700 ~/.local/state/orca-workflows/logs
   target="$HOME/.local/state/orca-workflows/logs/waves-$(date -u +%F).jsonl"   # orca-task-runner
   # or: target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"   # orca-workflow-task / orca-workflow-epic
-  printf '{"ts":"%s","event":"self_recovery","skill":"%s","issue":"%s","task_id":"%s","dispatch_id":"%s","terminal":"%s","waited_ms":3600000,"terminal_status":"%s","action_taken":"%s","new_dispatch_id":"%s"}\n' \
+  printf '{"ts":"%s","event":"self_recovery","skill":"%s","issue":"%s","task_id":"%s","dispatch_id":"%s","terminal":"%s","waited_ms":3600000,"terminal_status":"%s","action_taken":"%s","new_dispatch_id":"%s","raw_action":"%s","schema_gap_issue":"%s"}\n' \
     "$(date -u +%FT%TZ)" "$CALLING_SKILL" "$ISSUE_NUM" "$TASK_ID" "$DISPATCH_ID" "$WORKER_HANDLE" \
-    "$terminal_status" "$action_taken" "$new_dispatch_id" >> "$target"
+    "$terminal_status" "$action_taken" "$new_dispatch_id" "${raw_action:-}" "${schema_gap_issue:-}" >> "$target"
   chmod 600 "$target"
   # If a retry happened, this pending-set entry's dispatch_id moves forward now (see the opening
   # paragraph above: "update the entry's dispatch_id in place").
@@ -126,6 +126,21 @@ the fact that the real event hasn't arrived yet.
 The liveness `terminal read` above does not count as "already reads that terminal's output" for
 `logging.md` §2's `recv`-logging rule (same carve-out as `dispatch-verify.md`'s own probe) — log no
 `recv` line for it.
+
+**`none_decision_gate_self_timed_out_worker_proceeded`** — 이 값은 위 wait/recovery 루프의 timeout
+분기(`alive`/`stuck_draft`/`dead` 케이스)가 아니라, 별개 경로에서 기록된다: 디스패치된 워커가 스스로
+`ask`(decision_gate)를 호출했는데, 이 문서의 `check --wait --types worker_done,escalation` 호출이
+`question` 타입을 듣지 않아 코디네이터에게 전달되지 못하고, 워커 자신의 `ask` 타임아웃(기본 600s)까지
+응답이 오지 않아 워커가 자체 판단으로 진행한 경우다(#524 세션에서 최초 관측, 근본 원인은 별도 추적:
+issue #93 — 이 문서의 `--types worker_done,escalation` 인자 목록 자체는 이 값 도입으로 바뀌지 않는다).
+기록 주체는 이 상황을 인지한 코디네이터이며, `waited_ms`는 이 루프의 3600000 고정값이 아니라 워커
+자신의 `ask` 타임아웃 예산을 남긴다.
+
+**`UNMAPPED_BRANCH`** — 위 4개 케이스(`resumed_wait`/`retried_enter`/`worker_abandon_retry`/
+`escalated_spawn_failure`), `none_decision_gate_self_timed_out_worker_proceeded` 어디에도 해당하지
+않는 정상 분기를 만나면 즉석 문자열을 발명하지 말고, `sleeptimegrt-skills`에 스키마 구멍 이슈를 열고,
+같은 write에서 `action_taken=UNMAPPED_BRANCH`, `raw_action=<실제 관측 문자열>`,
+`schema_gap_issue=<추적 이슈 slug>`로 남긴다.
 
 **Retry budget: 2** `worker_abandon_retry` attempts per `task_id`, matching `orca-task-runner` §6's
 task-level-gate retry limit and `orca-workflow-task` §4's FAIL-retry limit.
