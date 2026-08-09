@@ -106,6 +106,27 @@ log_dispatch() {
     return 64
   fi
 
+  # --provider validation (issue #90). The canonical set (claude-code|codex|agy) is (a) a hardcoded
+  # mirror of the basenames under ~/.agents/orca-workflows/models/*.md — that directory is the single
+  # source of truth for which providers exist. (b) When a new provider doc is added under models/,
+  # this hardcoded list must be updated alongside it, or the new provider will be rejected here.
+  # (c) It is not derived by globbing models/ at runtime because this script must keep working in
+  # contexts where that directory doesn't exist — e.g. the pytest suite sources this file against an
+  # isolated $HOME with no ~/.agents tree — and because doing so would add another bash/zsh
+  # portability difference on top of the ones the PORTABILITY note above already constrains against.
+  case "$provider" in
+    claude-code|codex|agy) ;;
+    claude)
+      echo "log_dispatch: --provider \"claude\" is a deprecated alias — normalizing to" \
+        "\"claude-code\"" >&2
+      provider="claude-code"
+      ;;
+    *)
+      echo "log_dispatch: --provider must be one of claude-code|codex|agy (got: \"$provider\")" >&2
+      return 64
+      ;;
+  esac
+
   local logs_dir="$HOME/.local/state/orca-workflows/logs"
   install -d -m 700 "$logs_dir" || return $?
 
