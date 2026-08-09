@@ -46,7 +46,7 @@ install -d -m 700 "$CONTRACT_DIR"
   "round": 1,
   "draft_acceptance_criteria": [ {"id": "ac1", "text": "<판정 가능한 완료 기준>"} ],
   "scope": { "summary": "<무엇을 만들 것인가 — 사실 서술만>", "files": ["<path>"] },
-  "verification_plan": [ {"covers": ["ac1"], "method": "<구체 파일/함수/테스트>"} ],
+  "verification_plan": [ {"covers": ["ac1"], "method": "<구체 파일/함수/테스트>", "fails_before_fix": "<이 항목이 fix 이전에 어떻게 실패하는지, 또는 왜 실패할 수 없는지>"} ],
   "destructive_operations": [ "<의도된 destructive op 설명>" ],
   "existing_tests_affected": [ {"location": "<file:line>", "reason": "<이 변경으로 red가 되는 이유>"} ]
 }
@@ -54,11 +54,11 @@ install -d -m 700 "$CONTRACT_DIR"
 
 - **모든 필드 필수.** `destructive_operations`/`existing_tests_affected`의 빈 배열 `[]`은
   "명시적으로 없음"이다 — 필드가 아예 없으면 스키마 위반이므로 "언급 안 함" 상태는 존재할 수
-  없다(종전 prose 제안서의 "공란 vs 없음" 구분을 스키마 필수성이 대체한다).
+  없다(종전 prose 제안서의 "공란 vs 없음" 구분을 스키마 필수성이 대체한다). `verification_plan[].fails_before_fix`도 같은 규칙이다 — 비어 있거나 필드 자체가 없으면 스키마 위반이다. 변별 불가일 때도 침묵이 아니라 그 사실을 명시적으로 적는다 — 예: 이 항목이 fix 전후 구분이 불가능한 이유를 그대로 서술한다.
 - **설득 서술 필드는 의도적으로 없다.** "왜 이 제안이 충분한가"류 정당화는 어떤 필드에도 넣지
-  않는다(`scope.summary` 포함 — 사실 서술만). 근거는 아래 "라운드 2 입력 격리".
+  않는다(`scope.summary` 포함 — 사실 서술만). `verification_plan[].fails_before_fix`도 같은 경계를 따른다 — pre-fix 동작에 대한 사실 서술이지 "왜 이 항목이 검증으로 충분한가" 정당화가 아니다. 근거는 아래 "라운드 2 입력 격리".
 - `verification_plan[].covers`는 `draft_acceptance_criteria`의 id만 참조한다. 어떤 plan 항목도
-  커버하지 않는 ac id가 남으면 evaluator가 기계적으로 잡을 수 있다.
+  커버하지 않는 ac id가 남으면 evaluator가 기계적으로 잡을 수 있다. `fails_before_fix`가 비어 있거나 없거나 "fix 이후에도 동일하다"고 스스로 적은 항목도 evaluator가 기계적으로 반려할 수 있다.
 
 ## verdict-r&lt;n&gt;.json
 
@@ -79,7 +79,7 @@ install -d -m 700 "$CONTRACT_DIR"
 - `ac_fidelity_ok`: AC 초안이 원본 issue의 요구를 충실히 반영하는가(누락·과소·과대).
 - `plan_covers_ac`: verification_plan이 그 AC를 실제로 커버하는가.
 - `reasons[].target`은 `"ac_fidelity"` 또는 `"plan_coverage"`; `ac_id`는 특정 항목을 가리킬 때만,
-  아니면 `null`.
+  아니면 `null`. 커버리지 누락(기존 축)과 `fails_before_fix` 결함(신규 축) 둘 다 verification_plan의 품질에 대한 것이므로 두 축 모두 `"plan_coverage"`로 지목한다 — 이 이슈로 `target` 값을 추가하지 않는다.
 - **불변식**: `status`는 두 boolean이 모두 true일 때만 `"approved"`, 아니면 `"rejected"`.
   소비자(generator, coordinator의 기계적 검사)는 이 불변식으로 파일 정합성을 확인한다.
 - `"rejected"`면 `reasons`는 비어 있을 수 없다.
