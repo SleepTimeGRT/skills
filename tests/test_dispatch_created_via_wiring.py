@@ -268,6 +268,21 @@ def test_self_recovery_documents_orca_workflow_task_wires_dispatch_created_via_e
 
 
 # ---------------------------------------------------------------------------
+# issue #112 eval-report-a3 important 2 -- pin the issue #121 warning (this attempt's fix_direction
+# explicitly allows deferring the pending-set-identity fix itself, but requires the newly-exposed gap not
+# be left undocumented). Anchored so a later edit can't silently drop it.
+# ---------------------------------------------------------------------------
+
+
+def test_self_recovery_documents_issue_121_warning_before_dispatch_id_carry_forward():
+    text = SELF_RECOVERY_MD.read_text()
+    assert "issue #121" in text
+    warning_idx = text.index("issue #121", text.index("WARNING (issue #121"))
+    carry_forward_idx = text.index('[ -n "$new_dispatch_id" ] && DISPATCH_ID="$new_dispatch_id"')
+    assert warning_idx < carry_forward_idx
+
+
+# ---------------------------------------------------------------------------
 # issue #112 eval-report-a2 critical -- the write leg (SKILL.md, covered above) alone does not change
 # what self-recovery.md's dead-case inject sub-branch actually consumes: attempts 1-2 left the
 # `[ -n "$SPEC_TEXT" ]` gate reading whatever value this shell last held, unchanged in substance from
@@ -325,6 +340,195 @@ def test_self_recovery_read_leg_prevents_stale_spec_text_reuse(tmp_path):
     # fails-before-fix: a write-only sidecar with no read-back leaves the gate reading whatever this
     # shell last held -- here, a different dispatch's stale spec text (issue #112 eval-report-a2 critical).
     assert run(False) == "EVALUATOR-STALE-SPEC"
+
+
+# ---------------------------------------------------------------------------
+# issue #112 eval-report-a3 important 1 -- the two tests above only check the read leg and the gate in
+# isolation; neither actually runs the recovery consumer (task-update -> task-create --spec) that the
+# gate exists to protect. A regression landing *between* the gate and task-create (or reordering
+# task-update ahead of the gate) passed all 11 existing tests green (evaluator's live reproduction).
+# Run the real inject sub-branch end to end with `orca` stubbed out, and assert the sidecar's own text
+# reaches task-create's `--spec` argv verbatim -- then show each of the three mutations fix_direction
+# names actually flips that assertion.
+# ---------------------------------------------------------------------------
+
+
+def _inject_subbranch_snippet(text: str) -> str:
+    start = text.index("inject_recovery_ok=true\n")
+    marker = "fi  # final inject-recovery outcome\n"
+    end = text.index(marker) + len(marker)
+    return text[start:end]
+
+
+def _full_line(text: str, needle: str) -> str:
+    idx = text.index(needle)
+    line_start = text.rfind("\n", 0, idx) + 1
+    line_end = text.index("\n", idx) + 1
+    return text[line_start:line_end]
+
+
+_ORCA_STUB = r'''
+orca() {
+  sub="$1 $2"
+  printf '%s\n' "$sub" >> "$CALL_LOG"
+  if [ "$sub" = "orchestration task-create" ]; then
+    while [ $# -gt 0 ]; do
+      if [ "$1" = "--spec" ]; then
+        printf '%s' "$2" > "$SPEC_ARGV_FILE"
+        break
+      fi
+      shift
+    done
+  fi
+  case "$sub" in
+    "orchestration task-update")
+      printf '{"result":{}}' ;;
+    "orchestration task-create")
+      printf '{"result":{"task":{"id":"new-task-fake"}}}' ;;
+    "orchestration dispatch")
+      printf '{"result":{"dispatch":{"id":"new-dispatch-fake"}}}' ;;
+    "terminal create")
+      printf '{"result":{"terminal":{"handle":"new-terminal-fake"}}}' ;;
+    "terminal wait")
+      printf '{}' ;;
+    "terminal read")
+      printf '{"result":{"terminal":{"latestCursor":"cur0","returnedLineCount":0}}}' ;;
+    *)
+      printf '{}' ;;
+  esac
+}
+uuidgen() { printf 'fake-uuid'; }
+sleep() { :; }
+'''
+
+
+def _run_inject_subbranch(snippet: str, *, task_id: str, home, preset_spec_text: str = "") -> dict:
+    # Stub out every `orca`/`uuidgen`/`sleep` call the inject sub-branch makes so it runs to completion
+    # in milliseconds against fake JSON responses, while a real bash interpreter executes the doc's own
+    # code verbatim (not a reimplementation of it).
+    import os
+    import subprocess
+
+    call_log = home / "calls.log"
+    spec_argv_file = home / "spec_argv.txt"
+    action_taken_file = home / "action_taken.txt"
+    call_log.write_text("")
+
+    script = (
+        "set -u\n"
+        + _ORCA_STUB
+        + f'CALL_LOG="{call_log}"\n'
+        + f'SPEC_ARGV_FILE="{spec_argv_file}"\n'
+        + f'TASK_ID="{task_id}"\n'
+        + f'SPEC_TEXT="{preset_spec_text}"\n'
+        + 'effective_dispatch_created_via="dispatch-inject"\n'
+        + snippet
+        + f'\nprintf %s "$action_taken" > "{action_taken_file}"\n'
+    )
+    result = subprocess.run(
+        ["bash", "-c", script],
+        env={**os.environ, "HOME": str(home)},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    return {
+        "call_log": call_log.read_text(),
+        "spec_argv": spec_argv_file.read_text() if spec_argv_file.exists() else None,
+        "action_taken": action_taken_file.read_text() if action_taken_file.exists() else "",
+    }
+
+
+def _sidecar_home(tmp_path, task_id: str, content: str | None):
+    home = tmp_path / "home"
+    logs_dir = home / ".local" / "state" / "orca-workflows" / "logs"
+    logs_dir.mkdir(parents=True)
+    if content is not None:
+        (logs_dir / f"spec-{task_id}.txt").write_text(content)
+    return home
+
+
+def test_self_recovery_inject_subbranch_delivers_sidecar_spec_verbatim_to_task_create(tmp_path):
+    text = SELF_RECOVERY_MD.read_text()
+    snippet = _inject_subbranch_snippet(text)
+    home = _sidecar_home(tmp_path, "task-A", "TASK-RUNNER-ORIGINAL-SPEC")
+
+    result = _run_inject_subbranch(snippet, task_id="task-A", home=home)
+
+    assert "orchestration task-update" in result["call_log"]
+    assert result["spec_argv"] == "TASK-RUNNER-ORIGINAL-SPEC"
+    assert result["action_taken"] == "task_recreate_retry"
+
+
+def test_self_recovery_inject_subbranch_gate_precedes_task_update_when_sidecar_missing(tmp_path):
+    text = SELF_RECOVERY_MD.read_text()
+    snippet = _inject_subbranch_snippet(text)
+    home = _sidecar_home(tmp_path, "task-A", None)  # no sidecar -- SPEC_TEXT must not fall back to
+    # whatever this shell already held (a different dispatch's own non-empty value, simulating a caller
+    # that hasn't wired the write leg yet -- e.g. orca-workflow-epic's task-coordinator today).
+
+    result = _run_inject_subbranch(
+        snippet, task_id="task-A", home=home, preset_spec_text="EVALUATOR-STALE-SPEC"
+    )
+
+    # The precondition is a pure check with no side effect (issue #89 eval-report-a2 finding 3) -- a
+    # missing sidecar must never let task-update run, let alone with the stale value.
+    assert "orchestration task-update" not in result["call_log"]
+    assert result["spec_argv"] is None
+    assert result["action_taken"] == "escalated_spawn_failure"
+
+
+def test_self_recovery_inject_subbranch_mutation_missing_read_leg_leaks_stale_spec_text(tmp_path):
+    # Mutation 1 (fix_direction): deleting the read leg.
+    text = SELF_RECOVERY_MD.read_text()
+    snippet = _inject_subbranch_snippet(text)
+    read_leg = _read_leg_snippet(text)
+    assert read_leg in snippet
+    mutated = snippet.replace(read_leg, "")
+    home = _sidecar_home(tmp_path, "task-A", "TASK-RUNNER-ORIGINAL-SPEC")
+
+    result = _run_inject_subbranch(
+        mutated, task_id="task-A", home=home, preset_spec_text="EVALUATOR-STALE-SPEC"
+    )
+
+    # fails-before-fix: without the read leg, whatever this shell already held reaches task-create
+    # instead of the sidecar's own text (issue #112 eval-report-a2 critical).
+    assert result["spec_argv"] == "EVALUATOR-STALE-SPEC"
+
+
+def test_self_recovery_inject_subbranch_mutation_post_gate_reassignment_reaches_task_create(tmp_path):
+    # Mutation 2 (fix_direction): SPEC_TEXT reassigned after the gate.
+    text = SELF_RECOVERY_MD.read_text()
+    snippet = _inject_subbranch_snippet(text)
+    gate_line = _full_line(snippet, '[ -n "$SPEC_TEXT" ] || inject_recovery_ok=false')
+    mutated = snippet.replace(gate_line, gate_line + 'SPEC_TEXT="MUTATED-AFTER-GATE"\n', 1)
+    home = _sidecar_home(tmp_path, "task-A", "TASK-RUNNER-ORIGINAL-SPEC")
+
+    result = _run_inject_subbranch(mutated, task_id="task-A", home=home)
+
+    # fails-before-fix: a reassignment landing between the gate and task-create silently overrides the
+    # sidecar's own text (issue #112 eval-report-a3 important 1).
+    assert result["spec_argv"] == "MUTATED-AFTER-GATE"
+
+
+def test_self_recovery_inject_subbranch_mutation_gate_after_task_update_causes_side_effect(tmp_path):
+    # Mutation 3 (fix_direction): the precondition checked after the first mutation instead of before
+    # it -- the inverse of the ordering issue #89 eval-report-a2 finding 3 fixed.
+    text = SELF_RECOVERY_MD.read_text()
+    snippet = _inject_subbranch_snippet(text)
+    gate_line = _full_line(snippet, '[ -n "$SPEC_TEXT" ] || inject_recovery_ok=false')
+    task_update_line = _full_line(
+        snippet, 'orca orchestration task-update --id "$TASK_ID" --status failed --json'
+    )
+    assert gate_line + task_update_line in snippet
+    mutated = snippet.replace(gate_line + task_update_line, task_update_line + gate_line, 1)
+    home = _sidecar_home(tmp_path, "task-A", None)  # no sidecar -- SPEC_TEXT stays empty
+
+    result = _run_inject_subbranch(mutated, task_id="task-A", home=home)
+
+    # fails-before-fix: with the gate moved after the mutation, task-update fires even though SPEC_TEXT
+    # is empty (issue #112 eval-report-a3 important 1, mutation class 3).
+    assert "orchestration task-update" in result["call_log"]
 
 
 # ---------------------------------------------------------------------------

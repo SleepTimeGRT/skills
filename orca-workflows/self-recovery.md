@@ -82,11 +82,14 @@ Run this once per pending dispatch. `WORKER_HANDLE`/`TASK_ID`/`DISPATCH_ID`/`MY_
 `DISPATCH_CREATED_VIA`/`SPEC_TEXT` are caller-supplied for that dispatch (see the caller table above for
 `DISPATCH_CREATED_VIA`'s value per call site); `CALLING_SKILL` (`orca-task-runner`, `orca-workflow-task`,
 or `orca-workflow-epic`) and `ISSUE_NUM` are caller-supplied constants for the whole session. A wave has
-one pending-set entry per subtask, keyed by `task_id` (stable across retries — a `worker_abandon_retry` or
-`task_recreate_retry` retry changes `dispatch_id`, so update the entry's `dispatch_id` in place rather
-than adding a second entry). `retry_count` is likewise tracked per `task_id` in that same pending-set
-entry, not as one shell scalar shared across a wave's concurrent subtasks. A contract round has exactly
-one entry. `SPEC_TEXT` is this specific dispatch's own original spec, stored in that same pending-set
+one pending-set entry per subtask, keyed by `task_id` (stable across retries for the `worker_abandon_retry`
+sub-branch — that retry changes only `dispatch_id`, so update the entry's `dispatch_id` in place rather
+than adding a second entry. The inject sub-branch's `task_recreate_retry` is **not** actually stable this
+way: it creates a brand-new `task_id` and terminal handle, and only `dispatch_id` gets moved into this
+entry afterward — the entry's own `TASK_ID`/`WORKER_HANDLE` keep pointing at the dead original. Not fixed
+here; see the warning below the loop code and issue #121). `retry_count` is likewise tracked per `task_id`
+in that same pending-set entry, not as one shell scalar shared across a wave's concurrent subtasks. A
+contract round has exactly one entry. `SPEC_TEXT` is this specific dispatch's own original spec, stored in that same pending-set
 entry at dispatch-creation time — **never** a single shell variable a caller reuses across several
 dispatches in one code block. A caller whose own dispatch-creation site assigns a shared `spec_text`
 variable more than once before this loop runs (e.g. `orca-workflow-task` §1 round 1's task-runner and
@@ -362,6 +365,12 @@ if [ "$timed_out" = "true" ]; then
   chmod 600 "$target"
   # If a retry happened, this pending-set entry's dispatch_id moves forward now (see the opening
   # paragraph above: "update the entry's dispatch_id in place").
+  # WARNING (issue #121, not fixed here): for action_taken=task_recreate_retry (the inject sub-branch
+  # above), recovery also created a *new* task_id/terminal handle (new_task_id/new_terminal_handle) --
+  # this line only carries DISPATCH_ID forward. The entry's TASK_ID/WORKER_HANDLE keep pointing at the
+  # dead original, so a later worker_done or liveness probe can miss the replacement worker's real
+  # identity. See issue #121 for the full failure mode and the fix (move the entry's identity, not just
+  # dispatch_id).
   [ -n "$new_dispatch_id" ] && DISPATCH_ID="$new_dispatch_id"
   [ "$action_taken" = escalated_spawn_failure ] && : # hand off to spawn-failures.md here; do not loop back.
   # If this escalation came from the inject sub-branch failing partway through (see that
