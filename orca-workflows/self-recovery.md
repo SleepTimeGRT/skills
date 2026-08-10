@@ -108,10 +108,12 @@ see below and issue #89 eval-report-a2 finding 3). Once `orca-workflow-epic` wir
 `logging.md` §2's `log_dispatch` already writes that exact spec text into that dispatch's own
 `term-<handle>.jsonl` as the `sent` record's `content` field, keyed by the terminal handle this loop
 already has as `WORKER_HANDLE` — reading it back from there is one valid way to satisfy the requirement.
-(`orca-task-runner` §2's `spec-<task_id>.txt` sidecar is a different, `worker-start`-only mechanism used
-by a caller that can never reach this sub-branch — do not cite it here.) Any per-dispatch storage works as
-long as it is not the shared variable itself (issue #89 eval-report-a1 finding 3 — a shared `$spec_text`
-read here after a later dispatch has overwritten it recreates the wrong role's task).
+(`orca-task-runner` §2's `spec-<task_id>.txt` sidecar is a different mechanism, built for its own
+`worker-start` dispatches — `orca-workflow-epic`'s `task-coordinator` doesn't need a new file-based
+mechanism when the term-log read-back above is already free for it; see "The complete form, not just the
+forbidden form" below for what *any* mechanism, sidecar included, must still provide.) Any per-dispatch
+storage works as long as it is not the shared variable itself (issue #89 eval-report-a1 finding 3 — a
+shared `$spec_text` read here after a later dispatch has overwritten it recreates the wrong role's task).
 
 **The complete form, not just the forbidden form.** The paragraph above states what `SPEC_TEXT` wiring must
 *not* do (reuse a shared variable across dispatches) but does not by itself specify what a *complete* wiring
