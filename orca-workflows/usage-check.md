@@ -46,6 +46,18 @@ One parser handles every provider — `usedPercent`/`windowMinutes`/`resetsAt` (
 No account setup or extra flags needed to read this — `account list --json` returns `rateLimits` for every
 provider regardless of whether `account add` was run for it.
 
+## `accounts` is not a quota signal
+
+`.result.<provider>.accounts` (the orca managed-auth registry for that provider, e.g. `.result.codex.accounts`)
+lives under the provider's own top-level object — a sibling of the shared `.result.rateLimits` object, not a
+field nested inside `.result.rateLimits.<provider>`. Candidate exclusion (hard-exclude) and deprioritization
+(prefer-avoid) are decided only by the `rateLimits` rules in `model-selection.md`'s "Quota check before
+pinning" — the `accounts` array is not a quota signal and plays no role in that decision.
+
+An empty `accounts` array (`accounts: []`, i.e. the provider isn't registered in orca's managed-auth registry)
+does not mean the provider can't be dispatched: CLI-native login can still make a spawn work. Don't exclude a
+candidate just because its `accounts` array is empty — check `rateLimits` instead.
+
 ## Reverify before relying on this
 
 `rateLimits`'s shape is CLI/API surface that can change across `orca` versions. Run
