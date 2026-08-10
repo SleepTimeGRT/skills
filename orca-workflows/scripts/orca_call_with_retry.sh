@@ -7,9 +7,9 @@
 #
 # On success, or on a failure whose combined stdout+stderr doesn't match the known Orca-restart
 # signature, the wrapped command's stdout/stderr/exit code pass through unchanged. On a matching
-# failure: log one spawn-failures.jsonl occurrence, poll `orca status --json` for `.state ==
-# "ready"` (bounded), and retry the identical command once ready — up to ORCA_RETRY_MAX_CYCLES
-# cycles before giving up and returning the last failure to the caller.
+# failure: log one spawn-failures.jsonl occurrence, poll `orca status --json` for
+# `.result.runtime.state == "ready"` (bounded), and retry the identical command once ready — up to
+# ORCA_RETRY_MAX_CYCLES cycles before giving up and returning the last failure to the caller.
 #
 # Signature broadened 2026-08-07 (issue #42 reopened): the two original literals missed a real
 # recurrence at MediCount#502/child#496 — 3 occurrences across that pair where the actual error
@@ -92,7 +92,7 @@ orca_call_with_retry() {
 
     local n=0 ready=0
     while [ "$n" -lt "$poll_max" ]; do
-      if [ "$(orca status --json 2>/dev/null | jq -r '.state // empty')" = "ready" ]; then
+      if [ "$(orca status --json 2>/dev/null | jq -r '.result.runtime.state // empty')" = "ready" ]; then
         ready=1
         break
       fi

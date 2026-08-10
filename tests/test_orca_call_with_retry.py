@@ -100,7 +100,7 @@ def test_retry_recovers_after_orca_becomes_ready(tmp_path):
         "orca": """
             #!/usr/bin/env bash
             if [ "$1" = "status" ]; then
-              echo '{"state":"ready"}'
+              echo '{"result":{"runtime":{"state":"ready"}}}'
               exit 0
             fi
             echo "unsupported orca stub call: $*" >&2
@@ -147,7 +147,7 @@ def test_exhausts_after_max_cycles_when_signature_persists(tmp_path):
     stubs = {
         "orca": """
             #!/usr/bin/env bash
-            [ "$1" = "status" ] && echo '{"state":"ready"}' && exit 0
+            [ "$1" = "status" ] && echo '{"result":{"runtime":{"state":"ready"}}}' && exit 0
             exit 1
         """,
         "real-cmd": """
@@ -173,7 +173,7 @@ def test_returns_failure_when_orca_never_becomes_ready(tmp_path):
     stubs = {
         "orca": """
             #!/usr/bin/env bash
-            [ "$1" = "status" ] && echo '{"state":"pending"}' && exit 0
+            [ "$1" = "status" ] && echo '{"result":{"runtime":{"state":"pending"}}}' && exit 0
             exit 1
         """,
         "real-cmd": """
@@ -200,7 +200,7 @@ def test_log_file_is_chmod_600(tmp_path):
     stubs = {
         "orca": """
             #!/usr/bin/env bash
-            [ "$1" = "status" ] && echo '{"state":"ready"}' && exit 0
+            [ "$1" = "status" ] && echo '{"result":{"runtime":{"state":"ready"}}}' && exit 0
             exit 1
         """,
         "real-cmd": """
@@ -230,7 +230,7 @@ def test_poll_timeout_path_keeps_stdout_and_stderr_separate(tmp_path):
     stubs = {
         "orca": """
             #!/usr/bin/env bash
-            [ "$1" = "status" ] && echo '{"state":"pending"}' && exit 0
+            [ "$1" = "status" ] && echo '{"result":{"runtime":{"state":"pending"}}}' && exit 0
             exit 1
         """,
         "real-cmd": """
@@ -256,7 +256,7 @@ def test_logged_failure_signature_is_matched_substring_not_full_output(tmp_path)
     stubs = {
         "orca": """
             #!/usr/bin/env bash
-            [ "$1" = "status" ] && echo '{"state":"ready"}' && exit 0
+            [ "$1" = "status" ] && echo '{"result":{"runtime":{"state":"ready"}}}' && exit 0
             exit 1
         """,
         "real-cmd": """
@@ -283,7 +283,7 @@ def test_broadened_signature_catches_stale_bootstrap_without_new_literal(tmp_pat
     stubs = {
         "orca": """
             #!/usr/bin/env bash
-            [ "$1" = "status" ] && echo '{"state":"ready"}' && exit 0
+            [ "$1" = "status" ] && echo '{"result":{"runtime":{"state":"ready"}}}' && exit 0
             exit 1
         """,
         "real-cmd": """
@@ -323,7 +323,7 @@ def test_broadened_signature_catches_generic_reconnect_message(tmp_path):
     stubs = {
         "orca": """
             #!/usr/bin/env bash
-            [ "$1" = "status" ] && echo '{"state":"ready"}' && exit 0
+            [ "$1" = "status" ] && echo '{"result":{"runtime":{"state":"ready"}}}' && exit 0
             exit 1
         """,
         "real-cmd": """
@@ -351,7 +351,7 @@ def test_case_insensitive_match_does_not_alter_known_literal_extraction(tmp_path
     stubs = {
         "orca": """
             #!/usr/bin/env bash
-            [ "$1" = "status" ] && echo '{"state":"ready"}' && exit 0
+            [ "$1" = "status" ] && echo '{"result":{"runtime":{"state":"ready"}}}' && exit 0
             exit 1
         """,
         "real-cmd": """
@@ -395,7 +395,7 @@ def test_retry_request_value_is_identical_across_retry_cycle(tmp_path, shell):
     stubs = {
         "orca": """
             #!/usr/bin/env bash
-            [ "$1" = "status" ] && echo '{"state":"ready"}' && exit 0
+            [ "$1" = "status" ] && echo '{"result":{"runtime":{"state":"ready"}}}' && exit 0
             exit 1
         """,
         "real-cmd": """
