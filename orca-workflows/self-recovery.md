@@ -107,11 +107,48 @@ task marked failed, no orphan (a direct consequence of moving this precondition 
 see below and issue #89 eval-report-a2 finding 3). Once `orca-workflow-epic` wires it,
 `logging.md` §2's `log_dispatch` already writes that exact spec text into that dispatch's own
 `term-<handle>.jsonl` as the `sent` record's `content` field, keyed by the terminal handle this loop
-already has as `WORKER_HANDLE` — reading it back from there is one valid way to satisfy the requirement.
-(`orca-task-runner` §2's `spec-<task_id>.txt` sidecar is a different, `worker-start`-only mechanism used
-by a caller that can never reach this sub-branch — do not cite it here.) Any per-dispatch storage works as
-long as it is not the shared variable itself (issue #89 eval-report-a1 finding 3 — a shared `$spec_text`
-read here after a later dispatch has overwritten it recreates the wrong role's task).
+already has as `WORKER_HANDLE` — so the text is already sitting there without a separate write step, though
+reading it back safely takes more than "read that file" (see "The complete form, not just the forbidden
+form" below).
+(`orca-task-runner` §2's `spec-<task_id>.txt` sidecar is a different mechanism, built for its own
+`worker-start` dispatches — `orca-workflow-epic`'s `task-coordinator` doesn't need a new file just for the
+write side, since the term-log already has one free; see "The complete form, not just the forbidden form"
+below for the isolate step this still needs before it's complete.) Any per-dispatch
+storage works as long as it is not the shared variable itself (issue #89 eval-report-a1 finding 3 — a
+shared `$spec_text` read here after a later dispatch has overwritten it recreates the wrong role's task).
+
+**The complete form, not just the forbidden form.** The paragraph above states what `SPEC_TEXT` wiring must
+*not* do (reuse a shared variable across dispatches) but does not by itself specify what a *complete* wiring
+looks like — and that gap let two implementation attempts on issue #112 replace the forbidden shared-scalar
+with a per-dispatch file that was only ever *written*, never *read back* into `SPEC_TEXT` at the point this
+loop actually consumes it (the `[ -n "$SPEC_TEXT" ]` gate below): the loop kept silently reading whatever
+value was last assigned outside it, unchanged in substance from the shared-scalar bug (issue #112
+eval-report-a1/a2, issue #114). A caller implementing per-dispatch `SPEC_TEXT` storage must wire all three
+of:
+
+1. **write** — at dispatch-creation time, store this dispatch's own spec text keyed by an identifier stable
+   across retries (e.g. `task_id`);
+2. **read** — immediately before this loop's `[ -n "$SPEC_TEXT" ]` gate, for *this* dispatch's pending-set
+   entry, load the stored value into `SPEC_TEXT`;
+3. **isolate** — guarantee a stale or wrong-dispatch value can never be silently consumed by a later read. A
+   mutable per-dispatch sidecar file must be *deleted* once the dispatch is no longer pending (`worker_done`
+   received or terminally failed), since a leftover file would otherwise be readable by a future dispatch
+   that reuses the same key.
+
+`orca-task-runner` §2 (write) / §5 (read via `cat`, then delete) is the reference implementation of this
+triad for its `spec-<task_id>.txt` sidecar — steps 1–3 all apply to it, including deletion. A caller may
+pick a different storage mechanism, but whichever it picks, all three steps must be present — write alone
+does not change what this loop reads.
+
+The term-log `sent`-record read-back mentioned above for `orca-workflow-epic`'s `task-coordinator` does
+**not**, as written, satisfy step 3: the `sent` record's schema (`logging.md` §2) is `{ts, direction,
+content}` — no `dispatch_id` or sequence field ties a record to one specific dispatch, so "reading it back"
+can only mean the *latest* `sent` record for that `WORKER_HANDLE`, and a handle reused across retries would
+then resolve to a different dispatch's spec. Treat that line as describing where the text physically lives,
+not as an endorsed complete mechanism — a caller wiring `SPEC_TEXT` from the term-log still needs its own
+answer to step 3 (e.g. capturing the exact log line number/offset at write time and re-reading that specific
+line, never "whatever is last") before it satisfies this section. The sidecar triad remains the only
+mechanism this document verifies end-to-end.
 
 ```bash
 result="$(orca orchestration check --run "$RUN_ID" --wait \
