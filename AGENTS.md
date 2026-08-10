@@ -93,12 +93,6 @@ use Orca's own features as fully as possible. When one of them misbehaves, the r
 3. **Bypass/disable, last resort only, with explicit user sign-off** — turning off the misbehaving Orca
    feature entirely to make the symptom go away is not an acceptable substitute for 1-2 on its own.
 
-Reference precedent: issue #42 (Orca app auto-update breaking mid-session dispatch). The user explicitly
-rejected disabling auto-update and required self-recovery instead — "자동 업데이트는 켜둔 채로, 그로 인한
-일시적 실패가 스스로(self-recovery) 복구되길 원한다." That issue is still open (recurred against a signature
-`orca_call_with_retry.sh`'s regex didn't cover) — treat it as the running example of this principle, not a
-closed case to imitate blindly.
-
 ### Prefer Orca's current recommended mechanism over ad-hoc CLI composition
 
 Before implementing any orca-* skill behavior — waiting on a worker, reading its output, retrying,
