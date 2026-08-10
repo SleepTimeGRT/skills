@@ -128,14 +128,22 @@ of:
    across retries (e.g. `task_id`);
 2. **read** — immediately before this loop's `[ -n "$SPEC_TEXT" ]` gate, for *this* dispatch's pending-set
    entry, load the stored value into `SPEC_TEXT`;
-3. **delete** — once the dispatch is no longer pending (`worker_done` received or terminally failed), remove
-   the stored value so it cannot leak into an unrelated future dispatch.
+3. **isolate** — guarantee a stale or wrong-dispatch value can never be silently consumed by a later read.
+   What satisfies this depends on the storage mechanism: a mutable per-dispatch sidecar file must be
+   *deleted* once the dispatch is no longer pending (`worker_done` received or terminally failed), since a
+   leftover file would otherwise be readable by a future dispatch that reuses the same key; an append-only
+   mechanism like the term-log's `sent` record can't be deleted (`logging.md`'s transcript contract is
+   append-only) and doesn't need to be — instead it must be addressed by *this dispatch's own record*
+   (e.g. its `dispatch_id`/sequence position), never by "the latest `sent` record for this `WORKER_HANDLE`",
+   since a handle can be reused across retries and "latest" would then resolve to a different dispatch's
+   spec.
 
 `orca-task-runner` §2 (write) / §5 (read via `cat`, then delete) is the reference implementation of this
-triad for its `spec-<task_id>.txt` sidecar. A caller may pick a different storage mechanism instead (the
-term-log `sent`-record read-back described above for `orca-workflow-epic`'s `task-coordinator` is one such
-alternative), but whichever mechanism it picks, all three steps must be present — write alone does not
-change what this loop reads.
+triad for its `spec-<task_id>.txt` sidecar — steps 1–3 all apply to it, including deletion. The term-log
+`sent`-record read-back described above for `orca-workflow-epic`'s `task-coordinator` is a different,
+append-only mechanism: it satisfies steps 1–2 the same way, and satisfies step 3 through per-dispatch
+addressing rather than deletion. Whichever mechanism a caller picks, all three steps must be present —
+write alone does not change what this loop reads.
 
 ```bash
 result="$(orca orchestration check --run "$RUN_ID" --wait \
