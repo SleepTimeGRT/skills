@@ -268,6 +268,66 @@ def test_self_recovery_documents_orca_workflow_task_wires_dispatch_created_via_e
 
 
 # ---------------------------------------------------------------------------
+# issue #112 eval-report-a2 critical -- the write leg (SKILL.md, covered above) alone does not change
+# what self-recovery.md's dead-case inject sub-branch actually consumes: attempts 1-2 left the
+# `[ -n "$SPEC_TEXT" ]` gate reading whatever value this shell last held, unchanged in substance from
+# the shared-scalar bug. The read leg ("The complete form, not just the forbidden form" step 2) must
+# load this dispatch's own spec text from its sidecar, keyed by TASK_ID, immediately before that gate.
+# ---------------------------------------------------------------------------
+
+
+def _read_leg_snippet(text: str) -> str:
+    start = text.index('spec_sidecar="$HOME/.local/state/orca-workflows/logs/spec-$TASK_ID.txt"')
+    marker = '[ -s "$spec_sidecar" ] && SPEC_TEXT="$(cat "$spec_sidecar")"\n'
+    end = text.index(marker) + len(marker)
+    return text[start:end]
+
+
+def test_self_recovery_read_leg_is_wired_immediately_before_spec_text_gate():
+    text = SELF_RECOVERY_MD.read_text()
+    read_leg = _read_leg_snippet(text)
+    gate = '[ -n "$SPEC_TEXT" ] || inject_recovery_ok=false'
+    read_idx = text.index(read_leg)
+    gate_idx = text.index(gate)
+    assert read_idx < gate_idx
+    # No unrelated SPEC_TEXT re-assignment sits between the read leg and the gate it feeds (prose
+    # comments mentioning SPEC_TEXT are fine -- only a bare `SPEC_TEXT=` assignment would matter).
+    assert "SPEC_TEXT=" not in text[read_idx + len(read_leg) : gate_idx]
+
+
+def test_self_recovery_read_leg_prevents_stale_spec_text_reuse(tmp_path):
+    import os
+    import subprocess
+
+    text = SELF_RECOVERY_MD.read_text()
+    read_leg = _read_leg_snippet(text)
+
+    fake_home = tmp_path / "home"
+    logs_dir = fake_home / ".local" / "state" / "orca-workflows" / "logs"
+    logs_dir.mkdir(parents=True)
+    (logs_dir / "spec-task-A.txt").write_text("TASK-RUNNER-ORIGINAL-SPEC")
+
+    def run(include_read_leg: bool) -> str:
+        script = 'set -eu\nTASK_ID="task-A"\nSPEC_TEXT="EVALUATOR-STALE-SPEC"\n'
+        if include_read_leg:
+            script += read_leg
+        script += 'printf %s "$SPEC_TEXT"\n'
+        result = subprocess.run(
+            ["bash", "-c", script],
+            env={**os.environ, "HOME": str(fake_home)},
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout
+
+    assert run(True) == "TASK-RUNNER-ORIGINAL-SPEC"
+    # fails-before-fix: a write-only sidecar with no read-back leaves the gate reading whatever this
+    # shell last held -- here, a different dispatch's stale spec text (issue #112 eval-report-a2 critical).
+    assert run(False) == "EVALUATOR-STALE-SPEC"
+
+
+# ---------------------------------------------------------------------------
 # ac7 -- orca-set.version bump is covered by
 # tests/test_log_enum_schema.py::test_orca_set_version_bumped and
 # tests/test_contract_schema_fails_before_fix.py::test_orca_set_version_line1_is_v1_1_7.

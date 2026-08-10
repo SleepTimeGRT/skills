@@ -228,6 +228,19 @@ if [ "$timed_out" = "true" ]; then
             # inject_recovery_ok tracks this so a failure anywhere escalates instead of logging a
             # false task_recreate_retry (finding 2).
             inject_recovery_ok=true
+            # read -- the write/read/isolate triad's second leg ("The complete form, not just the
+            # forbidden form" above). orca-workflow-task's task-runner/evaluator roles (the write leg)
+            # already stash this dispatch's own spec text in spec-<task_id>.txt, keyed by this pending-set
+            # entry's own TASK_ID; load it back into SPEC_TEXT here, immediately before the gate below
+            # consumes it -- writing alone does not change what that gate reads (issue #112
+            # eval-report-a2 critical). SPEC_TEXT="" first so a missing sidecar (a caller that has not
+            # wired the write leg yet, e.g. orca-workflow-epic's task-coordinator per the paragraph above)
+            # fails closed to an empty value instead of leaking whatever this shell last held, rather than
+            # a stale value some other dispatch's own setup left behind under the old shared-scalar bug.
+            # A caller using a different storage mechanism for step 1 substitutes its own read here.
+            spec_sidecar="$HOME/.local/state/orca-workflows/logs/spec-$TASK_ID.txt"
+            SPEC_TEXT=""
+            [ -s "$spec_sidecar" ] && SPEC_TEXT="$(cat "$spec_sidecar")"
             # SPEC_TEXT must be this dispatch's own spec (see the loop preamble above) and non-empty --
             # an empty value here would create a replacement task with no instructions and dispatch a
             # worker at it, silently (issue #89 eval-report-a1 finding 3's failure mode in new clothes).
