@@ -36,22 +36,21 @@ worker that will never send anything because it's dead) — never as the default
   mailboxes.
 - The worker terminal has already been dispatched via one of two Orca primitives — every caller's own
   call site is fixed to exactly one of the two (see the caller table below), so which primitive applies
-  to a given dispatch is a fact about that call site, not something this loop probes or guesses. As of
-  this writing, no caller's code actually assigns `DISPATCH_CREATED_VIA` before invoking this loop
-  (wiring it in per-dispatch requires editing `skills/**`, out of this contract's scope — see issue #89
-  eval-report-a1 finding 1). This loop does not wait on that wiring for the two callers whose call site
-  is already unambiguous, though: `CALLING_SKILL` is a caller-supplied constant these callers already set
+  to a given dispatch is a fact about that call site, not something this loop probes or guesses.
+  `orca-workflow-task` assigns `DISPATCH_CREATED_VIA` explicitly before invoking this loop, at each of
+  its three call sites (see `skills/orca-workflow-task/SKILL.md` §1). `orca-task-runner` and
+  `orca-workflow-epic` do not (wiring it in per-dispatch for them requires editing `skills/**`, out of
+  this contract's scope — see issue #89 eval-report-a1 finding 1). This loop does not wait on that
+  wiring for those two callers, whose call site is already unambiguous, though: `CALLING_SKILL` is a
+  caller-supplied constant these callers already set
   (loop preamble below), and per the caller table, `orca-task-runner` never uses anything but
   `worker-start` and `orca-workflow-epic` never uses anything but `dispatch-inject` — so the `dead` case
   derives `DISPATCH_CREATED_VIA`'s effective value from `CALLING_SKILL` for exactly those two callers
   when it reads empty, and both recovery sub-branches are reachable for them today without further
-  wiring. `orca-workflow-task` is deliberately excluded from that derivation (its call sites are mixed —
-  `task-runner`/`evaluator` via `dispatch-inject`, `contract-round` via `worker-start`, see the caller
-  table), so for it `DISPATCH_CREATED_VIA` still reads empty and the `dead` case's fail-closed `else`
-  branch (neither `worker-start` nor `dispatch-inject`) still executes, routing straight to
-  `escalated_spawn_failure` instead of attempting either recovery sub-branch — until `orca-workflow-task`
-  wires `DISPATCH_CREATED_VIA` explicitly per dispatch (issue #89 eval-report-a2 finding 4, tracked
-  toward issue #94). `SPEC_TEXT` has no such derivation (there is no analogous per-caller constant for
+  wiring. `orca-workflow-task` wires `DISPATCH_CREATED_VIA` explicitly per dispatch instead of relying
+  on this derivation (all three of its call sites — `task-runner`/`evaluator` via `dispatch-inject`,
+  `contract-round` via `worker-start`, see the caller table), so both recovery sub-branches are
+  reachable for it too. `SPEC_TEXT` has no such derivation (there is no analogous per-caller constant for
   spec text) and must still be wired in by the two `dispatch-inject` callers that need it in the `dead`
   case, per the loop preamble below:
   - `orca orchestration worker-start --task <task_id> --worktree <selector> --terminal <handle> --run
@@ -83,25 +82,32 @@ Run this once per pending dispatch. `WORKER_HANDLE`/`TASK_ID`/`DISPATCH_ID`/`MY_
 `DISPATCH_CREATED_VIA`/`SPEC_TEXT` are caller-supplied for that dispatch (see the caller table above for
 `DISPATCH_CREATED_VIA`'s value per call site); `CALLING_SKILL` (`orca-task-runner`, `orca-workflow-task`,
 or `orca-workflow-epic`) and `ISSUE_NUM` are caller-supplied constants for the whole session. A wave has
-one pending-set entry per subtask, keyed by `task_id` (stable across retries — a `worker_abandon_retry` or
-`task_recreate_retry` retry changes `dispatch_id`, so update the entry's `dispatch_id` in place rather
-than adding a second entry). `retry_count` is likewise tracked per `task_id` in that same pending-set
-entry, not as one shell scalar shared across a wave's concurrent subtasks. A contract round has exactly
-one entry. `SPEC_TEXT` is this specific dispatch's own original spec, stored in that same pending-set
+one pending-set entry per subtask, keyed by `task_id` (stable across retries for the `worker_abandon_retry`
+sub-branch — that retry changes only `dispatch_id`, so update the entry's `dispatch_id` in place rather
+than adding a second entry. The inject sub-branch's `task_recreate_retry` is **not** actually stable this
+way: it creates a brand-new `task_id` and terminal handle, and only `dispatch_id` gets moved into this
+entry afterward — the entry's own `TASK_ID`/`WORKER_HANDLE` keep pointing at the dead original. Not fixed
+here; see the warning below the loop code and issue #121). `retry_count` is likewise tracked per `task_id`
+in that same pending-set entry, not as one shell scalar shared across a wave's concurrent subtasks. A
+contract round has exactly one entry. `SPEC_TEXT` is this specific dispatch's own original spec, stored in that same pending-set
 entry at dispatch-creation time — **never** a single shell variable a caller reuses across several
 dispatches in one code block. A caller whose own dispatch-creation site assigns a shared `spec_text`
-variable more than once before this loop runs (e.g. `orca-workflow-task` §1 round 1's task-runner dispatch
-at L95 and evaluator dispatch at L122, both created in the same fenced block) must keep each dispatch's
+variable more than once before this loop runs (e.g. `orca-workflow-task` §1 round 1's task-runner and
+evaluator dispatches, both created in the same fenced block) must keep each dispatch's
 spec distinctly per pending-set entry. Three `dispatch-inject` callers exist per the caller table above
 (`orca-workflow-task` `task-runner`/`evaluator`, both §1 round 1, and `orca-workflow-epic`
-`task-coordinator`, §3) — but only `orca-workflow-epic` `task-coordinator` actually reaches the `dead`
-case's inject sub-branch today: the `CALLING_SKILL`-based derivation above (`## The wait/recovery loop`)
-resolves its effective `DISPATCH_CREATED_VIA` to `dispatch-inject` automatically, while
-`orca-workflow-task`'s two roles stay fail-closed to `escalated_spawn_failure` until `orca-workflow-task`
-wires `DISPATCH_CREATED_VIA` explicitly (issue #89 eval-report-a2 finding 4, tracked toward issue #94) —
-so they cannot reach this sub-branch yet and do not need `SPEC_TEXT` wired for it in the meantime. Until
+`task-coordinator`, §3) — all three now reach the `dead` case's inject sub-branch: the
+`CALLING_SKILL`-based derivation above (`## The wait/recovery loop`) resolves `orca-workflow-epic`
+`task-coordinator`'s effective `DISPATCH_CREATED_VIA` to `dispatch-inject` automatically, while
+`orca-workflow-task`'s two roles supply `DISPATCH_CREATED_VIA=dispatch-inject` explicitly at their own
+call sites (see `skills/orca-workflow-task/SKILL.md` §1) and so need no derivation.
+`orca-workflow-task`'s two roles also wire `SPEC_TEXT` explicitly there: each reads its own spec text
+back from `log_dispatch`'s own `term-<handle>.jsonl` record (see below) and immediately copies it into
+a per-`task_id` sidecar file (`spec-<task_id>.txt`, same directory and naming convention as the sidecar
+below, populated independently per role) rather than into a shell variable the two roles' dispatches
+would otherwise share. Until
 `orca-workflow-epic` wires `SPEC_TEXT` for its `task-coordinator` dispatches, this sub-branch's first gate
-(`[ -n "$SPEC_TEXT" ]`, below) fails and the loop escalates — but it fails *before* the first mutation
+(`[ -n "$SPEC_TEXT" ]`, below) fails for that caller and the loop escalates — but it fails *before* the first mutation
 (the `task-update --status failed` a few lines down), so that escalation carries zero side effects: no
 task marked failed, no orphan (a direct consequence of moving this precondition ahead of the mutation,
 see below and issue #89 eval-report-a2 finding 3). Once `orca-workflow-epic` wires it,
@@ -113,9 +119,12 @@ form" below).
 (`orca-task-runner` §2's `spec-<task_id>.txt` sidecar is a different mechanism, built for its own
 `worker-start` dispatches — `orca-workflow-epic`'s `task-coordinator` doesn't need a new file just for the
 write side, since the term-log already has one free; see "The complete form, not just the forbidden form"
-below for the isolate step this still needs before it's complete.) Any per-dispatch
-storage works as long as it is not the shared variable itself (issue #89 eval-report-a1 finding 3 — a
-shared `$spec_text` read here after a later dispatch has overwritten it recreates the wrong role's task).
+below for the isolate step this still needs before it's complete. `orca-workflow-task`'s two roles above
+independently adopted the same `spec-<task_id>.txt` file-naming convention for their own per-`task_id`
+sidecar — which is fine, since `task_id` is unique Orca-wide and the two mechanisms never collide, but that
+choice is not because this sub-branch mandates it.) Any per-dispatch storage works as long as it is not the
+shared variable itself (issue #89 eval-report-a1 finding 3 — a shared `$spec_text` read here after a later
+dispatch has overwritten it recreates the wrong role's task).
 
 **The complete form, not just the forbidden form.** The paragraph above states what `SPEC_TEXT` wiring must
 *not* do (reuse a shared variable across dispatches) but does not by itself specify what a *complete* wiring
@@ -185,9 +194,9 @@ if [ "$timed_out" = "true" ]; then
         # unset -- CALLING_SKILL is already a caller-supplied constant for the whole session (loop
         # preamble above), so this does not require any skills/** wiring to land first (out of scope,
         # issue #94). orca-workflow-task's call sites are mixed (dispatch-inject in round 1,
-        # worker-start in round 2+ -- see the caller table), so it is deliberately left out of this
-        # derivation and stays fail-closed to escalation until it wires DISPATCH_CREATED_VIA
-        # explicitly per dispatch (issue #89 eval-report-a2 finding 4).
+        # worker-start in round 2+ -- see the caller table), so it wires DISPATCH_CREATED_VIA
+        # explicitly per dispatch instead (see skills/orca-workflow-task/SKILL.md §1) --
+        # effective_dispatch_created_via below is already non-empty for it before either -z check runs.
         effective_dispatch_created_via="$DISPATCH_CREATED_VIA"
         if [ -z "$effective_dispatch_created_via" ] && [ "$CALLING_SKILL" = "orca-task-runner" ]; then
           effective_dispatch_created_via=worker-start
@@ -209,8 +218,7 @@ if [ "$timed_out" = "true" ]; then
         else
           # --- inject sub-branch ---
           # This else covers every effective_dispatch_created_via value that is not exactly
-          # "worker-start" -- including unset/empty (for orca-workflow-task, which is deliberately
-          # excluded from the derivation above) and anything misspelled. Only the recognized
+          # "worker-start" -- including unset/empty and anything misspelled. Only the recognized
           # "dispatch-inject" value below actually runs the inject recovery procedure; every other
           # value fails closed to escalation instead of silently guessing (issue #89 eval-report-a1
           # finding 1: a worker-start-created dispatch recovered via this procedure would skip the
@@ -223,6 +231,19 @@ if [ "$timed_out" = "true" ]; then
             # inject_recovery_ok tracks this so a failure anywhere escalates instead of logging a
             # false task_recreate_retry (finding 2).
             inject_recovery_ok=true
+            # read -- the write/read/isolate triad's second leg ("The complete form, not just the
+            # forbidden form" above). orca-workflow-task's task-runner/evaluator roles (the write leg)
+            # already stash this dispatch's own spec text in spec-<task_id>.txt, keyed by this pending-set
+            # entry's own TASK_ID; load it back into SPEC_TEXT here, immediately before the gate below
+            # consumes it -- writing alone does not change what that gate reads (issue #112
+            # eval-report-a2 critical). SPEC_TEXT="" first so a missing sidecar (a caller that has not
+            # wired the write leg yet, e.g. orca-workflow-epic's task-coordinator per the paragraph above)
+            # fails closed to an empty value instead of leaking whatever this shell last held, rather than
+            # a stale value some other dispatch's own setup left behind under the old shared-scalar bug.
+            # A caller using a different storage mechanism for step 1 substitutes its own read here.
+            spec_sidecar="$HOME/.local/state/orca-workflows/logs/spec-$TASK_ID.txt"
+            SPEC_TEXT=""
+            [ -s "$spec_sidecar" ] && SPEC_TEXT="$(cat "$spec_sidecar")"
             # SPEC_TEXT must be this dispatch's own spec (see the loop preamble above) and non-empty --
             # an empty value here would create a replacement task with no instructions and dispatch a
             # worker at it, silently (issue #89 eval-report-a1 finding 3's failure mode in new clothes).
@@ -314,9 +335,10 @@ if [ "$timed_out" = "true" ]; then
               # attempt automatic compensation (issue #89 eval-report-a2 finding 3).
             fi  # final inject-recovery outcome
           else
-            # effective_dispatch_created_via is neither "worker-start" nor "dispatch-inject" -- unset
-            # (orca-workflow-task, not covered by the derivation above), empty, or an unrecognized
-            # value. Fail closed: no recovery is attempted. terminal_status stays "dead" (already
+            # effective_dispatch_created_via is neither "worker-start" nor "dispatch-inject" -- unset,
+            # empty, or an unrecognized value (every caller in the caller table above now wires a
+            # recognized value, so this branch only fires for a caller not yet in that table, or a
+            # typo). Fail closed: no recovery is attempted. terminal_status stays "dead" (already
             # assigned above by the outer case -- that classification is accurate and logging.md's
             # schema only allows alive|stuck_draft|dead here, not a fourth "n/a" value).
             action_taken=escalated_spawn_failure
@@ -343,6 +365,12 @@ if [ "$timed_out" = "true" ]; then
   chmod 600 "$target"
   # If a retry happened, this pending-set entry's dispatch_id moves forward now (see the opening
   # paragraph above: "update the entry's dispatch_id in place").
+  # WARNING (issue #121, not fixed here): for action_taken=task_recreate_retry (the inject sub-branch
+  # above), recovery also created a *new* task_id/terminal handle (new_task_id/new_terminal_handle) --
+  # this line only carries DISPATCH_ID forward. The entry's TASK_ID/WORKER_HANDLE keep pointing at the
+  # dead original, so a later worker_done or liveness probe can miss the replacement worker's real
+  # identity. See issue #121 for the full failure mode and the fix (move the entry's identity, not just
+  # dispatch_id).
   [ -n "$new_dispatch_id" ] && DISPATCH_ID="$new_dispatch_id"
   [ "$action_taken" = escalated_spawn_failure ] && : # hand off to spawn-failures.md here; do not loop back.
   # If this escalation came from the inject sub-branch failing partway through (see that
