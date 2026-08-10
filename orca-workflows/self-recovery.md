@@ -113,6 +113,28 @@ by a caller that can never reach this sub-branch — do not cite it here.) Any p
 long as it is not the shared variable itself (issue #89 eval-report-a1 finding 3 — a shared `$spec_text`
 read here after a later dispatch has overwritten it recreates the wrong role's task).
 
+**The complete form, not just the forbidden form.** The paragraph above states what `SPEC_TEXT` wiring must
+*not* do (reuse a shared variable across dispatches) but does not by itself specify what a *complete* wiring
+looks like — and that gap let two implementation attempts on issue #112 replace the forbidden shared-scalar
+with a per-dispatch file that was only ever *written*, never *read back* into `SPEC_TEXT` at the point this
+loop actually consumes it (the `[ -n "$SPEC_TEXT" ]` gate below): the loop kept silently reading whatever
+value was last assigned outside it, unchanged in substance from the shared-scalar bug (issue #112
+eval-report-a1/a2, issue #114). A caller implementing per-dispatch `SPEC_TEXT` storage must wire all three
+of:
+
+1. **write** — at dispatch-creation time, store this dispatch's own spec text keyed by an identifier stable
+   across retries (e.g. `task_id`);
+2. **read** — immediately before this loop's `[ -n "$SPEC_TEXT" ]` gate, for *this* dispatch's pending-set
+   entry, load the stored value into `SPEC_TEXT`;
+3. **delete** — once the dispatch is no longer pending (`worker_done` received or terminally failed), remove
+   the stored value so it cannot leak into an unrelated future dispatch.
+
+`orca-task-runner` §2 (write) / §5 (read via `cat`, then delete) is the reference implementation of this
+triad for its `spec-<task_id>.txt` sidecar. A caller may pick a different storage mechanism instead (the
+term-log `sent`-record read-back described above for `orca-workflow-epic`'s `task-coordinator` is one such
+alternative), but whichever mechanism it picks, all three steps must be present — write alone does not
+change what this loop reads.
+
 ```bash
 result="$(orca orchestration check --run "$RUN_ID" --wait \
   --types worker_done,escalation,question,decision_gate --timeout-ms 3600000 --json)"
