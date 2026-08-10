@@ -367,18 +367,32 @@ def _full_line(text: str, needle: str) -> str:
     return text[line_start:line_end]
 
 
+# $ORCA_STUB_FAIL/$ORCA_STUB_EMPTY (env-supplied, "orchestration task-update"-style "$1 $2" strings) let
+# a test inject a failure at one specific call site without hand-rolling a second stub: FAIL exits
+# nonzero (a transport/API failure), EMPTY exits 0 but omits the id field a caller extracts next (a
+# call that "succeeds" but returns nothing usable) -- issue #112 eval-report-a4 important 2, so tests
+# can prove the inject sub-branch's per-step `inject_recovery_ok` guards actually stop the chain instead
+# of only ever seeing success responses.
 _ORCA_STUB = r'''
 orca() {
   sub="$1 $2"
   printf '%s\n' "$sub" >> "$CALL_LOG"
   if [ "$sub" = "orchestration task-create" ]; then
-    while [ $# -gt 0 ]; do
-      if [ "$1" = "--spec" ]; then
-        printf '%s' "$2" > "$SPEC_ARGV_FILE"
-        break
-      fi
-      shift
-    done
+    for a in "$@"; do
+      printf '%s\0' "$a"
+    done > "$TASK_CREATE_ARGV_FILE"
+  fi
+  if [ "$sub" = "${ORCA_STUB_FAIL:-}" ]; then
+    return 7
+  fi
+  if [ "$sub" = "${ORCA_STUB_EMPTY:-}" ]; then
+    case "$sub" in
+      "orchestration task-create") printf '{"result":{"task":{}}}' ;;
+      "orchestration dispatch")    printf '{"result":{"dispatch":{}}}' ;;
+      "terminal create")           printf '{"result":{"terminal":{}}}' ;;
+      *)                           printf '{}' ;;
+    esac
+    return 0
   fi
   case "$sub" in
     "orchestration task-update")
@@ -402,39 +416,63 @@ sleep() { :; }
 '''
 
 
-def _run_inject_subbranch(snippet: str, *, task_id: str, home, preset_spec_text: str = "") -> dict:
+def _run_inject_subbranch(
+    snippet: str,
+    *,
+    task_id: str,
+    home,
+    preset_spec_text: str = "",
+    stub_fail: str | None = None,
+    stub_empty: str | None = None,
+) -> dict:
     # Stub out every `orca`/`uuidgen`/`sleep` call the inject sub-branch makes so it runs to completion
     # in milliseconds against fake JSON responses, while a real bash interpreter executes the doc's own
-    # code verbatim (not a reimplementation of it).
+    # code verbatim (not a reimplementation of it). TASK_ID/SPEC_TEXT/the stub-control knobs are passed
+    # through the environment, never interpolated into the script text -- the fixtures this harness
+    # exercises deliberately contain quotes/`$`/`;`/`|`/`&`, and string-formatting them into bash source
+    # would corrupt the harness itself rather than testing self-recovery.md's own quoting.
     import os
     import subprocess
 
     call_log = home / "calls.log"
-    spec_argv_file = home / "spec_argv.txt"
+    task_create_argv_file = home / "task_create_argv.bin"
     action_taken_file = home / "action_taken.txt"
     call_log.write_text("")
 
     script = (
         "set -u\n"
         + _ORCA_STUB
-        + f'CALL_LOG="{call_log}"\n'
-        + f'SPEC_ARGV_FILE="{spec_argv_file}"\n'
-        + f'TASK_ID="{task_id}"\n'
-        + f'SPEC_TEXT="{preset_spec_text}"\n'
         + 'effective_dispatch_created_via="dispatch-inject"\n'
         + snippet
         + f'\nprintf %s "$action_taken" > "{action_taken_file}"\n'
     )
-    result = subprocess.run(
-        ["bash", "-c", script],
-        env={**os.environ, "HOME": str(home)},
-        capture_output=True,
-        text=True,
-    )
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "TASK_ID": task_id,
+        "SPEC_TEXT": preset_spec_text,
+        "CALL_LOG": str(call_log),
+        "TASK_CREATE_ARGV_FILE": str(task_create_argv_file),
+        "ORCA_STUB_FAIL": stub_fail or "",
+        "ORCA_STUB_EMPTY": stub_empty or "",
+    }
+    result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+    task_create_argv: list[str] | None = None
+    if task_create_argv_file.exists():
+        raw = task_create_argv_file.read_bytes()
+        if raw:
+            task_create_argv = raw.decode().split("\0")[:-1]  # trailing \0 leaves an empty tail element
+
+    spec_argv = None
+    if task_create_argv is not None and "--spec" in task_create_argv:
+        spec_argv = task_create_argv[task_create_argv.index("--spec") + 1]
+
     return {
         "call_log": call_log.read_text(),
-        "spec_argv": spec_argv_file.read_text() if spec_argv_file.exists() else None,
+        "task_create_argv": task_create_argv,
+        "spec_argv": spec_argv,
         "action_taken": action_taken_file.read_text() if action_taken_file.exists() else "",
     }
 
@@ -448,15 +486,34 @@ def _sidecar_home(tmp_path, task_id: str, content: str | None):
     return home
 
 
+# A single unbroken token (the old fixture, "TASK-RUNNER-ORIGINAL-SPEC") can't distinguish `--spec
+# "$SPEC_TEXT"` from `--spec $SPEC_TEXT` or `--spec "${SPEC_TEXT%% *}"` -- all three deliver the same
+# one-word value. Whitespace/newlines force word-splitting to matter; the quotes/`;`/`|`/`&` prove the
+# harness's own env-var plumbing (not string-formatted into bash source, see _run_inject_subbranch)
+# survives content that would corrupt naive script interpolation (issue #112 eval-report-a4 important 1).
+FIXTURE_SPEC_WITH_WHITESPACE_AND_SHELL_METACHARACTERS = (
+    "line one two\n  $NOT_A_VAR 'quoted' \"dquoted\" ; | &"
+)
+
+
 def test_self_recovery_inject_subbranch_delivers_sidecar_spec_verbatim_to_task_create(tmp_path):
     text = SELF_RECOVERY_MD.read_text()
     snippet = _inject_subbranch_snippet(text)
-    home = _sidecar_home(tmp_path, "task-A", "TASK-RUNNER-ORIGINAL-SPEC")
+    home = _sidecar_home(
+        tmp_path, "task-A", FIXTURE_SPEC_WITH_WHITESPACE_AND_SHELL_METACHARACTERS
+    )
 
     result = _run_inject_subbranch(snippet, task_id="task-A", home=home)
 
     assert "orchestration task-update" in result["call_log"]
-    assert result["spec_argv"] == "TASK-RUNNER-ORIGINAL-SPEC"
+    # (a) byte-identical to the sidecar's own text -- not just non-empty, not just its first word.
+    assert result["spec_argv"] == FIXTURE_SPEC_WITH_WHITESPACE_AND_SHELL_METACHARACTERS
+    # (b) delivered as exactly one argv: an unquoted `--spec $SPEC_TEXT` would word-split this fixture
+    # (it embeds whitespace/newlines) into several, shifting --retry-request out of the next slot.
+    argv = result["task_create_argv"]
+    spec_idx = argv.index("--spec")
+    assert argv[spec_idx + 1] == FIXTURE_SPEC_WITH_WHITESPACE_AND_SHELL_METACHARACTERS
+    assert argv[spec_idx + 2] == "--retry-request"
     assert result["action_taken"] == "task_recreate_retry"
 
 
@@ -474,6 +531,7 @@ def test_self_recovery_inject_subbranch_gate_precedes_task_update_when_sidecar_m
     # The precondition is a pure check with no side effect (issue #89 eval-report-a2 finding 3) -- a
     # missing sidecar must never let task-update run, let alone with the stale value.
     assert "orchestration task-update" not in result["call_log"]
+    assert result["task_create_argv"] is None  # task-create itself never ran, not just --spec-less
     assert result["spec_argv"] is None
     assert result["action_taken"] == "escalated_spawn_failure"
 
@@ -529,6 +587,89 @@ def test_self_recovery_inject_subbranch_mutation_gate_after_task_update_causes_s
     # fails-before-fix: with the gate moved after the mutation, task-update fires even though SPEC_TEXT
     # is empty (issue #112 eval-report-a3 important 1, mutation class 3).
     assert "orchestration task-update" in result["call_log"]
+
+
+# ---------------------------------------------------------------------------
+# issue #112 eval-report-a4 important 2 -- every test above sees only success responses from the `orca`
+# stub, so it can't tell whether the inject sub-branch's per-step `inject_recovery_ok` guards (issue #89
+# eval-report-a1 finding 2's safety property: a failed step must not be logged as a successful retry)
+# are actually wired, or would silently keep going if a real Orca call failed or came back empty. Inject
+# a failure at one call site via $ORCA_STUB_FAIL/$ORCA_STUB_EMPTY and confirm the chain stops there.
+# ---------------------------------------------------------------------------
+
+
+def test_self_recovery_inject_subbranch_task_update_failure_escalates_without_task_create(tmp_path):
+    text = SELF_RECOVERY_MD.read_text()
+    snippet = _inject_subbranch_snippet(text)
+    home = _sidecar_home(tmp_path, "task-A", "TASK-RUNNER-ORIGINAL-SPEC")
+
+    result = _run_inject_subbranch(
+        snippet, task_id="task-A", home=home, stub_fail="orchestration task-update"
+    )
+
+    assert result["action_taken"] == "escalated_spawn_failure"
+    assert "orchestration task-create" not in result["call_log"]
+
+
+def test_self_recovery_inject_subbranch_mutation_missing_task_update_guard_creates_task_anyway(
+    tmp_path,
+):
+    # Mutation (fix_direction convergence 1/2): `|| inject_recovery_ok=false` removed from the
+    # task-update call self-recovery.md:254 -- a failed task-update would no longer stop the chain.
+    text = SELF_RECOVERY_MD.read_text()
+    snippet = _inject_subbranch_snippet(text)
+    guarded = (
+        'orca orchestration task-update --id "$TASK_ID" --status failed --json '
+        "|| inject_recovery_ok=false; }"
+    )
+    assert guarded in snippet
+    mutated = snippet.replace(
+        guarded, 'orca orchestration task-update --id "$TASK_ID" --status failed --json; }', 1
+    )
+    home = _sidecar_home(tmp_path, "task-A", "TASK-RUNNER-ORIGINAL-SPEC")
+
+    result = _run_inject_subbranch(
+        mutated, task_id="task-A", home=home, stub_fail="orchestration task-update"
+    )
+
+    # fails-before-fix: with the guard gone, a failed task-update is silently ignored and the chain
+    # continues to create a replacement task anyway (issue #112 eval-report-a4 important 2).
+    assert "orchestration task-create" in result["call_log"]
+
+
+def test_self_recovery_inject_subbranch_dispatch_without_id_escalates(tmp_path):
+    text = SELF_RECOVERY_MD.read_text()
+    snippet = _inject_subbranch_snippet(text)
+    home = _sidecar_home(tmp_path, "task-A", "TASK-RUNNER-ORIGINAL-SPEC")
+
+    result = _run_inject_subbranch(
+        snippet, task_id="task-A", home=home, stub_empty="orchestration dispatch"
+    )
+
+    # dispatch "succeeded" (exit 0) but returned no dispatch id -- must not be logged as a successful
+    # retry (issue #89 eval-report-a1 finding 2).
+    assert result["action_taken"] == "escalated_spawn_failure"
+
+
+def test_self_recovery_inject_subbranch_mutation_naked_new_dispatch_id_guard_reports_success_anyway(
+    tmp_path,
+):
+    # Mutation (fix_direction convergence 2/2): the new_dispatch_id guard self-recovery.md:320 weakened
+    # to a naked `[ -n "$new_dispatch_id" ]` with no `|| inject_recovery_ok=false` consequence.
+    text = SELF_RECOVERY_MD.read_text()
+    snippet = _inject_subbranch_snippet(text)
+    guarded = '[ -n "$new_dispatch_id" ] || inject_recovery_ok=false'
+    assert guarded in snippet
+    mutated = snippet.replace(guarded, '[ -n "$new_dispatch_id" ]', 1)
+    home = _sidecar_home(tmp_path, "task-A", "TASK-RUNNER-ORIGINAL-SPEC")
+
+    result = _run_inject_subbranch(
+        mutated, task_id="task-A", home=home, stub_empty="orchestration dispatch"
+    )
+
+    # fails-before-fix: with the guard defanged, a dispatch response with no id is still reported as a
+    # successful retry (issue #112 eval-report-a4 important 2).
+    assert result["action_taken"] == "task_recreate_retry"
 
 
 # ---------------------------------------------------------------------------
