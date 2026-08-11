@@ -58,7 +58,45 @@ source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 orca_call_with_retry "orca-workflow" "retro" -- \
   orca terminal create --worktree active --title retro-<root-issue-num> \
   --command "<REPL 가능, agy 제외 provider의 launch 문법 — provider 문서에서 resolve>" --json
-orca terminal wait --terminal <retro-handle> --for tui-idle --timeout-ms 60000 --json
+# Pre-dispatch boot-quiesce (issue #84)
+# freshly launched REPL은 tui-idle 뒤에도 MCP boot 출력이 남을 수 있으므로, cursor-scoped 새 출력이
+# 멈출 때까지 확인한다. 전체 scrollback grep은 TUI repaint 잔재를 boot 출력으로 오판하므로 쓰지 않는다.
+# retro는 best-effort(§0) — 다른 스폰 사이트처럼 exit 1로 빠지지 않는다. tui-idle wait 자체의 실패도
+# 여기서 fail-closed로 걸러야 한다: wait가 timeout/실패한 채로 넘어가면 첫 cursor-diff가 정적인(=이미
+# 죽은) 터미널을 "boot 출력 정지"로 오판해 quiesced로 확정해버린다(spawn-failures.md #37과 같은 모양의
+# 죽은-셸 오탐). 실패하면 아래 boot_quiesced=0 분기가 RETRO_FAIL만 남기고 정상 종료한다(워크플로
+# 전체를 실패시키지 않는다).
+boot_quiesced=0
+if orca_call_with_retry "orca-workflow" "retro" -- \
+  orca terminal wait --terminal <retro-handle> --for tui-idle --timeout-ms 60000 --json; then
+  boot_deadline=$(( $(date -u +%s) + 60 ))
+  boot_initial="$(orca_call_with_retry "orca-workflow" "retro" -- \
+    orca terminal read --terminal <retro-handle> --json)" || boot_initial=""
+  if [ -n "$boot_initial" ]; then
+    cur="$(printf '%s' "$boot_initial" | jq -r '.result.terminal.latestCursor')"
+    while :; do
+      sleep 12
+      boot_read="$(orca_call_with_retry "orca-workflow" "retro" -- \
+        orca terminal read --terminal <retro-handle> --cursor "$cur" --json)" || break
+      new="$(printf '%s' "$boot_read" | jq -r '.result.terminal.returnedLineCount')"
+      if [ "$new" = "0" ]; then
+        boot_quiesced=1
+        break
+      fi
+      cur="$(printf '%s' "$boot_read" | jq -r '.result.terminal.latestCursor')"
+      if [ "$(date -u +%s)" -ge "$boot_deadline" ]; then
+        break
+      fi
+    done
+  fi
+fi
+# End pre-dispatch boot-quiesce
+if [ "$boot_quiesced" != "1" ]; then
+  # boot-quiesce 확인에 실패(터미널 read 불가 또는 60s 안에 MCP boot 출력이 멈추지 않음) — task-create/
+  # dispatch --inject로 진행하지 않는다. RETRO_FAIL만 남기고 정상 종료(터미널 close 후 실행 종료).
+  printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<root-issue-num>","outcome":"RETRO_FAIL","retry":0}\n' \
+    "$(date -u +%FT%TZ)" >> "$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
+else
 spec_text="<orca-retro SKILL.md 지침 + root issue 번호 + 큐 issue 목록(orca-workflow-epic 경로면 §5 보고의 큐 목록, orca-workflow-task 경로면 root 1건 — 분석 issue 집합 = root ∪ 큐, 중복 제거) + 대상 repo + skills repo(sleeptimegrt-skills) slug>"
 orca_call_with_retry "orca-workflow" "retro" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
@@ -75,6 +113,7 @@ orca_call_with_retry "orca-workflow" "retro" -- \
 printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<root-issue-num>","outcome":"<RETRO_DONE|RETRO_FAIL>","retry":0,"filed":<n>,"commented":<n>,"discarded":<n>}\n' \
   "$(date -u +%FT%TZ)" >> "$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
 # RETRO_FAIL이면 filed/commented/discarded 필드는 생략한다(logging.md §1). 터미널 close 후 실행 종료.
+fi
 ```
 
 ## 폴백

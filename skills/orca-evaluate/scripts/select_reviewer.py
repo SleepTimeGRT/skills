@@ -63,11 +63,12 @@ def classify_tier(stats: DiffStats, *, high_risk_signal: bool = False) -> str:
     for an unrelated reason (§3 already runs a migration/schema-file check before spawning the
     reviewer, to decide whether to run the destructive-op linter — without this passthrough, a
     small-churn migration diff would fall to the cheapest reviewer tier with no later local gate
-    to catch it: merge-time verification is delegated to repo CI). This is
-    still not path matching: the caller decides what counts as a "known high-risk kind" using
-    whatever pre-existing check it already ran (migration-lint's own file list here); this
-    function and its caller never introduce a new static path list to satisfy it — the boolean is
-    the only thing that crosses this boundary, same shape as `codex_available`.
+    to catch it: merge-time verification is delegated to repo CI). A second source,
+    gate_safety_files_present, ORs into the same flag — unlike the migration source, its path list
+    exists solely to compute this boolean, with no other consumer (see
+    references/reviewer-selection.md "High-risk-signal override"). This function itself is still
+    not path matching, and the caller may introduce a static path list to compute a source: the
+    boolean is the only thing that crosses this boundary, same shape as `codex_available`.
     """
     if high_risk_signal or stats.files_changed > ROUTINE_MAX_FILES or stats.lines_changed > ROUTINE_MAX_LINES:
         return "high-risk"

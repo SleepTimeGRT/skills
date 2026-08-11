@@ -24,8 +24,17 @@ stands.
 Diff stats alone can let a low-churn destructive-migration diff fall into the lowest tier, so the
 already-computed `migration_files_present` (§3's destructive-op linter step) is passed through as
 `--high-risk-signal`, forcing that diff into the high-risk tier regardless of churn. This isn't a
-new path-matching rule — it reuses a value §3 already computes for a different purpose (deciding
-whether to run the destructive-op linter at all).
+new path-matching rule for that source — it reuses a value §3 already computes for a different
+purpose (deciding whether to run the destructive-op linter at all).
+
+A second source, `gate_safety_files_present`
+(docs/superpowers/specs/2026-08-12-orca-evaluate-gate-safety-signal-design.md), ORs into the same
+flag. Unlike the migration source, its path list exists only to compute this boolean — §3 has no
+other use for it. That's accepted deliberately: `classify_tier` itself still only ever consumes a
+boolean, never a path list, so the pure-function contract holds; the path matching lives entirely
+in the caller (§3), which is allowed to introduce one to compute a source. §3 ⑤'s prose
+gate-safety judgment stays unconditional and uncoupled from this list on purpose, so the reviewer
+never anchors its own judgment to what the precheck matched.
 
 ## Codex availability
 
