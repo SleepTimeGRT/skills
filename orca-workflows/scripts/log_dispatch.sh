@@ -50,6 +50,37 @@
 # recv is NOT written here — logging.md's recv carve-out (dispatch-verify.md's opaque liveness
 # probe doesn't count as "already reads the terminal") still applies. Callers that separately read
 # a terminal back log recv themselves at that read site, same as today.
+#
+# ── Canonical enums (issues #105/#116/#125/#127/#138) ──────────────────────────────────────────
+# These variables are the MACHINE-CHECKED AUTHORITY for the outcome / self_recovery.action_taken
+# value sets; logging.md §1's prose lists are the human-readable mirror. If they ever disagree,
+# this file wins. Rationale (issue #105's fix direction, escalated by #138's 5th recurrence):
+# the enum was violated by ad-hoc invented values five times (#62 → #69 → #86 → #105 → #138), each
+# fix patching one value in prose with no runtime enforcement — per the skills guide
+# (docs/references/anthropic-building-skills-for-claude.pdf, Troubleshooting): "For critical
+# validations, bundle a script that performs the checks programmatically."
+#
+# Space-separated (not |-separated) on purpose: it lets the validation below use a portable
+# `case " $LIST " in *" $value "*` substring match that behaves identically in bash and zsh (no
+# word-splitting dependence — zsh doesn't split unquoted variables), and lets the pytest suite
+# extract and compare the set mechanically (tests/test_log_outcome.py).
+#
+# Membership notes beyond logging.md's original list:
+# - skipped: added per issue #138 — orca-workflow-epic's "dependent of a parked task" branch is a
+#   real, recurring routing state (9 records in one run) that had no legal value; blocked_by is its
+#   conditional companion field (required when outcome=skipped, dropped otherwise).
+# - NO_ACCEPTANCE_CRITERIA: added per issue #105 — its fix-direction section concludes this is
+#   probably a legitimate branch ("issue body not concrete enough to draft acceptance criteria"
+#   at the issue-drain/AC-draft stage), observed live from orca-workflow.
+# - EPIC_DONE / PR_OPEN_PREMERGE_PASS (observed in #105's recurrence comments) are deliberately
+#   NOT added: neither has a decided semantics yet — they hit the UNMAPPED_BRANCH safeguard, which
+#   is the designed path for values awaiting a schema decision.
+LOG_OUTCOME_ENUM="PASS FAIL ESCALATE GATE_FAIL CONTRACT_ESCALATE CI_GATE_FAIL NO_DONE_TRANSITION CONTRACT_FINALIZED_BY_GENERATOR CONTRACT_APPROVED MANUAL_RECOVERY_COMPLETED CI_GATE_TIMEOUT MERGE_CONFLICT RETRO_DONE RETRO_FAIL escalation_parked skipped NO_ACCEPTANCE_CRITERIA UNMAPPED_BRANCH"
+
+# self_recovery.action_taken — mirrors logging.md §1's self_recovery recipe. resume_wait (a typo'd
+# variant of resumed_wait, seen 5x in issue #127) is exactly the class the substitution below
+# catches: hand-typed near-misses, not just genuinely new branches.
+LOG_SELF_RECOVERY_ACTION_ENUM="resumed_wait retried_enter worker_abandon_retry task_recreate_retry escalated_spawn_failure none_decision_gate_self_timed_out_worker_proceeded UNMAPPED_BRANCH"
 
 log_dispatch() {
   local skill="" role="" issue="" task_id="" task_id_set=0 terminal="" worktree="" \
@@ -179,4 +210,324 @@ log_dispatch() {
 
   jq -cn --arg ts "$(date -u +%FT%TZ)" --arg content "$spec_text" \
     '{ts:$ts, direction:"sent", content:$content}' >> "$term_log"
+}
+
+# Internal: validate a value against a space-separated enum list. Portable across bash/zsh (see
+# the PORTABILITY note above): substring match on the padded list instead of word-splitting a
+# loop (zsh doesn't split unquoted variables) or a case pattern built from a variable (a `|` in
+# an expanded variable is a literal, not alternation, in bash). Values containing characters
+# outside [A-Za-z0-9_] are rejected outright — whitespace in particular could false-match across
+# adjacent list members.
+_log_enum_has() {
+  # $1 = space-separated enum list, $2 = candidate value
+  case "$2" in
+    ''|*[!A-Za-z0-9_]*) return 1 ;;
+  esac
+  case " $1 " in
+    *" $2 "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Internal: append one already-built JSON line to a log file with logging.md §1's dir/permission
+# convention. $1 = target file, $2 = JSON line.
+_log_append() {
+  install -d -m 700 "$HOME/.local/state/orca-workflows/logs" || return $?
+  printf '%s\n' "$2" >> "$1" || return $?
+  chmod 600 "$1"
+}
+
+# log_outcome — the ONLY sanctioned writer of `"event":"outcome"` records (logging.md §1).
+# Written for issues #105/#116/#138 (enum values invented ad-hoc, bypassing the documented
+# UNMAPPED_BRANCH safeguard, five separate times) and #116 (hand-copied printf dropping the fixed
+# `event`/`retry` fields — the same defect log_dispatch already killed for `assign` in issue #68).
+#
+#   source ~/.agents/orca-workflows/scripts/log_dispatch.sh
+#   log_outcome --skill <skill> --issue <issue-num> --outcome <value> --retry <n> \
+#     [--round <n>] [--filed <n>] [--commented <n>] [--discarded <n>] [--detail <text>] \
+#     [--blocked-by <issue-num>] [--raw-outcome <text>] [--schema-gap-issue <slug>]
+#
+# - --skill/--issue/--outcome/--retry are required: they are the recipe's fixed fields, and #116's
+#   observed defect was precisely a fixed field (retry) silently dropped at one call site.
+# - Optional flags are the documented per-call-site extras (round: CONTRACT_*; filed/commented/
+#   discarded: RETRO_DONE; detail: MANUAL_RECOVERY_COMPLETED; blocked_by: skipped, issue #138).
+#   Undocumented ad-hoc extras are deliberately NOT accepted — that openness is how field drift
+#   starts (#138's blocked_by began as an undocumented invention).
+# - An optional flag passed an EMPTY value is treated as "omit the field entirely", never written
+#   as "" (issue #127: conditional fields written as empty strings violate the omission rule; the
+#   helper makes that mistake impossible). This intentionally differs from log_dispatch's
+#   --task-id, where explicit-empty is a caller error — there, emptiness would silently change
+#   relay semantics; here it can only mean "nothing to record".
+# - Unknown --outcome value: the record is STILL WRITTEN (logging.md: never omit the outcome
+#   event) as outcome=UNMAPPED_BRANCH with raw_outcome=<attempted value> and schema_gap_issue
+#   (caller-supplied, else "unfiled" — file the schema-gap issue on sleeptimegrt-skills and pass
+#   --schema-gap-issue next time). A warning goes to stderr and the function returns 0: enum
+#   drift must surface in the log and on stderr, not fail the pipeline mid-run.
+# - --raw-outcome/--schema-gap-issue with a valid (non-UNMAPPED_BRANCH) outcome are dropped with
+#   a warning — logging.md marks them "only when outcome=UNMAPPED_BRANCH".
+log_outcome() {
+  local skill="" issue="" outcome="" retry="" round="" filed="" commented="" discarded="" \
+        detail="" blocked_by="" raw_outcome="" schema_gap_issue=""
+  while [ $# -gt 0 ]; do
+    # Same value-less-trailing-flag guard as log_dispatch (shift 2 on the last argument hangs the
+    # loop in both bash and zsh — see the note there).
+    if [ $# -lt 2 ]; then
+      echo "log_outcome: $1 requires a value" >&2
+      return 64
+    fi
+    case "$1" in
+      --skill) skill="$2"; shift 2 ;;
+      --issue) issue="$2"; shift 2 ;;
+      --outcome) outcome="$2"; shift 2 ;;
+      --retry) retry="$2"; shift 2 ;;
+      --round) round="$2"; shift 2 ;;
+      --filed) filed="$2"; shift 2 ;;
+      --commented) commented="$2"; shift 2 ;;
+      --discarded) discarded="$2"; shift 2 ;;
+      --detail) detail="$2"; shift 2 ;;
+      --blocked-by) blocked_by="$2"; shift 2 ;;
+      --raw-outcome) raw_outcome="$2"; shift 2 ;;
+      --schema-gap-issue) schema_gap_issue="$2"; shift 2 ;;
+      *) echo "log_outcome: unknown argument: $1" >&2; return 64 ;;
+    esac
+  done
+
+  local missing=""
+  [ -n "$skill" ]   || missing="$missing --skill"
+  [ -n "$issue" ]   || missing="$missing --issue"
+  [ -n "$outcome" ] || missing="$missing --outcome"
+  [ -n "$retry" ]   || missing="$missing --retry"
+  if [ -n "$missing" ]; then
+    echo "log_outcome: missing required argument(s):$missing" >&2
+    return 64
+  fi
+
+  # Numeric fields go into the JSON via --argjson (so consumers get numbers, not strings) —
+  # validate first so a bad value is a clear caller error instead of a cryptic jq failure.
+  case "$retry" in *[!0-9]*)
+    echo "log_outcome: --retry must be a non-negative integer (got: \"$retry\")" >&2; return 64 ;;
+  esac
+  local numfield numval
+  for numfield in round filed commented discarded; do
+    case "$numfield" in
+      round) numval="$round" ;; filed) numval="$filed" ;;
+      commented) numval="$commented" ;; discarded) numval="$discarded" ;;
+    esac
+    if [ -n "$numval" ]; then
+      case "$numval" in *[!0-9]*)
+        echo "log_outcome: --$numfield must be a non-negative integer (got: \"$numval\")" >&2
+        return 64 ;;
+      esac
+    fi
+  done
+
+  # Enum validation — the whole point of this helper (issues #105/#138). Unknown value → forced
+  # UNMAPPED_BRANCH substitution per logging.md §1's documented safeguard, never a hard failure.
+  if ! _log_enum_has "$LOG_OUTCOME_ENUM" "$outcome"; then
+    raw_outcome="$outcome"
+    outcome="UNMAPPED_BRANCH"
+    [ -n "$schema_gap_issue" ] || schema_gap_issue="unfiled"
+    echo "log_outcome: WARNING — outcome \"$raw_outcome\" is not in the canonical enum" \
+      "(LOG_OUTCOME_ENUM in ${BASH_SOURCE:-log_dispatch.sh}); writing outcome=UNMAPPED_BRANCH with" \
+      "raw_outcome preserved and schema_gap_issue=\"$schema_gap_issue\". Do not invent enum values" \
+      "(#62/#69/#86/#105/#138) — file a schema-gap issue on sleeptimegrt-skills and pass" \
+      "--schema-gap-issue <slug>." >&2
+  fi
+
+  if [ "$outcome" = "UNMAPPED_BRANCH" ]; then
+    # Explicit --outcome UNMAPPED_BRANCH passthrough: raw_outcome should say what was observed.
+    [ -n "$schema_gap_issue" ] || schema_gap_issue="unfiled"
+    [ -n "$raw_outcome" ] || echo "log_outcome: WARNING — outcome=UNMAPPED_BRANCH without" \
+      "--raw-outcome; the record loses the observed branch string (logging.md §1)" >&2
+  else
+    if [ -n "$raw_outcome" ] || [ -n "$schema_gap_issue" ]; then
+      echo "log_outcome: WARNING — --raw-outcome/--schema-gap-issue only apply when" \
+        "outcome=UNMAPPED_BRANCH; dropping them (logging.md §1 conditional-field rule)" >&2
+      raw_outcome=""
+      schema_gap_issue=""
+    fi
+  fi
+
+  # blocked_by is conditionally REQUIRED for skipped and dropped otherwise (issue #138).
+  if [ "$outcome" = "skipped" ]; then
+    [ -n "$blocked_by" ] || echo "log_outcome: WARNING — outcome=skipped without --blocked-by" \
+      "(required conditional field, issue #138); writing the record without it" >&2
+  elif [ -n "$blocked_by" ]; then
+    echo "log_outcome: WARNING — --blocked-by only applies when outcome=skipped; dropping it" >&2
+    blocked_by=""
+  fi
+
+  local line
+  line="$(jq -cn --arg ts "$(date -u +%FT%TZ)" --arg skill "$skill" --arg issue "$issue" \
+    --arg outcome "$outcome" --argjson retry "$retry" \
+    '{ts:$ts, event:"outcome", skill:$skill, issue:$issue, outcome:$outcome, retry:$retry}')" \
+    || return $?
+  # Optional fields: appended only when non-empty — an empty value can never reach the JSON
+  # (issue #127's omission rule, enforced structurally).
+  [ -n "$round" ]     && { line="$(printf '%s' "$line" | jq -c --argjson v "$round" '. + {round:$v}')" || return $?; }
+  [ -n "$filed" ]     && { line="$(printf '%s' "$line" | jq -c --argjson v "$filed" '. + {filed:$v}')" || return $?; }
+  [ -n "$commented" ] && { line="$(printf '%s' "$line" | jq -c --argjson v "$commented" '. + {commented:$v}')" || return $?; }
+  [ -n "$discarded" ] && { line="$(printf '%s' "$line" | jq -c --argjson v "$discarded" '. + {discarded:$v}')" || return $?; }
+  [ -n "$detail" ]    && { line="$(printf '%s' "$line" | jq -c --arg v "$detail" '. + {detail:$v}')" || return $?; }
+  [ -n "$blocked_by" ] && { line="$(printf '%s' "$line" | jq -c --arg v "$blocked_by" '. + {blocked_by:$v}')" || return $?; }
+  [ -n "$raw_outcome" ] && { line="$(printf '%s' "$line" | jq -c --arg v "$raw_outcome" '. + {raw_outcome:$v}')" || return $?; }
+  [ -n "$schema_gap_issue" ] && { line="$(printf '%s' "$line" | jq -c --arg v "$schema_gap_issue" '. + {schema_gap_issue:$v}')" || return $?; }
+
+  _log_append "$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl" "$line"
+}
+
+# log_self_recovery — the ONLY sanctioned writer of `"event":"self_recovery"` records
+# (logging.md §1). Written for issue #127: the hand-copied printf in self-recovery.md always
+# emitted new_dispatch_id/raw_action/schema_gap_issue as "%s" — so valid-action records carried
+# forbidden empty-string conditional fields (8x observed), and a hand-typed action_taken typo
+# (resume_wait, 5x) bypassed the UNMAPPED_BRANCH safeguard. Same defect class as #105/#138, per
+# #127's fix direction ("extend the helper's enum + conditional-field validation to
+# self_recovery").
+#
+#   log_self_recovery --skill <skill> --issue <issue-num> --task-id <task_id> \
+#     --dispatch-id <dispatch_id> --terminal <handle> --terminal-status <alive|dead|stuck_draft> \
+#     --action-taken <value> [--waited-ms <n>] [--new-dispatch-id <id>] [--raw-action <text>] \
+#     [--schema-gap-issue <slug>] [--wave-index <n>]
+#
+# - Target file is derived from --skill per logging.md §1: orca-task-runner → waves-<date>.jsonl
+#   (with --wave-index as its documented join key), everything else → assignments-<date>.jsonl
+#   (--wave-index dropped with a warning — those skills have no wave concept).
+# - --waited-ms omitted/empty → JSON null (a fixed field whose value can genuinely be unknown —
+#   observed null in real records), NOT omitted; all other empty optionals are omitted (#127).
+# - --terminal-status has no documented substitution safeguard (logging.md defines no raw_* field
+#   for it), so an unknown value is a hard caller error (return 64) — same policy as
+#   log_dispatch's --provider validation (issue #90) — rather than silently persisting a typo.
+# - --action-taken outside LOG_SELF_RECOVERY_ACTION_ENUM gets the same UNMAPPED_BRANCH
+#   substitution as log_outcome (raw_action=<attempted>, schema_gap_issue default "unfiled",
+#   stderr warning, exit 0) because logging.md documents exactly that safeguard for this field.
+# - --new-dispatch-id is only legal when action_taken is worker_abandon_retry|task_recreate_retry
+#   (dropped with a warning otherwise; warned-if-missing when it is one of those two).
+log_self_recovery() {
+  local skill="" issue="" task_id="" dispatch_id="" terminal="" waited_ms="" terminal_status="" \
+        action_taken="" new_dispatch_id="" raw_action="" schema_gap_issue="" wave_index=""
+  while [ $# -gt 0 ]; do
+    if [ $# -lt 2 ]; then
+      echo "log_self_recovery: $1 requires a value" >&2
+      return 64
+    fi
+    case "$1" in
+      --skill) skill="$2"; shift 2 ;;
+      --issue) issue="$2"; shift 2 ;;
+      --task-id) task_id="$2"; shift 2 ;;
+      --dispatch-id) dispatch_id="$2"; shift 2 ;;
+      --terminal) terminal="$2"; shift 2 ;;
+      --waited-ms) waited_ms="$2"; shift 2 ;;
+      --terminal-status) terminal_status="$2"; shift 2 ;;
+      --action-taken) action_taken="$2"; shift 2 ;;
+      --new-dispatch-id) new_dispatch_id="$2"; shift 2 ;;
+      --raw-action) raw_action="$2"; shift 2 ;;
+      --schema-gap-issue) schema_gap_issue="$2"; shift 2 ;;
+      --wave-index) wave_index="$2"; shift 2 ;;
+      *) echo "log_self_recovery: unknown argument: $1" >&2; return 64 ;;
+    esac
+  done
+
+  local missing=""
+  [ -n "$skill" ]           || missing="$missing --skill"
+  [ -n "$issue" ]           || missing="$missing --issue"
+  [ -n "$task_id" ]         || missing="$missing --task-id"
+  [ -n "$dispatch_id" ]     || missing="$missing --dispatch-id"
+  [ -n "$terminal" ]        || missing="$missing --terminal"
+  [ -n "$terminal_status" ] || missing="$missing --terminal-status"
+  [ -n "$action_taken" ]    || missing="$missing --action-taken"
+  if [ -n "$missing" ]; then
+    echo "log_self_recovery: missing required argument(s):$missing" >&2
+    return 64
+  fi
+
+  if [ -n "$waited_ms" ]; then
+    case "$waited_ms" in *[!0-9]*)
+      echo "log_self_recovery: --waited-ms must be a non-negative integer (got: \"$waited_ms\")" >&2
+      return 64 ;;
+    esac
+  fi
+  if [ -n "$wave_index" ]; then
+    case "$wave_index" in *[!0-9]*)
+      echo "log_self_recovery: --wave-index must be a non-negative integer (got: \"$wave_index\")" >&2
+      return 64 ;;
+    esac
+  fi
+
+  case "$terminal_status" in
+    alive|dead|stuck_draft) ;;
+    *)
+      echo "log_self_recovery: --terminal-status must be one of alive|dead|stuck_draft (got:" \
+        "\"$terminal_status\")" >&2
+      return 64
+      ;;
+  esac
+
+  if ! _log_enum_has "$LOG_SELF_RECOVERY_ACTION_ENUM" "$action_taken"; then
+    raw_action="$action_taken"
+    action_taken="UNMAPPED_BRANCH"
+    [ -n "$schema_gap_issue" ] || schema_gap_issue="unfiled"
+    echo "log_self_recovery: WARNING — action_taken \"$raw_action\" is not in the canonical enum" \
+      "(LOG_SELF_RECOVERY_ACTION_ENUM); writing action_taken=UNMAPPED_BRANCH with raw_action" \
+      "preserved and schema_gap_issue=\"$schema_gap_issue\" (#127 — do not hand-type enum values;" \
+      "file a schema-gap issue and pass --schema-gap-issue <slug>)." >&2
+  fi
+
+  if [ "$action_taken" = "UNMAPPED_BRANCH" ]; then
+    [ -n "$schema_gap_issue" ] || schema_gap_issue="unfiled"
+    [ -n "$raw_action" ] || echo "log_self_recovery: WARNING — action_taken=UNMAPPED_BRANCH" \
+      "without --raw-action; the record loses the observed action string (logging.md §1)" >&2
+  else
+    if [ -n "$raw_action" ] || [ -n "$schema_gap_issue" ]; then
+      echo "log_self_recovery: WARNING — --raw-action/--schema-gap-issue only apply when" \
+        "action_taken=UNMAPPED_BRANCH; dropping them (logging.md §1 conditional-field rule)" >&2
+      raw_action=""
+      schema_gap_issue=""
+    fi
+  fi
+
+  case "$action_taken" in
+    worker_abandon_retry|task_recreate_retry)
+      [ -n "$new_dispatch_id" ] || echo "log_self_recovery: WARNING — action_taken=$action_taken" \
+        "without --new-dispatch-id (logging.md §1 expects the retry's new dispatch id here)" >&2
+      ;;
+    *)
+      if [ -n "$new_dispatch_id" ]; then
+        echo "log_self_recovery: WARNING — --new-dispatch-id only applies when" \
+          "action_taken=worker_abandon_retry|task_recreate_retry; dropping it" >&2
+        new_dispatch_id=""
+      fi
+      ;;
+  esac
+
+  # Target routing per logging.md §1: only orca-task-runner writes self_recovery to the waves
+  # file (joinable with wave_start/wave_end via wave_index); coordinators use assignments.
+  local target
+  if [ "$skill" = "orca-task-runner" ]; then
+    target="$HOME/.local/state/orca-workflows/logs/waves-$(date -u +%F).jsonl"
+  else
+    target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
+    if [ -n "$wave_index" ]; then
+      echo "log_self_recovery: WARNING — --wave-index only applies to orca-task-runner" \
+        "(waves-<date>.jsonl); dropping it" >&2
+      wave_index=""
+    fi
+  fi
+
+  local waited_json="null"
+  [ -n "$waited_ms" ] && waited_json="$waited_ms"
+
+  local line
+  line="$(jq -cn --arg ts "$(date -u +%FT%TZ)" --arg skill "$skill" --arg issue "$issue" \
+    --arg task_id "$task_id" --arg dispatch_id "$dispatch_id" --arg terminal "$terminal" \
+    --argjson waited_ms "$waited_json" --arg terminal_status "$terminal_status" \
+    --arg action_taken "$action_taken" \
+    '{ts:$ts, event:"self_recovery", skill:$skill, issue:$issue, task_id:$task_id,
+      dispatch_id:$dispatch_id, terminal:$terminal, waited_ms:$waited_ms,
+      terminal_status:$terminal_status, action_taken:$action_taken}')" || return $?
+  [ -n "$wave_index" ] && { line="$(printf '%s' "$line" | jq -c --argjson v "$wave_index" '. + {wave_index:$v}')" || return $?; }
+  [ -n "$new_dispatch_id" ] && { line="$(printf '%s' "$line" | jq -c --arg v "$new_dispatch_id" '. + {new_dispatch_id:$v}')" || return $?; }
+  [ -n "$raw_action" ] && { line="$(printf '%s' "$line" | jq -c --arg v "$raw_action" '. + {raw_action:$v}')" || return $?; }
+  [ -n "$schema_gap_issue" ] && { line="$(printf '%s' "$line" | jq -c --arg v "$schema_gap_issue" '. + {schema_gap_issue:$v}')" || return $?; }
+
+  _log_append "$target" "$line"
 }

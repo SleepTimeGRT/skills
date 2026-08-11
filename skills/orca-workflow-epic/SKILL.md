@@ -118,8 +118,12 @@ log_dispatch --skill "orca-workflow-epic" --role "task-coordinator" --issue "<ta
 - `PASS` → dequeue, 의존이 풀린 다음 ready task로.
 - 그 외(escalation류 outcome) →
   - mode=afk: 그 task를 **parked** 목록에 기록하고, `~/.agents/orca-workflows/logging.md` §1 outcome
-    레시피대로 `skill=orca-workflow-epic`, `outcome=escalation_parked`를 남긴 뒤, 그 task에 의존하는
-    후속 task 전부를 **skipped** 목록으로 옮기고, 남은 독립 ready task로 계속한다.
+    레시피(`log_outcome`)대로 `skill=orca-workflow-epic`, `outcome=escalation_parked`를 남긴 뒤, 그
+    task에 의존하는 후속 task 전부를 **skipped** 목록으로 옮기고, 남은 독립 ready task로 계속한다.
+    skipped로 옮긴 각 task도 issue별로 로그를 남긴다 — 반드시 같은 레시피의
+    `log_outcome --outcome skipped --blocked-by <막은 선행 issue>`로만 쓴다(**"skipped 목록"은 §5
+    보고용 인메모리 목록과 이 로그 레코드 둘 다를 뜻한다** — 이 문장이 모호해 raw printf로 즉석
+    스키마를 발명한 것이 #138의 2차 원인이었다).
   - mode=hitl: 이 outcome은 `-task`의 질문에 사람이 "중단"을 답한 결과다 — 그 자리에서 사람에게
     "다음 task 계속 / 전체 중단"을 묻고 따른다. 전체 중단을 고르면 아직 시도하지 않은 나머지 큐
     항목 전부를 **skipped** 목록에 담되, 막은 선행 task 자리에는 이 중단 사실을 적는다.

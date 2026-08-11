@@ -68,14 +68,24 @@ Extra fields (`wave_index`, `subtask_type`, `advisor`, ...) are added per call s
 - **진행-분기 축** — 판정이 아니라 정상적인 워크플로 상태 전이:
   `NO_DONE_TRANSITION`|`CONTRACT_FINALIZED_BY_GENERATOR`|`CONTRACT_APPROVED`|
   `MANUAL_RECOVERY_COMPLETED`|`CI_GATE_TIMEOUT`|`MERGE_CONFLICT`|`RETRO_DONE`|`RETRO_FAIL`|
-  `escalation_parked`|`UNMAPPED_BRANCH`
+  `escalation_parked`|`skipped`|`NO_ACCEPTANCE_CRITERIA`|`UNMAPPED_BRANCH`
+
+**기계-검증 정본은 `orca-workflows/scripts/log_dispatch.sh`의 `log_outcome()`(enum 변수
+`LOG_OUTCOME_ENUM`)이다** — 위 목록은 사람이 읽는 미러이고, 둘이 어긋나면 스크립트가 정본이다. 모든
+outcome write는 이 헬퍼를 통해야 하며, `"event":"outcome"`을 raw printf/jq로 직접 조립하는 것은
+금지다(#105/#116/#138 — 손으로 베낀 printf가 enum 즉석 발명 5회와 고정 필드 누락의 공통 원인이었고,
+`assign` 이벤트가 issue #68에서 같은 방식으로 이미 해결된 전례를 그대로 확장한 것). 목록에 없는 값을
+넘기면 헬퍼가 그 자리에서 `outcome=UNMAPPED_BRANCH`+`raw_outcome`+`schema_gap_issue`로 강제 대체하고
+stderr 경고만 남긴다(파이프라인은 실패시키지 않는다).
 
 ```bash
-install -d -m 700 ~/.local/state/orca-workflows/logs
-target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
-printf '{"ts":"%s","event":"outcome","skill":"<skill>","issue":"<issue-num>","outcome":"<PASS|FAIL|ESCALATE|GATE_FAIL|CONTRACT_ESCALATE|CI_GATE_FAIL|NO_DONE_TRANSITION|CONTRACT_FINALIZED_BY_GENERATOR|CONTRACT_APPROVED|MANUAL_RECOVERY_COMPLETED|CI_GATE_TIMEOUT|MERGE_CONFLICT|RETRO_DONE|RETRO_FAIL|escalation_parked|UNMAPPED_BRANCH>","retry":<n>,"raw_outcome":"<raw_outcome-or-omit, only when outcome=UNMAPPED_BRANCH>","schema_gap_issue":"<schema_gap_issue-or-omit, only when outcome=UNMAPPED_BRANCH>"}\n' \
-  "$(date -u +%FT%TZ)" >> "$target"
-chmod 600 "$target"
+source ~/.agents/orca-workflows/scripts/log_dispatch.sh
+log_outcome --skill <skill> --issue <issue-num> --outcome <위 두 축의 값 중 하나> --retry <n>
+# per-call-site 추가 필드(해당할 때만): --round <n> / --filed <n> --commented <n> --discarded <n> /
+#   --detail <text> / --blocked-by <issue-num>. 값이 빈 문자열이면 필드 자체가 생략된다 — 빈 문자열
+#   조건부 필드 금지(#127)를 헬퍼가 강제한다.
+# UNMAPPED_BRANCH를 직접 남길 때: --outcome UNMAPPED_BRANCH --raw-outcome <관측 문자열> \
+#   --schema-gap-issue <추적 이슈 slug>
 ```
 
 `skill`은 기록 주체다 — task 라우팅 outcome은 `orca-workflow-task`, parked 라우팅 결과(`escalation_parked`)는
@@ -85,7 +95,9 @@ chmod 600 "$target"
 `sleeptimegrt-skills`에 스키마 구멍 이슈를 열고, 같은 write에서 outcome 이벤트를
 `outcome=UNMAPPED_BRANCH`, `raw_outcome=<실제 관측 문자열>`, `schema_gap_issue=<추적 이슈 slug>`로
 남긴다(outcome 이벤트 자체를 생략하지 않는다) — 이 규칙 자체가 새 값이 필요할 때마다 반복되는
-드리프트(#62, #69, #86)를 막는 대상이다.
+드리프트(#62, #69, #86, #105, #138)를 막는 대상이며, `log_outcome()`이 실행 시점에 자동으로 강제한다
+(이슈를 아직 못 열었으면 `schema_gap_issue`는 `unfiled`로 남는다 — 헬퍼 기본값. 사후에 이슈를 열어
+추적을 붙인다).
 
 `RETRO_DONE`/`RETRO_FAIL`은 task 라우팅이 아니라 retro 결과다 — `orca-workflow` §2(invocation 종료 시의
 retro 사이트)만 쓴다. `RETRO_DONE` 라인은 per-call-site 추가 필드 규칙에 따라 `filed`/`commented`/`discarded`
@@ -124,6 +136,15 @@ per-call-site 추가 필드 규칙에 따라 `round`(도달한 라운드 수)를
 복구가 맞았는지" 재구성할 방법이 없다(#69 증거 2가 실제로 이 상세를 `detail`에 남긴 덕에 그 retro가
 판독 가능했다).
 
+`skipped`는 `orca-workflow-epic`이 afk-escalation으로 park된 선행 task의 dependent를 건너뛸 때(또는
+hitl 전체-중단 선택으로 남은 큐를 건너뛸 때) dependent issue별로 남기는 정상 진행-분기다 — issue #138에서
+즉석 발명으로 최초 관측된 뒤 정식 등재. 이 값에는 조건부 필드 `blocked_by`(막은 선행 issue 번호)가
+**필수**이며, `blocked_by`는 `outcome=skipped`일 때만 쓴다(다른 outcome에 실리면 헬퍼가 경고 후 버린다).
+
+`NO_ACCEPTANCE_CRITERIA`는 issue 본문이 Acceptance Criteria를 초안할 만큼 구체적이지 않아 진행 불가로
+판정된 정상 분기다(issue-drain/AC 초안 단계) — issue #105에서 즉석 발명으로 최초 관측된 뒤, 그 이슈의
+수정 방향대로 정식 등재.
+
 **`wave_start`/`wave_end`** (`orca-task-runner` only): same jq schema as today, written to
 `waves-$(date -u +%F).jsonl` instead of the fixed `waves.jsonl`.
 
@@ -131,17 +152,24 @@ per-call-site 추가 필드 규칙에 따라 `round`(도달한 라운드 수)를
 wait/recovery loop):
 
 ```bash
-install -d -m 700 ~/.local/state/orca-workflows/logs
-target="$HOME/.local/state/orca-workflows/logs/waves-$(date -u +%F).jsonl"   # orca-task-runner
-# or: target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"   # orca-workflow-task / orca-workflow-epic
-printf '{"ts":"%s","event":"self_recovery","skill":"<skill>","issue":"<issue-num>","task_id":"<task_id>","dispatch_id":"<dispatch_id>","terminal":"<handle>","waited_ms":<n>,"terminal_status":"<alive|dead|stuck_draft>","action_taken":"<resumed_wait|retried_enter|worker_abandon_retry|task_recreate_retry|escalated_spawn_failure|none_decision_gate_self_timed_out_worker_proceeded|UNMAPPED_BRANCH>","new_dispatch_id":"<new dispatch_id-or-omit, only when action_taken=worker_abandon_retry or action_taken=task_recreate_retry>","raw_action":"<raw_action-or-omit, only when action_taken=UNMAPPED_BRANCH>","schema_gap_issue":"<schema_gap_issue-or-omit, only when action_taken=UNMAPPED_BRANCH>"}\n' \
-  "$(date -u +%FT%TZ)" >> "$target"
-chmod 600 "$target"
+source ~/.agents/orca-workflows/scripts/log_dispatch.sh
+log_self_recovery --skill <skill> --issue <issue-num> --task-id <task_id> --dispatch-id <dispatch_id> \
+  --terminal <handle> --waited-ms <n> \
+  --terminal-status <alive|dead|stuck_draft> \
+  --action-taken <resumed_wait|retried_enter|worker_abandon_retry|task_recreate_retry|escalated_spawn_failure|none_decision_gate_self_timed_out_worker_proceeded|UNMAPPED_BRANCH>
+# 조건부 필드(해당할 때만): --new-dispatch-id <id> (action_taken=worker_abandon_retry|task_recreate_retry
+#   전용), --raw-action <관측 문자열>/--schema-gap-issue <slug> (action_taken=UNMAPPED_BRANCH 전용),
+#   --wave-index <n> (orca-task-runner 전용). 값이 빈 문자열이면 필드 자체가 생략된다(#127).
 ```
 
-`orca-task-runner` writes to `waves-<date>.jsonl` (add `wave_index` as an extra field, joinable with
-that wave's `wave_start`/`wave_end` records); `orca-workflow-task`/`orca-workflow-epic` write to `assignments-<date>.jsonl` (no
-`wave_index`). Purpose: `self-recovery.md`'s 3600000ms timeout is an unvalidated starting guess — this
+**`action_taken`의 기계-검증 정본도 같은 스크립트의 `log_self_recovery()`(enum 변수
+`LOG_SELF_RECOVERY_ACTION_ENUM`)다** — `"event":"self_recovery"` raw printf 금지. enum 밖 값(오타 포함 —
+issue #127의 `resume_wait`처럼)은 헬퍼가 `action_taken=UNMAPPED_BRANCH`+`raw_action`+`schema_gap_issue`로
+강제 대체한다.
+
+대상 파일은 헬퍼가 `--skill` 값으로 고른다: `orca-task-runner` → `waves-<date>.jsonl` (`--wave-index`를
+extra field로 실어 그 wave의 `wave_start`/`wave_end` 레코드와 join); `orca-workflow-task`/`orca-workflow-epic` →
+`assignments-<date>.jsonl` (`wave_index` 없음). Purpose: `self-recovery.md`'s 3600000ms timeout is an unvalidated starting guess — this
 log is what lets a future session re-derive a real distribution instead of guessing again, and lets
 `orca-retro`'s "repeated FAIL attributable to skill prose" lens notice if a particular signature
 recurs.
