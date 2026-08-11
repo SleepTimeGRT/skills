@@ -112,6 +112,37 @@ a prohibition on ever sending Enter again — `spawn-failures.md`'s `#43` row ma
 Enter, but only after manually confirming via `orca terminal read` that the terminal is still holding
 unsubmitted input, not as an unconditional retry.
 
+**Before that retry, distinguish "stuck draft" from "composer empty" — the Enter-only remedy only fixes the
+former.** The procedure above (and `spawn-failures.md`'s `#43` row) was written for the case where the
+injected text landed in the composer but the trailing Enter didn't register — resending Enter alone submits
+that already-present draft. A live `worker-start --agent codex` failure (issue #151, 2026-08-11) showed a
+different failure shape: the paste happened before the target TUI could accept input at all, so *nothing*
+reached the composer — no draft, partial or otherwise, anywhere in `tail_2`. Sending Enter into an empty
+composer is a no-op; the loop above would exhaust its retries and still report "not confirmed" for a reason
+the remedy can't address.
+
+```bash
+# After tail_2 still fails the $spec_prefix check: look for *any* trace of the injected payload, not just
+# the clean prefix match above (a garbled/partial paste still counts as "something is there to submit").
+spec_fragment="$(printf '%s' "$spec_text" | head -c 24)"   # shorter, coarser than $spec_prefix on purpose —
+                                                              # tolerate mid-string corruption from a
+                                                              # partial paste, not just a clean prefix
+if printf '%s' "$tail_2" | grep -qF "$spec_fragment"; then
+  : # some form of our payload is present but unsubmitted — the stuck-draft case, spawn-failures.md #43 applies
+else
+  # Composer is empty, not stuck. Resending Enter cannot help — there is nothing to submit. Treat this as a
+  # lost dispatch, not a submit failure: worker-abandon the dispatch, then worker-start --retry-of it (same
+  # provider/model/effort, unchanged spec) rather than retrying `terminal send --enter` further.
+  :
+fi
+```
+
+This distinction matters most for providers with a heavier boot sequence (MCP-server fan-out, plugin
+loading) where the empty-composer shape is far more likely than the stuck-draft shape — `orca-task-runner`'s
+codex path already avoids the race with the pre-dispatch boot-quiesce check above, so this branch is mainly
+defense-in-depth there. Any dispatch path that skips that pre-check (a different skill, a low-level
+`dispatch --inject` call outside `orca-task-runner`) is exactly where this branch is load-bearing.
+
 ## Edge cases
 
 - This does not replace `orca-task-runner`'s existing wave-loop timeout/`count:0` checkpoint (`terminal
