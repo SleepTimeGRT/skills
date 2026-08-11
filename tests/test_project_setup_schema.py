@@ -52,3 +52,39 @@ def test_issue_tracker_section_github_default_writes_no_file():
 def test_project_setup_avoids_claude_code_specific_tool_names():
     text = PROJECT_SETUP_MD.read_text()
     assert "AskUserQuestion" not in text
+
+
+def test_project_setup_has_e2e_tooling_section():
+    text = PROJECT_SETUP_MD.read_text()
+    assert "## 2. E2E tooling" in text
+
+
+def test_e2e_tooling_section_skips_when_doc_already_exists():
+    text = PROJECT_SETUP_MD.read_text()
+    start = text.index("## 2. E2E tooling")
+    window = text[start:]
+    assert "docs/agents/e2e-tooling.md" in window
+    assert "있으면" in window and ("스킵" in window or "건너" in window)
+
+
+def test_e2e_tooling_section_has_no_unconditional_default():
+    text = PROJECT_SETUP_MD.read_text()
+    start = text.index("## 2. E2E tooling")
+    window = text[start:]
+    # Unlike issue-tracker's GitHub default, e2e-tooling must always ask -- no silent default.
+    assert "무조건" in window
+
+
+def test_e2e_tooling_section_covers_all_four_fields():
+    text = PROJECT_SETUP_MD.read_text()
+    start = text.index("## 2. E2E tooling")
+    window = text[start:]
+    for field in ["Platform", "Tool", "Usage guidance", "Precondition"]:
+        assert field in window
+
+
+def test_e2e_tooling_section_proposes_playwright_default_for_web():
+    text = PROJECT_SETUP_MD.read_text()
+    start = text.index("## 2. E2E tooling")
+    window = text[start:]
+    assert "Playwright" in window

@@ -28,3 +28,35 @@ issue-trackers/selection.md` §2)이 문서 부재를 전제로 동작하므로,
 다른 트래커면 받은 답으로 `docs/agents/issue-tracker.md` 형식의 초안을 작성해 사용자에게 보여주고,
 승인되면 별도의 작은 커밋으로 대상 repo에 반영한다. 이후 실행부터는 문서가 있으므로 이 섹션이 다시
 트리거되지 않는다.
+
+## 2. E2E tooling
+
+`docs/agents/e2e-tooling.md`가 있으면 스킵.
+
+없으면 **무조건** 사용자에게 직접 묻는다(GitHub 같은 무조건-기본값이 없다) — ①Platform(자유
+텍스트, 예시: `web`/`native-android`/`native-ios`/`desktop`) ②Tool(MCP/도구 이름 — Platform이
+`web`류면 기본 제안으로 "Playwright MCP"를 보여주되, 사람이 최종 승인한다) ③Usage guidance(그
+도구를 쓸 때 알아야 할 사항 — accessibility-tree 기반인지, YAML 시나리오인지 등) ④Precondition(연결
+전 충족해야 하는 인프라 조건 — 에뮬레이터 부팅, 앱 사전 설치 등).
+
+받은 답으로 아래 형식의 초안을 작성해 사용자에게 보여주고, 승인되면 별도의 작은 커밋으로 대상
+repo에 반영한다:
+
+```markdown
+# E2E Tooling
+
+## Platform
+<답변>
+
+## Tool
+<답변>
+
+## Usage guidance
+<답변>
+
+## Precondition
+<답변, 없으면 "없음">
+```
+
+이후 실행부터는 문서가 있으므로 이 섹션이 다시 트리거되지 않는다. `orca-evaluate` §2가 이 문서를
+agent-e2e 스폰 시 읽는다.
