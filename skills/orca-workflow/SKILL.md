@@ -17,11 +17,11 @@ entry point 라우터다. 이슈 하나를 받아 타입을 판별해 `orca-work
   정의하는 `get_issue`/`get_issue_type`/`list_children`/`get_child_order`/`is_open`/`close_issue`/
   `link_pr_for_close`를 이후 전체 실행에서 쓴다. 구체 값(project key, transition id 등)은 이 스킬에
   복제하지 않는다 — 항상 selection.md가 가리키는 대상 repo의 tracker 문서에서 얻는다.
-- **온보딩**: selection.md가 "문서 없음 + GitHub 형식이 아닌 이슈 ID"로 판정하면, 곧바로 GitHub로 넘어가지
-  않고 사용자에게 직접 묻는다: ①어떤 tracker를 쓰는지 + 그 API를 부르는 데 필요한 최소 정보(Jira라면
-  site·cloudId·project key) ②"완료" transition/상태 이름. 받은 답으로 `docs/agents/issue-tracker.md` 형식의
-  초안을 작성해 보여주고, 승인되면 별도의 작은 커밋으로 대상 repo에 반영한 뒤 이번 실행을 이어간다. 이후
-  실행부터는 문서가 있으므로 다시 트리거되지 않는다.
+- **E2E tooling 확인**(실행 시작 시 1회, §1 라우팅 이전): 대상 repo의 `docs/agents/e2e-tooling.md`가
+  없으면 §1로 넘어가지 않고 사용자에게 `/project-setup` 실행을 안내하며 이번 실행을 중단한다 —
+  generation이 끝난 뒤 evaluate 단계(`orca-evaluate` §2)에서야 막히는 낭비를 피한다. 이슈 ID 모양에
+  따른 예외는 없다(GitHub 숫자 ID든 Jira형이든 agent-e2e는 모든 task 평가에 항상 필요하다는 기존
+  전제 — `orca-evaluate` §2가 이미 무조건 게이트로 문서화). 문서가 있으면 그대로 §1로 진행한다.
 - **고착 dispatched 스윕**(세션 시작 시 1회, report-only): `bash
   ~/.agents/orca-workflows/scripts/sweep_stale_dispatched.sh`를 실행해 임계(기본 1시간)를 넘긴 `dispatched`
   task 목록을 확보하고, 발견되면(exit 3 — 전제 실패가 아니다, 진행은 계속한다) 사용자 보고에 그대로
