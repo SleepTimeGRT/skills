@@ -74,14 +74,22 @@ orca_call_with_retry "orca-evaluate" "contract-review" -- \
 
 ## 2. Test Gate: Agent e2e (evaluator가 headless agy로 스폰)
 
-앱을 직접 조작하는 e2e. Playwright MCP(accessibility-tree 기반 — 스크린샷·좌표 클릭보다 UI 변경에 덜 깨진다)를 붙인 agy(Gemini) 세션을 **headless(`-p`, one-shot)로** 스폰한다, REPL 아님(agy는 이 스킬 전체에서 REPL 금지 — 이유는 §0). 시나리오·경로·요청 형식을 launch 시점의 `-p` 인자 하나에 다 담아 한 번에 실행하고, 이후 orchestration 왕복 없이 완료를 회수한다. (e2e·pgTAP은 여기서 안 돈다 — §0 참고.)
+앱을 직접 조작하는 e2e. 스폰 전에 evaluator가 대상 repo의 `docs/agents/e2e-tooling.md`를 직접
+읽는다(script 없이, evaluator 자신의 판단으로). **문서가 없으면**: 이 시점에는 이미
+`orca-workflow` §0이 막았어야 하므로 도달은 예외적 경로(폴백 직행 등)다 — 조용히 Playwright로
+되돌아가지 않고, §4의 ESCALATE("인프라 문제로 판단 불가" 버킷)로 처리하며 `/project-setup` 실행을
+안내한다. **문서가 있으면**: `Platform`/`Tool`/`Usage guidance`/`Precondition` 네 필드를 읽어,
+그 `Tool`이 붙은 agy(Gemini) 세션을 **headless(`-p`, one-shot)로** 스폰한다, REPL 아님(agy는 이
+스킬 전체에서 REPL 금지 — 이유는 §0). `Usage guidance` 텍스트 + 시나리오·경로·요청 형식 + `Precondition`
+확인 지침을 launch 시점의 `-p` 인자 하나에 다 담아 한 번에 실행하고, 이후
+orchestration 왕복 없이 완료를 회수한다. (e2e·pgTAP은 여기서 안 돈다 — §0 참고.)
 
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 report_path="<worktree 루트>/.evaluate-agent-e2e-report.md"
 orca_call_with_retry "orca-evaluate" "agent-e2e" -- \
   orca terminal create --worktree active --title eval-agent-e2e \
-  --command "agy -p '<Playwright MCP 지침 + 테스트 시나리오 + 앱 URL/worktree 경로 + 실패 시 무엇을 관찰했는지 요약해서 $report_path에 저장하고 완료 시 한 줄 요약도 출력하라는 지침>' --model <token> --print-timeout 15m --dangerously-skip-permissions" --json
+  --command "agy -p '<e2e-tooling.md의 Tool + Usage guidance + 테스트 시나리오 + 앱 URL/worktree 경로 + e2e-tooling.md의 Precondition 확인 지침 + 실패 시 무엇을 관찰했는지 요약해서 $report_path에 저장하고 완료 시 한 줄 요약도 출력하라는 지침>' --model <token> --print-timeout 15m --dangerously-skip-permissions" --json
 orca terminal wait --terminal <agent-e2e-handle> --for tui-idle --timeout-ms 900000 --json
 # 완료 확인은 orchestration이 아니라 터미널 출력/report 파일로 한다 — headless는 dispatch --inject
 # 대상이 아니고(agy.md 참고), 이 터미널의 셸 자체는 agy 프로세스가 끝나도 죽지 않으므로
@@ -92,7 +100,7 @@ orca terminal read --terminal <agent-e2e-handle> --json
 # task_id/dispatch_id 없음(orchestration 태스크가 아니므로).
 ```
 
-이 세션(evaluator)은 agy의 자기 요약을 **그대로 믿지 않는다** — 이미 이 세션 자체가 롱컨텍스트 REPL 세션이므로, `$report_path`와 원본 트레이스를 직접(별도 터미널 스폰 없이) 읽어서 "성공했다"는 보고가 실제로 맞는지, 조용히 막히거나 우회한 흔적은 없는지 확인한다.
+이 세션(evaluator)은 agy의 자기 요약을 **그대로 믿지 않는다** — 이미 이 세션 자체가 롱컨텍스트 REPL 세션이므로, `$report_path`와 원본 트레이스를 직접(별도 터미널 스폰 없이) 읽어서 "성공했다"는 보고가 실제로 맞는지, 조용히 막히거나 우회한 흔적은 없는지 확인한다. **구체 기준**: 트레이스에서 `e2e-tooling.md`의 `Tool` 필드가 실제로 쓰였는지 확인한다. 다른 방식(예: 선언은 Maestro인데 raw adb로 우회)으로 조용히 대체된 흔적이 있으면 agy의 성공 자기요약을 그대로 신뢰하지 않는다(실측: studio-hevv/selah-android — 선언된 Playwright MCP 대신 즉석 raw `adb shell` 명령으로 조용히 대체된 사례).
 
 **실패 확정 시 fail-fast — §3 생략**: 위 재확인 결과 실패가 실제이고(자기 요약·report·트레이스가 일치) 인프라 원인이 아니라 AC-관련 동작 실패로 확인되면, §3 code-reviewer를 스폰하지 않고 곧장 §4로 간다 — §4의 PASS 조건이 어차피 agent e2e 통과를 요구하므로 리뷰를 돌려도 verdict는 FAIL로 같고, 강한 reasoning 모델 스폰 비용만 든다(이미 실패가 확정된 코드를 비싼 단계에 태우지 않는다는 `GATE_FAIL`과 같은 원칙). 이때 FAIL findings는 e2e 관찰(어떤 시나리오가 어떤 AC에서 실패했는지)로 작성하고, eval-report의 `code_review_ran`을 `false`로 남긴다 — 생략은 이번 attempt에 한하며, 다음 attempt는 §3을 다시 태운다. 인프라 원인(계정·secret·환경)이면 §4의 ESCALATE 규칙 그대로다. 부분 통과 등 판단이 애매하면 생략하지 않는다 — §3을 그대로 진행한다.
 
@@ -185,10 +193,10 @@ report는 severity(Critical/Important/Minor) + 도달 조건 + 최악 결과 + f
 
 - **PASS** — code-reviewer report에 Critical/Important finding 없음, agent e2e 통과(자기 요약과 재확인 결과가 일치), contract 종결이 approved거나 `plan_coverage`-only override(override의 unresolved 항목이 §3 리뷰(입력 ⑥)에서 실제 결함으로 실체화되면 그게 곧 finding이라 첫 조건에서 걸린다 — override 자체는 PASS를 막지 않는다. `ac_fidelity` 미해소 override는 이 스킬에 도달하지 않는다: `orca-workflow-task` §1이 `CONTRACT_ESCALATE`로 먼저 자른다).
 - **FAIL** — 구체적 finding(severity+근거+수정 방향)은 아래 `eval-report-a<attempt>.json`에 남기고, `orca-workflow-task`에는 FAIL verdict만 반환한다. (재시도는 `orca-workflow-task`가 관리한다 — 이 스킬은 재-dispatch하지 않는다. `orca-workflow-task`가 재시도 카운터를 세고, 필요하면 attempt 번호와 함께 `orca-task-runner`에 재-dispatch — evaluator가 task-runner를 직접 부르지 않고, feedback 본문도 `orca-workflow-task`를 거치지 않는다.)
-- **ESCALATE** — 다음 중 하나면 재시도 없이 즉시: acceptance criteria 자체가 애매해서 판정이 불가능, 구현이 issue 스코프 밖의 것을 건드림, agent e2e가 인프라 문제(계정·secret·환경)로 판단 불가, **destructive-op 린터가 flag했는데 code-reviewer report가 그 항목이 제안서의 destructive-op 선언에 커버되지 않는다고 명시함**.
+- **ESCALATE** — 다음 중 하나면 재시도 없이 즉시: acceptance criteria 자체가 애매해서 판정이 불가능, 구현이 issue 스코프 밖의 것을 건드림, agent e2e가 인프라 문제(계정·secret·환경, **또는 `docs/agents/e2e-tooling.md` 부재·precondition 미충족** — 후자는 `/project-setup` 실행 안내와 함께)로 판단 불가, **destructive-op 린터가 flag했는데 code-reviewer report가 그 항목이 제안서의 destructive-op 선언에 커버되지 않는다고 명시함**.
 
 판정과 함께 `CONTRACT_DIR`에 `eval-report-a<attempt>.json`을 남긴다(attempt 번호는 spec으로 받은 값, 스키마·불변식은 `contract-schema.md` — `verdict` 필드는 반환값과 반드시 일치). FAIL 시 이 파일의 `findings`가 재-dispatch된 generator의 유일한 feedback 입력이다.
 
 ## 폴백
 
-- orca 런타임 불가: coding agent(§1 contract 판정, §3 code review 둘 다)를 orca 없이 **Bash로 직접**(headless) 실행해 판정·report 회수 — §1은 고정된 강한 reasoning 모델 그대로, §3은 `select_reviewer.py`가 고른 모델·effort 그대로 유지한다(폴백이라는 이유로 §3의 동적 선택을 강한 고정으로 되돌리지 않는다). 할당 로그(§1)는 동일하게 남긴다 — `terminal` 필드만 대체 식별자로. agent e2e(§2)는 로컬에서 Playwright MCP를 붙인 headless agy 세션으로 직접 실행하고 report 경로만 기록. 이 evaluator 세션 자체(REPL, agy 아님)가 뜨지 않으면 `model-selection.md`의 다른 REPL 가능 provider로 대체하되, §1·§3의 coding agent는 반드시 이 세션과 다른 provider/모델을 유지한다(같은 세션이 스스로를 판단하지 않도록). 폴백 발동은 사용자에게 보고.
+- orca 런타임 불가: coding agent(§1 contract 판정, §3 code review 둘 다)를 orca 없이 **Bash로 직접**(headless) 실행해 판정·report 회수 — §1은 고정된 강한 reasoning 모델 그대로, §3은 `select_reviewer.py`가 고른 모델·effort 그대로 유지한다(폴백이라는 이유로 §3의 동적 선택을 강한 고정으로 되돌리지 않는다). 할당 로그(§1)는 동일하게 남긴다 — `terminal` 필드만 대체 식별자로. agent e2e(§2)는 로컬에서 `docs/agents/e2e-tooling.md`가 선언한 도구를 붙인 headless agy 세션으로 직접 실행하고 report 경로만 기록(§2와 동일 도구 선택 절차 — 문서가 없으면 §2와 동일하게 ESCALATE). 이 evaluator 세션 자체(REPL, agy 아님)가 뜨지 않으면 `model-selection.md`의 다른 REPL 가능 provider로 대체하되, §1·§3의 coding agent는 반드시 이 세션과 다른 provider/모델을 유지한다(같은 세션이 스스로를 판단하지 않도록). 폴백 발동은 사용자에게 보고.

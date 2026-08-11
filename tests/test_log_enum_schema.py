@@ -224,9 +224,15 @@ def test_orca_set_version_bumped():
     # issue's proposal-r2.json scope).
     # then again per issue #141 (v1.1.8 -> v1.1.9, set members orca-workflow-task/orca-task-runner
     # touched by that issue's proposal scope).
-    # Invariant unchanged: exact version string + 6-member list are still both enforced.
+    # then again per issue #140's merge into main (v1.1.9 -> v1.1.10, new 7th set member
+    # project-setup added -- orca-workflow/orca-evaluate both reference it by name in their
+    # fail-fast redirects, so a version mismatch could point at a nonexistent or stale copy of
+    # the skill; moved to v1.1.10 rather than reusing v1.1.9 because issue #141 had already
+    # shipped that version string on main with different, 6-member content by the time this
+    # branch merged).
+    # Invariant unchanged: exact version string + now-7-member list are still both enforced.
     lines = [l for l in SET_VERSION.read_text().splitlines() if l.strip()]
-    assert lines[0] == "v1.1.9"
+    assert lines[0] == "v1.1.10"
     assert sorted(lines[1:]) == sorted(
         [
             "orca-evaluate",
@@ -235,6 +241,7 @@ def test_orca_set_version_bumped():
             "orca-workflow",
             "orca-workflow-epic",
             "orca-workflow-task",
+            "project-setup",
         ]
     )
 
