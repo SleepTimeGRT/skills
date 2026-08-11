@@ -1,6 +1,14 @@
 ---
 name: project-setup
-description: Invoke explicitly via `/project-setup` — do not phrase-match. One-time-per-repo onboarding for project-level agent config docs under `docs/agents/`: issue tracker (`issue-tracker.md`) and agent-e2e tooling (`e2e-tooling.md`). Idempotent — sections whose doc already exists are skipped and reported as already-configured. `orca-workflow` §0 and `~/.agents/orca-workflows/issue-trackers/selection.md` §2 both redirect here instead of onboarding inline. Self-relative.
+description: >-
+  Invoke explicitly via `/project-setup` — do not phrase-match. One-time-per-repo onboarding for
+  project-level agent config docs under `docs/agents/`: issue tracker (`issue-tracker.md`) and
+  agent-e2e tooling (`e2e-tooling.md`). Idempotent — sections whose doc already exists are skipped and
+  reported as already-configured. `orca-workflow` §0 and
+  `~/.agents/orca-workflows/issue-trackers/selection.md` §2 both redirect here instead of onboarding
+  inline. Self-relative. Do NOT use for general repo scaffolding, project bootstrapping, or CI setup —
+  this skill only creates the one-time `docs/agents/` config docs.
+compatibility: Requires the `orca` CLI (skill set last verified against Orca app 1.4.180), the `~/.agents/orca-workflows/` symlink to this repo's orca-workflows/, and the `gh` CLI.
 ---
 
 # Project Setup

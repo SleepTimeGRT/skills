@@ -1,6 +1,18 @@
 ---
 name: orca-retro
-description: Use right after an orca-workflow invocation ends (retro runs regardless of how the invocation ended) — analyzes only that invocation's logs under ~/.local/state/orca-workflows/logs/ (assignments/outcome events, spawn-failures, term transcripts) through four defect lenses (documented-schema violations, repeated FAILs attributable to skill prose, preventable escalations or human interventions, new spawn-failure signatures) and files at most 3 evidence-backed skill-defect issues on the sleeptimegrt-skills repo, deduplicating against open issues via recurrence comments. Never edits skills directly — output is issues only; fixes flow through the normal /orca-workflow pipeline later. Best-effort by contract: no retro failure may block the invocation. Self-relative.
+description: >-
+  Use right after an orca-workflow invocation ends (retro runs regardless of how the invocation ended)
+  — analyzes only that invocation's logs under ~/.local/state/orca-workflows/logs/
+  (assignments/outcome events, spawn-failures, term transcripts) through four defect lenses
+  (documented-schema violations, repeated FAILs attributable to skill prose, preventable escalations
+  or human interventions, new spawn-failure signatures) and files at most 3 evidence-backed
+  skill-defect issues on the sleeptimegrt-skills repo, deduplicating against open issues via
+  recurrence comments. Never edits skills directly — output is issues only; fixes flow through the
+  normal /orca-workflow pipeline later. Best-effort by contract: no retro failure may block the
+  invocation. Self-relative. Do NOT use for general retrospectives, ad-hoc log analysis, or
+  multi-agent coordination (use the `orchestration` or `orca-cli` skills) — this skill runs only as
+  the closing step of an orca-workflow invocation.
+compatibility: Requires the `orca` CLI (skill set last verified against Orca app 1.4.180), the `~/.agents/orca-workflows/` symlink to this repo's orca-workflows/, and the `gh` CLI. Reads logs under ~/.local/state/orca-workflows/logs/.
 ---
 
 # Orca Retro

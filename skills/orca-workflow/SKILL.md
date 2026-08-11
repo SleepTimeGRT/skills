@@ -1,6 +1,18 @@
 ---
 name: orca-workflow
-description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-matching, which collides with Orca's built-in `orchestration` skill (multi-agent coordination, task dispatch, coordinator loops). Entry point that drives an issue (GitHub Issues or Jira, resolved per repo — see `~/.agents/orca-workflows/issue-trackers/selection.md`) through its full lifecycle: gates on agent-e2e tooling being declared before routing, resolves the tracker (with first-run onboarding), routes the issue in-session — children present → `orca-workflow-epic`, none → `orca-workflow-task` — forwarding mode [afk|hitl] (default hitl), and after the routed run finishes, however it ended, always launches a best-effort `orca-retro` over that invocation's logs (issue set = root ∪ queue). Never generates or evaluates code directly — pure orchestration. Self-relative.
+description: >-
+  Invoke explicitly via `/orca-workflow` — do not rely on phrase-matching, which collides with Orca's
+  built-in `orchestration` skill (multi-agent coordination, task dispatch, coordinator loops). Entry
+  point that drives an issue (GitHub Issues or Jira, resolved per repo — see
+  `~/.agents/orca-workflows/issue-trackers/selection.md`) through its full lifecycle: gates on
+  agent-e2e tooling being declared before routing, resolves the tracker (with first-run onboarding),
+  routes the issue in-session — children present → `orca-workflow-epic`, none → `orca-workflow-task` —
+  forwarding mode [afk|hitl] (default hitl), and after the routed run finishes, however it ended,
+  always launches a best-effort `orca-retro` over that invocation's logs (issue set = root ∪ queue).
+  Never generates or evaluates code directly — pure orchestration. Self-relative. Do NOT use it for
+  ad-hoc multi-agent coordination, task dispatch, DAGs, or coordinator loops (use the `orchestration`
+  skill), nor for raw terminal/worktree control (use `orca-cli`).
+compatibility: Requires the `orca` CLI (skill set last verified against Orca app 1.4.180), the `~/.agents/orca-workflows/` symlink to this repo's orca-workflows/, and the `gh` CLI.
 ---
 
 # Orca Workflow
