@@ -48,14 +48,21 @@ def test_section_2_missing_doc_redirects_to_project_setup():
 
 def test_self_recheck_paragraph_checks_declared_tool_actually_used():
     text = EVALUATE_SKILL.read_text()
-    section2 = _section(text, "## 2. Test Gate", "## 3. Diff")
-    assert "Tool" in section2
-    assert "우회" in section2 or "대체" in section2
+    # Bound tightly to the self-recheck paragraph itself (not all of section 2) so this
+    # test actually pins the new "**구체 기준**" sentence rather than passing merely
+    # because "Tool" appears somewhere earlier in section 2 (e.g. the opening paragraph).
+    self_recheck = _section(
+        text, "이 세션(evaluator)은 agy의 자기 요약을", "## 3. Diff"
+    )
+    assert "구체 기준" in self_recheck
+    assert "selah-android" in self_recheck or "adb" in self_recheck
 
 
 def test_escalate_bucket_covers_missing_e2e_tooling_doc():
     text = EVALUATE_SKILL.read_text()
-    section4 = text[text.index("## 4."):]
+    # Bound to §4 only (not §4-through-EOF) so this doesn't accidentally pass because the
+    # unrelated "## 폴백" section below also mentions e2e-tooling.md.
+    section4 = _section(text, "## 4.", "## 폴백")
     assert "e2e-tooling" in section4 or "e2e-tooling.md" in section4
 
 
