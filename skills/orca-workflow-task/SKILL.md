@@ -92,6 +92,32 @@ source ~/.agents/orca-workflows/scripts/log_dispatch.sh
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
   orca terminal create --worktree active --title task-run-<n> \
   --command "<provider의 launch 문법 — provider 문서에서 resolve하되, 인라인 permission-bypass 플래그 필수: claude → --dangerously-skip-permissions, codex → --dangerously-bypass-approvals-and-sandbox>" --json
+if ! orca_call_with_retry "orca-workflow-task" "task-runner" -- \
+  orca terminal wait --terminal <run-handle> --for tui-idle --timeout-ms 60000 --json; then
+  exit 1
+fi
+# Pre-dispatch boot-quiesce (issue #84)
+# freshly launched REPL은 tui-idle 뒤에도 MCP boot 출력이 남을 수 있으므로, cursor-scoped 새 출력이
+# 멈출 때까지 확인한다. 전체 scrollback grep은 TUI repaint 잔재를 boot 출력으로 오판하므로 쓰지 않는다.
+boot_deadline=$(( $(date -u +%s) + 60 ))
+boot_initial="$(orca_call_with_retry "orca-workflow-task" "task-runner" -- \
+  orca terminal read --terminal <run-handle> --json)" || exit 1
+cur="$(printf '%s' "$boot_initial" | jq -r '.result.terminal.latestCursor')"
+while :; do
+  sleep 12
+  boot_read="$(orca_call_with_retry "orca-workflow-task" "task-runner" -- \
+  orca terminal read --terminal <run-handle> --cursor "$cur" --json)" || exit 1
+  new="$(printf '%s' "$boot_read" | jq -r '.result.terminal.returnedLineCount')"
+  if [ "$new" = "0" ]; then
+    break
+  fi
+  cur="$(printf '%s' "$boot_read" | jq -r '.result.terminal.latestCursor')"
+  if [ "$(date -u +%s)" -ge "$boot_deadline" ]; then
+    # spawn-failures.md의 grep-first 절차를 따른다. task-create/dispatch --inject로 진행하지 않는다.
+    exit 1
+  fi
+done
+# End pre-dispatch boot-quiesce
 spec_text="<issue 번호 + CONTRACT_DIR 절대경로 + 제안서/구현 모드(제안서 모드면: contract-schema.md 스키마대로 AC 초안을 포함한 proposal-r<라운드>.json을 CONTRACT_DIR에 작성) + orphan-폴백 계약(§0) 전문>"
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
@@ -128,9 +154,34 @@ fi
 orca_call_with_retry "orca-workflow-task" "evaluator" -- \
   orca terminal create --worktree active --title task-evaluate-<n> \
   --command "<REPL이 가능한, agy 제외 provider의 launch 문법 — provider 문서에서 resolve하되, 인라인 permission-bypass 플래그 필수: claude → --dangerously-skip-permissions, codex → --dangerously-bypass-approvals-and-sandbox>" --json
-orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json
+if ! orca_call_with_retry "orca-workflow-task" "evaluator" -- \
+  orca terminal wait --terminal <evaluate-handle> --for tui-idle --timeout-ms 60000 --json; then
+  exit 1
+fi
 # 해당 provider가 최초 launch 시 신뢰/승인류 재프롬프트를 요구하면 그 provider 문서가 정의하는
 # 절차를 따른다(agy 전용 시퀀스를 여기서 가정하지 않는다).
+# Pre-dispatch boot-quiesce (issue #84)
+# freshly launched REPL은 tui-idle 뒤에도 MCP boot 출력이 남을 수 있으므로, cursor-scoped 새 출력이
+# 멈출 때까지 확인한다. 전체 scrollback grep은 TUI repaint 잔재를 boot 출력으로 오판하므로 쓰지 않는다.
+boot_deadline=$(( $(date -u +%s) + 60 ))
+boot_initial="$(orca_call_with_retry "orca-workflow-task" "evaluator" -- \
+  orca terminal read --terminal <evaluate-handle> --json)" || exit 1
+cur="$(printf '%s' "$boot_initial" | jq -r '.result.terminal.latestCursor')"
+while :; do
+  sleep 12
+  boot_read="$(orca_call_with_retry "orca-workflow-task" "evaluator" -- \
+  orca terminal read --terminal <evaluate-handle> --cursor "$cur" --json)" || exit 1
+  new="$(printf '%s' "$boot_read" | jq -r '.result.terminal.returnedLineCount')"
+  if [ "$new" = "0" ]; then
+    break
+  fi
+  cur="$(printf '%s' "$boot_read" | jq -r '.result.terminal.latestCursor')"
+  if [ "$(date -u +%s)" -ge "$boot_deadline" ]; then
+    # spawn-failures.md의 grep-first 절차를 따른다. task-create/dispatch --inject로 진행하지 않는다.
+    exit 1
+  fi
+done
+# End pre-dispatch boot-quiesce
 spec_text="<orca-evaluate SKILL.md 지침 + CONTRACT_DIR 절대경로와 대상 라운드 번호(검토 대상 proposal-r<n>.json·판정 산출 verdict-r<n>.json — 스키마·적대적 판정 지침·라운드 2 입력 격리 규칙은 contract-schema.md) + issue 원문 + issue 번호 + 요청 모드 + orphan-폴백 계약(§0) 전문>"
 orca_call_with_retry "orca-workflow-task" "evaluator" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
