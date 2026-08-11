@@ -13,21 +13,25 @@ Code의 질문 UI)의 이름을 이 문서 본문에 넣지 않는다. 플랫폼
 
 ## 1. Issue tracker
 
-`docs/agents/issue-tracker.md`가 있으면 스킵.
+`docs/agents/issue-tracker.md`가 있으면 스킵. ("이미 설정됨"은 이 문서 파일과, 이를 가리키는
+AGENTS.md/CLAUDE.md의 "Issue tracker" pointer가 함께 있는 상태를 뜻한다 — 스킵 판정 자체는 문서
+파일 존재만 기계적으로 확인하는데, 아래 흐름이 이제 문서와 pointer를 항상 같이 만들기 때문이다.
+pointer 없이 문서만 있는 기존 repo의 마이그레이션은 이 작업의 범위 밖이다.)
 
 없으면 사용자에게 직접 묻는다: ①이 repo가 GitHub Issues를 쓰는지, 다른 트래커(Jira/Linear 등)를
 쓰는지 ②(GitHub가 아니면) 그 tracker의 API를 부르는 데 필요한 최소 정보(Jira라면 site·cloudId·
-project key) ③"완료" transition/상태 이름. (acceptance-criteria가 적히는 섹션 이름은 여기서 묻지
-않는다 — AC는 저장소 설정 시점의 고정값이 아니라 이슈마다 매번 새로 협상되는 값이고,
-`orca-evaluate` §1의 contract negotiation이 이미 소유한다.)
+project key) ③"완료" transition/상태 이름.
 
 **GitHub면 문서를 만들지 않고 이 섹션을 종료한다** — 숫자 ID 폴백(`~/.agents/orca-workflows/
 issue-trackers/selection.md` §2)이 문서 부재를 전제로 동작하므로, 여기서 GitHub 전용 문서를 만들면
 그 폴백 경로가 깨진다.
 
 다른 트래커면 받은 답으로 `docs/agents/issue-tracker.md` 형식의 초안을 작성해 사용자에게 보여주고,
-승인되면 별도의 작은 커밋으로 대상 repo에 반영한다. 이후 실행부터는 문서가 있으므로 이 섹션이 다시
-트리거되지 않는다.
+승인되면 같은 승인 단계에서 대상 repo의 AGENTS.md(그 repo가 CLAUDE.md를 쓰면 CLAUDE.md)에 이 문서를
+가리키는 "Issue tracker" pointer 섹션(예: `### Issue tracker` 헤딩, `docs/agents/issue-tracker.md`
+링크 — `~/.agents/orca-workflows/issue-trackers/selection.md` §1이 찾는 패턴과 동일)을 추가하거나
+이미 있는지 확인한다. 문서와 pointer를 함께 별도의 작은 커밋으로 대상 repo에 반영한다. 이후
+실행부터는 문서가 있으므로 이 섹션이 다시 트리거되지 않는다.
 
 ## 2. E2E tooling
 

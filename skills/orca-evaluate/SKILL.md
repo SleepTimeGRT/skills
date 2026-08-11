@@ -80,8 +80,8 @@ orca_call_with_retry "orca-evaluate" "contract-review" -- \
 되돌아가지 않고, §4의 ESCALATE("인프라 문제로 판단 불가" 버킷)로 처리하며 `/project-setup` 실행을
 안내한다. **문서가 있으면**: `Platform`/`Tool`/`Usage guidance`/`Precondition` 네 필드를 읽어,
 그 `Tool`이 붙은 agy(Gemini) 세션을 **headless(`-p`, one-shot)로** 스폰한다, REPL 아님(agy는 이
-스킬 전체에서 REPL 금지 — 이유는 §0). `Usage guidance` 텍스트 + 시나리오·경로·요청 형식 + `
-Precondition` 확인 지침을 launch 시점의 `-p` 인자 하나에 다 담아 한 번에 실행하고, 이후
+스킬 전체에서 REPL 금지 — 이유는 §0). `Usage guidance` 텍스트 + 시나리오·경로·요청 형식 + `Precondition`
+확인 지침을 launch 시점의 `-p` 인자 하나에 다 담아 한 번에 실행하고, 이후
 orchestration 왕복 없이 완료를 회수한다. (e2e·pgTAP은 여기서 안 돈다 — §0 참고.)
 
 ```bash

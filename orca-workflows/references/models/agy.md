@@ -99,7 +99,8 @@ scores are different properties, and no representative Orca long-log comparison 
 
 ## BrowserMCP and quota gaps
 
-The intended agent-e2e setup is agy plus an accessibility-tree Playwright MCP. The repository still needs
+The intended agent-e2e setup is agy plus the project-declared e2e tool (resolved from the consuming
+skill's `docs/agents/e2e-tooling.md`, not necessarily an MCP — e.g. a raw CLI). The repository still needs
 a recorded connection smoke before treating that path as verified.
 
 Public sources did not establish that the new model generation kept the previous quota and rate limits.

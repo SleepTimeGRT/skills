@@ -49,6 +49,18 @@ def test_issue_tracker_section_github_default_writes_no_file():
     assert "문서를 만들지 않" in window or "문서 생성 없이" in window
 
 
+def test_issue_tracker_section_adds_agents_or_claude_md_pointer():
+    text = PROJECT_SETUP_MD.read_text()
+    start = text.index("## 1. Issue tracker")
+    end = text.index("## 2.") if "## 2." in text else len(text)
+    window = text[start:end]
+    # The non-GitHub approve-and-commit step must also add/verify an AGENTS.md/CLAUDE.md
+    # "Issue tracker" pointer to the doc -- not just write the doc file -- so
+    # orca-workflows/issue-trackers/selection.md §1's pointer lookup finds it (issue #140).
+    assert "AGENTS.md" in window and "CLAUDE.md" in window
+    assert "Issue tracker" in window
+
+
 def test_project_setup_avoids_claude_code_specific_tool_names():
     text = PROJECT_SETUP_MD.read_text()
     assert "AskUserQuestion" not in text

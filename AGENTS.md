@@ -58,7 +58,7 @@ leaves unmarked manual installs untouched. These are not worktree symlinks — e
 skills so the recorded commit never lies about the deployed content.
 The orca skills are a version set pinned by `skills/orca-set.version` (line 1 = version,
 rest = members): deploying any member deploys the whole set at that one version, `--version`
-must not contradict the set file, and one dirty member aborts the whole set — so the six
+must not contradict the set file, and one dirty member aborts the whole set — so the seven
 always carry the same version label.
 
 ### `orca-workflows/` deploy path (decision, #22)
