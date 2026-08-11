@@ -10,7 +10,11 @@ description: Use when generating the implementation for one task (issue) — pro
 ## 0. 전제
 
 - `orca status --json` ready. 실패 시 아래 "폴백".
-- feature worktree에서 실행 중이어야 한다(main 체크아웃에서 금지). 워커는 전부 `--worktree active`에 생성.
+- feature worktree에서 실행 중이어야 한다(main 체크아웃에서 금지). `terminal create`(§3, agy pre-create)는
+  `--worktree active`로 생성한다(Orca 공식 예시와 일치). `worker-start`는 다르다 — `--worktree active`는
+  `--agent`·`--terminal` 두 조합 모두에서 `selector_not_found`로 항상 실패한다(라이브 확인, 2026-08-11).
+  `--agent` 호출은 `--worktree current`를 쓰고, `--terminal` 호출은 터미널 핸들이 이미 worktree를
+  고정하므로 `--worktree`를 아예 생략한다 — §5 템플릿 참조.
 - claude/codex 워커는 `worker-start --agent`로 스폰한다 — approval/sandbox(codex: `--dangerously-bypass-approvals-and-sandbox` 상당)는 Orca 계정 레벨 Agent 설정 프리셋이 맡는다. `--permission-mode` 같은 per-dispatch 플래그는 없고, 필요하지도 않다(`orca-workflows/self-recovery.md`의 `worker-release` 절, 2026-08-08/2026-08-11 라이브 검증). 이 결정을 다시 열지 않는다. agy만 예외: `--agent agy`는 구조적으로 지원되지 않으므로(`orca account list`에 gemini/agy 슬롯 자체가 없음) §3의 `terminal create --command` 템플릿으로 approval/sandbox를 명시적으로 계속 지정한다 — 근거·예외(headless read-only 등)는 `~/.agents/orca-workflows/models/codex.md`/`models/agy.md`가 정본이다. 안전 전제는 워크트리 격리이므로(§0 첫 불릿의 main 체크아웃 금지와 같은 전제), 격리 밖에서 이 posture로 launch하지 않는다.
 - 모델·effort는 매 launch 전 아래 문서에서 subtask 유형(전사·기계적 / 통합·판단 / 아키텍처)에 맞게 고른다. 값을 이 스킬에 복제하지 않는다.
   - `~/.agents/orca-workflows/model-selection.md`
@@ -153,13 +157,15 @@ spec_sidecar="$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"   # §2
 spec_text="$(cat "$spec_sidecar")"   # 지금 재구성하지 않는다 — §2에서 남긴 원문 그대로
 # claude
 orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
-  orca orchestration worker-start --task <task_id> --worktree active --agent claude --model <model> --effort <effort> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
+  orca orchestration worker-start --task <task_id> --worktree current --agent claude --model <model> --effort <effort> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
 # codex
 orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
-  orca orchestration worker-start --task <task_id> --worktree active --agent codex --model <model> --effort <effort> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
-# agy — §3에서 이미 만든 터미널에 배정(agy만 --agent가 없어 pre-create가 여전히 필요, §0)
+  orca orchestration worker-start --task <task_id> --worktree current --agent codex --model <model> --effort <effort> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
+# agy — §3에서 이미 만든 터미널에 배정(agy만 --agent가 없어 pre-create가 여전히 필요, §0). --worktree
+# 생략 — <impl_handle>이 이미 그 worktree에 고정된 터미널이므로 --worktree active는 불필요하고, 지정하면
+# selector_not_found로 실패한다(라이브 확인).
 orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
-  orca orchestration worker-start --task <task_id> --worktree active --terminal <impl_handle> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
+  orca orchestration worker-start --task <task_id> --terminal <impl_handle> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
 # 위 세 갈래 중 이 subtask의 provider에 맞는 하나만 — wave 크기만큼 병렬로, 크기 규칙은 §3.
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43·#58 — worker-start에도
 # 동일하게 필요: stage:"input_accepted"는 실제 제출을 보장하지 않는다, 실측). codex는 --agent 경로도
