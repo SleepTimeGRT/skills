@@ -11,7 +11,7 @@ description: Use when generating the implementation for one task (issue) — pro
 
 - `orca status --json` ready. 실패 시 아래 "폴백".
 - feature worktree에서 실행 중이어야 한다(main 체크아웃에서 금지). 워커는 전부 `--worktree active`에 생성.
-- CLI 기반 세션(Codex/agy — 이 세션이든 §4가 스폰하는 워커든)은 launch 시 approval·sandbox를 명시한다. codex posture는 `--dangerously-bypass-approvals-and-sandbox` — 근거·예외(headless read-only 등)는 `~/.agents/orca-workflows/models/codex.md`가 정본이다. 안전 전제는 워크트리 격리이므로(§0 첫 불릿의 main 체크아웃 금지와 같은 전제), 격리 밖에서 이 posture로 launch하지 않는다.
+- claude/codex 워커는 `worker-start --agent`로 스폰한다 — approval/sandbox(codex: `--dangerously-bypass-approvals-and-sandbox` 상당)는 Orca 계정 레벨 Agent 설정 프리셋이 맡는다. `--permission-mode` 같은 per-dispatch 플래그는 없고, 필요하지도 않다(`orca-workflows/self-recovery.md`의 `worker-release` 절, 2026-08-08/2026-08-11 라이브 검증). 이 결정을 다시 열지 않는다. agy만 예외: `--agent agy`는 구조적으로 지원되지 않으므로(`orca account list`에 gemini/agy 슬롯 자체가 없음) §3의 `terminal create --command` 템플릿으로 approval/sandbox를 명시적으로 계속 지정한다 — 근거·예외(headless read-only 등)는 `~/.agents/orca-workflows/models/codex.md`/`models/agy.md`가 정본이다. 안전 전제는 워크트리 격리이므로(§0 첫 불릿의 main 체크아웃 금지와 같은 전제), 격리 밖에서 이 posture로 launch하지 않는다.
 - 모델·effort는 매 launch 전 아래 문서에서 subtask 유형(전사·기계적 / 통합·판단 / 아키텍처)에 맞게 고른다. 값을 이 스킬에 복제하지 않는다.
   - `~/.agents/orca-workflows/model-selection.md`
   - `~/.agents/orca-workflows/models/claude-code.md`
@@ -20,7 +20,7 @@ description: Use when generating the implementation for one task (issue) — pro
 - 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 —
   `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다. §3(launch)과 §5(대기)에서
   이 확인이 걸리는 지점을 표시한다.
-- **MCP 서버 인증 전제**(세션 시작 시 1회 확인) — §3에서 스폰하는 워커 터미널이 쓰는 MCP 서버
+- **MCP 서버 인증 전제**(세션 시작 시 1회 확인) — §3/§5에서 스폰하는 워커 터미널이 쓰는 MCP 서버
   (예: Context7)는 스폰 전에 이미 인증이 끝나 있거나, 워커 프로필에서 비활성화돼 있어야 한다. 로그인
   프롬프트가 스폰된 세션을 막으면 주입된 spec이 처리되지 않고 사람이 직접 ESC로 해제해야 한다 —
   dispatch spec마다 그때그때 예방 문구를 덧붙이는 방식은 막지 못하는 것이 실측됐다(issue #60). 막히면
@@ -106,18 +106,13 @@ subtask spec 필수 항목: ①구체적 작업 내용(코드 블록 포함 그�
 
 wave 크기는 고정 상한 없이 머신 리소스 상황을 보며 판단한다(§5 wave telemetry가 적정치 계측의 근거 데이터다) — 단 무제한이 아니다: 한 wave에서 스폰 실패·timeout 재시도가 2회 이상 발생하면 그 즉시 wave 크기를 3 이하로 제한하고 사용자에게 보고한다. provider는 자유 선택(claude-code/codex/agy 아무거나, 토큰 효율을 위해 섞어도 됨) — 단 `model-selection.md`의 "Quota check before pinning"에서 제외된 provider는 후보에서 뺀다. 모델·effort는 subtask 성격에 맞게 provider 문서에서 고른다.
 
-**스폰 커맨드는 아래 템플릿을 verbatim 복사한다 — 손으로 재타이핑·재조립하지 않는다.** placeholder(`<model>`/`<effort>`/`<n>`) 치환 외의 어떤 변형도 금지: 재조립 과정에서 플래그가 누락·변형된 실측 사례가 spawn-failures.md에 known signature로 등록돼 있다(issue #40 — `--permission-mode acceptEdits`로 틀어진 채 `--effort` 누락). 같은 이유로 빈 fallback shell을 만들어 거기에 커맨드를 쳐 넣는 경로를 쓰지 않는다 — 터미널은 항상 아래처럼 `terminal create --command`로 launch 문법을 함께 넘겨 생성한다.
+**claude/codex는 여기서 미리 스폰하지 않는다.** `worker-start --agent`가 터미널 생성과 task 배정을
+한 호출로 처리하므로(§0 참고 — approval/sandbox는 계정 프리셋이 맡는다), verbatim 템플릿은 `task_id`를
+이미 아는 §5의 wave 루프에 있다. 여기서 미리 만들 idle 터미널이 없다. **agy만 예외**(구조적으로
+`--agent agy`가 없음, §0) — 아래처럼 여기서 미리 띄운다:
 
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
-# claude
-orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
-  orca terminal create --worktree active --title task-impl-<n> \
-  --command "claude --model <model> --effort <effort> --dangerously-skip-permissions" --json
-# codex
-orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
-  orca terminal create --worktree active --title task-impl-<n> \
-  --command "codex --model <model> -c model_reasoning_effort=<effort> --dangerously-bypass-approvals-and-sandbox" --json
 # agy — 프롬프트는 파일에 먼저 쓰고 command substitution으로 전달한다(인라인 '<...>' quoting은
 # 괄호·따옴표·개행이 있는 프롬프트에서 라이브 셸 파싱 에러를 낸다 — orca-workflows/spawn-failures.md)
 prompt_file="$(mktemp "${TMPDIR:-/tmp}/agy-prompt-XXXXXX.txt")"
@@ -129,16 +124,6 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
   --command "agy -p \"\$(cat '$prompt_file')\" --model <model> --print-timeout 15m --dangerously-skip-permissions" --json
 orca terminal wait --terminal <impl-handle> --for tui-idle --timeout-ms 60000 --json   # agy는 --for exit --timeout-ms 960000
 ```
-
-**Wave telemetry(시작)** — 상한 재검토용 데이터를 쌓는다. 이 wave의 모든 터미널이 뜬 직후 1회:
-
-```bash
-# wave_start 로그 — ~/.agents/orca-workflows/logging.md §1 절차대로 waves-<오늘 UTC 날짜>.jsonl에 기록.
-# event="wave_start", issue=<issue-num>, wave_index=<n>, wave_size=<이 wave 터미널 수>,
-# nproc=$(sysctl -n hw.ncpu 2>/dev/null || nproc), ts_epoch=$(date -u +%s)
-```
-
-`nproc`(가용 코어 수)을 같이 남기는 이유: wave_size와 소요시간만으로는 CPU 경합 여부를 판단할 수 없다 — 같은 wave_size라도 머신 코어 수·provider 구성(§5 `assign` 로그의 `wave_index`와 join)에 따라 경합 여부가 달라지기 때문이다.
 
 `terminal wait`가 timeout이거나 생성 직후 `terminal read`에 셸 에러(예: `zsh: parse error`)가 보이면
 스폰 실패다 — 처음부터 재진단하지 않고 `~/.agents/orca-workflows/spawn-failures.md`에서 known
@@ -152,6 +137,11 @@ subtask가 worker_done을 보내기 전에 스스로 실행: typecheck, unit tes
 
 ## 5. Wave 루프
 
+**스폰 커맨드는 아래 템플릿을 verbatim 복사한다 — 손으로 재타이핑·재조립하지 않는다.** placeholder
+(`<model>`/`<effort>`/`<n>`/`<task_id>`) 치환 외의 어떤 변형도 금지: 재조립 과정에서 플래그가
+누락·변형된 실측 사례가 spawn-failures.md에 known signature로 등록돼 있다(issue #40 — `--permission-mode
+acceptEdits`로 틀어진 채 `--effort` 누락).
+
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 sidecar="$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-task-runner.txt"
@@ -161,29 +151,55 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
   orca orchestration task-list --ready --brief --json
 spec_sidecar="$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"   # §2에서 남긴 사이드카
 spec_text="$(cat "$spec_sidecar")"   # 지금 재구성하지 않는다 — §2에서 남긴 원문 그대로
+# claude
 orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
-  orca orchestration worker-start --task <task_id> --worktree active --terminal <impl_handle> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json   # wave 크기만큼 병렬 — 크기 규칙은 §3
+  orca orchestration worker-start --task <task_id> --worktree active --agent claude --model <model> --effort <effort> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
+# codex
+orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
+  orca orchestration worker-start --task <task_id> --worktree active --agent codex --model <model> --effort <effort> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
+# agy — §3에서 이미 만든 터미널에 배정(agy만 --agent가 없어 pre-create가 여전히 필요, §0)
+orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
+  orca orchestration worker-start --task <task_id> --worktree active --terminal <impl_handle> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
+# 위 세 갈래 중 이 subtask의 provider에 맞는 하나만 — wave 크기만큼 병렬로, 크기 규칙은 §3.
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43·#58 — worker-start에도
-# 동일하게 필요: stage:"input_accepted"는 실제 제출을 보장하지 않는다, 실측).
+# 동일하게 필요: stage:"input_accepted"는 실제 제출을 보장하지 않는다, 실측). codex는 --agent 경로도
+# `dispatch --inject`와 같은 MCP-boot-race를 탈 수 있다(issue #84 패턴, 2026-08-11 라이브 재현) — Orca가
+# 내부적으로 injection을 수행해 우리가 boot-quiesce를 직접 걸 지점이 없으므로, 이 케이스는 별도 재시도
+# 없이 self-recovery.md의 `dead` 판정(worker-abandon → worker-start --retry-of)에 맡긴다.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. dispatch와 같은 블록에서 즉시 실행(누락 방지).
 #  logging.md §1 assign 이벤트: role="subtask-impl", issue=<issue-num>, task_id=<task_id>, wave_index=<n>,
 #    subtask_type=<전사|통합|아키텍처>, provider/model/effort=resolved 값, terminal=<impl_handle>,
-#    worktree=<worktree 경로>. wave_index는 §3 wave_start 로그와 join한다.
+#    worktree=<worktree 경로>. wave_index는 아래 wave_start 로그와 join한다.
 #  logging.md §2 term 로그: skill="orca-task-runner", role="subtask-impl", terminal=<impl_handle>,
 #    meta 기록 후 sent.content=$spec_text(위 사이드카에서 로드한 값). recv는 아래 close 직전에
 #    기록한다(§5 마지막 블록). 사이드카는 여기서 지우지 않는다 — 삭제 시점·이유는 §5 마지막 블록.
 ```
 
-- **완료 대기와 self-recovery**: `~/.agents/orca-workflows/self-recovery.md`의 wait/recovery 루프를 그대로 따른다 — 이 wave의 각 subtask `task_id`를 pending set에 넣고, `check --wait`(+`--ack`)로 기다리다 타임아웃되면 그 파일의 alive/stuck_draft/dead 분기(`worker-abandon`→`worker-start --retry-of`)로 복구한다. `dead` 판정 후 재시도할 때는 새 worker 터미널을 §3의 launch 템플릿으로 다시 띄운다(모델·effort는 같은 subtask이므로 재-resolve 없이 그대로 재사용).
+**Wave telemetry(시작)** — 상한 재검토용 데이터를 쌓는다. 이 wave의 모든 subtask에 대해 위 스폰 호출을
+전부 낸 직후 1회(claude/codex는 스폰과 dispatch가 한 호출이므로, agy까지 포함해 이 wave가 실제로
+"뜬" 시점은 여기다 — §3에서 미리 뜨는 건 agy뿐):
+
+```bash
+# wave_start 로그 — ~/.agents/orca-workflows/logging.md §1 절차대로 waves-<오늘 UTC 날짜>.jsonl에 기록.
+# event="wave_start", issue=<issue-num>, wave_index=<n>, wave_size=<이 wave 터미널 수>,
+# nproc=$(sysctl -n hw.ncpu 2>/dev/null || nproc), ts_epoch=$(date -u +%s)
+```
+
+`nproc`(가용 코어 수)을 같이 남기는 이유: wave_size와 소요시간만으로는 CPU 경합 여부를 판단할 수 없다 — 같은 wave_size라도 머신 코어 수·provider 구성(위 `assign` 로그의 `wave_index`와 join)에 따라 경합 여부가 달라지기 때문이다.
+
+- **완료 대기와 self-recovery**: `~/.agents/orca-workflows/self-recovery.md`의 wait/recovery 루프를 그대로 따른다 — 이 wave의 각 subtask `task_id`를 pending set에 넣고, `check --wait`(+`--ack`)로 기다리다 타임아웃되면 그 파일의 alive/stuck_draft/dead 분기(`worker-abandon`→`worker-start --retry-of`)로 복구한다. `dead` 판정 후 재시도할 때는 위 스폰 템플릿(해당 provider 갈래) 그대로 다시 띄운다(모델·effort는 같은 subtask이므로 재-resolve 없이 그대로 재사용).
 - decision_gate(워커 ask) → 판단 가능하면 `reply`, 불가하면 `orca-workflow-task`에 에스컬레이션.
 - **`orca_call_with_retry` exhausted로 인한 worker_done 유실**(위 self-recovery와는 다른 시나리오 — Orca 오케스트레이션 API 자체에 닿을 수 없는 경우, issue #41/#42): 커밋/산출물/worktree 루트의 `.orca-orphaned-result-<task_id>.json`(⑦의 exhausted 폴백 산출물) 확인 + `task-update --status completed` 수동 복구, 기록. orphan 파일은 복구 반영 후 삭제한다.
-- **완료 확인된 subtask 터미널은 즉시 닫는다** — wave 전체를 기다리지 않고, 그 subtask의 `worker_done` 수신(taskId+dispatchId 일치) 또는 위 유실 복구가 끝나는 즉시:
+- **완료 확인된 subtask 터미널은 즉시 정리한다** — wave 전체를 기다리지 않고, 그 subtask의 `worker_done` 수신(taskId+dispatchId 일치) 또는 위 유실 복구가 끝나는 즉시:
 
   ```bash
   read_json="$(orca terminal read --terminal <impl_handle> --json)"
   # recv 이벤트 — logging.md §2 "첫 read" 레시피대로 $read_json에서 tail/nextCursor를 뽑아
   # term-<impl_handle>.jsonl에 append(이 터미널은 §5에서 sent만 기록했고 이후 한 번도 read하지
   # 않았으므로, 이 read가 곧 유일한 recv).
+  # claude/codex (worker-start --agent로 스폰 -- ownershipState: "owned"):
+  orca orchestration worker-release --dispatch <dispatch_id> --json
+  # agy (worker-start --terminal로 스폰 -- ownershipState: "external", worker-release는 no-op이라 쓰지 않는다):
   orca terminal close --terminal <impl_handle> --tab --json
   rm -f "$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"   # 사이드카 회수는 여기서
   # 한다 — §5 dispatch 블록에서 즉시 지우면, 같은 task_id를 재스폰하는 스폰 실패 재시도나
@@ -192,9 +208,21 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
   # 기록할 수 있다.
   ```
 
-  `--tab`을 반드시 붙인다 — 실측 결과 `--tab` close는 기저 프로세스를 실제로 종료시키고 메모리를 회수하지만(`diagnostics memory`에서 세션이 사라짐), `--tab` 없는 close는 pane만 닫고 프로세스가 남을 수 있다. close 전에 `term-<impl_handle>.jsonl`에 마지막 `recv`를 남기는 이유는 close하면 스크롤백이 사라져서, §6 task-레벨 게이트가 나중에 실패했을 때 "이 subtask가 뭘 했는지" 재확인할 방법이 없어지기 때문이다. worker_done/유실 복구 둘 다 확인 전에는(단순히 활동이 멈췄다는 이유만으로는) 닫지 않는다 — 아직 파일 쓰기·커밋이 끝나지 않은 프로세스를 죽일 위험이 있다. 이 close는 §3에서 매 wave 새 터미널을 스폰하는 구조라 재사용 대상이 없다는 전제 위에서만 안전하다 — 이 스킬 밖(범용 `orchestration`, `orca-workflow-task` 자체 relay 터미널)에는 적용하지 않는다.
+  claude/codex는 `worker-release`가 archive를 먼저 보존한 뒤 정확히 이 dispatch가 소유한 에이전트
+  터미널만 닫는다(post-completion cleanup, cancel 아님) — `release_pending`/`release_unknown`이 오면
+  `terminal close`로 대체하지 않고 응답이 지시하는 복구 동작을 그대로 따른다. agy는 `--tab` close를
+  반드시 붙인다 — 실측 결과 `--tab` close는 기저 프로세스를 실제로 종료시키고 메모리를 회수하지만
+  (`diagnostics memory`에서 세션이 사라짐), `--tab` 없는 close는 pane만 닫고 프로세스가 남을 수 있다.
+  정리 전에 `term-<impl_handle>.jsonl`에 마지막 `recv`를 남기는 이유는 클로즈/릴리스 후 스크롤백이
+  사라져서, §6 task-레벨 게이트가 나중에 실패했을 때 "이 subtask가 뭘 했는지" 재확인할 방법이
+  없어지기 때문이다(단 claude/codex는 `worker-release`의 archive 덕분에 이후에도 `worker-read`로 다시
+  읽을 수 있다 — recv 로그는 그와 별개로 `logging.md`의 계약이라 여전히 남긴다). worker_done/유실 복구
+  둘 다 확인 전에는(단순히 활동이 멈췄다는 이유만으로는) 정리하지 않는다 — 아직 파일 쓰기·커밋이
+  끝나지 않은 프로세스를 죽일 위험이 있다. 이 정리는 매 wave 새 터미널을 스폰하는 구조라 재사용
+  대상이 없다는 전제 위에서만 안전하다 — 이 스킬 밖(범용 `orchestration`, `orca-workflow-task` 자체
+  relay 터미널)에는 적용하지 않는다.
 
-**Wave telemetry(종료)** — 이 wave의 모든 subtask가 완료(worker_done 또는 수동 복구)된 직후 1회, §3 `wave_start`와 같은 `issue`+`wave_index`로 join되도록:
+**Wave telemetry(종료)** — 이 wave의 모든 subtask가 완료(worker_done 또는 수동 복구)된 직후 1회, 위 `wave_start`와 같은 `issue`+`wave_index`로 join되도록:
 
 ```bash
 start_epoch="$(find ~/.local/state/orca-workflows/logs -name 'waves-*.jsonl' 2>/dev/null | sort | xargs cat 2>/dev/null | jq -r --arg issue "<issue-num>" --argjson wi <n> \
