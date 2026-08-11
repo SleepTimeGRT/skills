@@ -2,10 +2,10 @@
 `--ack "<result.deliveryId>"` with `--peek` on one line -- but `check --peek` never exposes a
 `deliveryId` in its response, so any batch it returns can never be acked and gets replayed by the
 loop's next `check --wait`, confirmed live against Orca 1.4.178 three times in the same session
-this issue was filed from). The fix splits the two concerns: `--ack` always targets this
-iteration's own `$result` (the loop's non-peek `check --wait` at the top, the only call that ever
-exposes a `deliveryId`), and the next batch is only ever fetched by looping back to that same
-non-peek call -- never by `--peek`.
+this issue was filed from). The fix: `--ack` always targets a `deliveryId` this same loop's own
+prior `check --wait` returned (carried forward as `prev_delivery_id`, see issue #147's
+tests/test_ack_wait_combined.py for the mechanics) -- never a `--peek` response, and the next
+batch is only ever fetched by looping back to that same non-peek call, never by `--peek`.
 """
 from __future__ import annotations
 
@@ -35,18 +35,17 @@ def test_no_ack_call_combines_peek():
         )
 
 
-def test_mandatory_ack_derives_delivery_id_from_loop_result():
+def test_mandatory_ack_derives_delivery_id_from_prev_delivery_id():
     text = SELF_RECOVERY_MD.read_text()
     idx = text.index('orca orchestration check --run "$RUN_ID" --ack')
     line_end = text.index("\n", idx)
     ack_line = text[idx:line_end]
-    assert "$result" in ack_line
-    assert ".result.deliveryId" in ack_line
+    assert "$prev_delivery_id" in ack_line
 
 
 def test_peek_ack_incompatibility_documented():
     text = SELF_RECOVERY_MD.read_text()
-    assert "Never combine this `--ack` call with `--peek`" in text
+    assert "Never combine `--ack` with `--peek`" in text
     assert "stale_delivery" in text
     assert "#134" in text
 
