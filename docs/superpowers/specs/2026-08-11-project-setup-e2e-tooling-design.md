@@ -88,8 +88,11 @@ YAML 기반 시나리오, 재실행 가능. 에뮬레이터가 이미 부팅돼 
 **§1 Issue tracker**: `docs/agents/issue-tracker.md`가 있으면 스킵. 없으면 "이 repo가 GitHub Issues를
 쓰나요, 다른 트래커를 쓰나요?"를 묻는다. GitHub면 **문서를 만들지 않고 종료**(숫자 ID 폴백을 그대로
 유지 — `selection.md`의 무-온보딩 경로가 안 깨진다). 다른 트래커면 트래커 종류 + 연결 정보(Jira: site·
-cloudId·project key 등) + 완료 상태/transition 이름 + AC 섹션 이름을 물어 초안 작성 → 승인 → 별도의
-작은 커밋으로 반영(기존 `orca-workflow` §0 인라인 로직을 그대로 이관, 동작 변경 없음).
+cloudId·project key 등) + 완료 상태/transition 이름을 물어 초안 작성 → 승인 → 별도의 작은 커밋으로
+반영(기존 `orca-workflow` §0 인라인 로직을 그대로 이관, 동작 변경 없음 — AC 섹션 이름은 여기서 묻지
+않는다: AC는 저장소 설정 시점의 고정값이 아니라 이슈마다 매번 새로 협상되는 값이고,
+`orca-evaluate` §1의 contract negotiation이 이미 소유하고 있다. `jira.md`/`github.md`/
+`contract-schema.md` 중 어느 adapter도 tracker 문서에서 AC 섹션 필드를 읽지 않는다).
 
 **§2 E2E tooling**: `docs/agents/e2e-tooling.md`가 있으면 스킵. 없으면 무조건 묻는다(GitHub 같은
 무조건-기본값이 없다) — Platform(예시 제시) + Tool + Usage guidance + Precondition. Platform으로
