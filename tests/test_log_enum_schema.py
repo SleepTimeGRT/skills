@@ -222,9 +222,11 @@ def test_orca_set_version_bumped():
     # issue's proposal-r3.json scope).
     # then again per issue #113 (v1.1.7 -> v1.1.8, set member orca-workflow-task touched by that
     # issue's proposal-r2.json scope).
+    # then again per issue #141 (v1.1.8 -> v1.1.9, set members orca-workflow-task/orca-task-runner
+    # touched by that issue's proposal scope).
     # Invariant unchanged: exact version string + 6-member list are still both enforced.
     lines = [l for l in SET_VERSION.read_text().splitlines() if l.strip()]
-    assert lines[0] == "v1.1.8"
+    assert lines[0] == "v1.1.9"
     assert sorted(lines[1:]) == sorted(
         [
             "orca-evaluate",
@@ -339,3 +341,33 @@ def test_ac7_matcher_accepts_pinned_template():
         "no rewrite needed\n"
     )
     assert ac7_comment_matches(valid) is True
+
+
+# ---------------------------------------------------------------------------
+# issue #141 -- FAIL-retry dispatch must name both eval-report and the
+# finalized contract, in order (a real observed failure: a retry session
+# deleted a contractually-required public API signature it never saw because
+# only eval-report-a<attempt>.json was in its dispatch spec)
+# ---------------------------------------------------------------------------
+
+
+def test_workflow_task_fail_retry_template_orders_both_pointers():
+    text = WORKFLOW_TASK_SKILL.read_text()
+    start = text.index('spec_text="<issue 번호 + CONTRACT_DIR 절대경로 + 구현 모드')
+    end = text.index("**GATE_FAIL 라우팅**")
+    window = text[start:end]
+    assert "eval-report-a<attempt>.json" in window
+    assert "proposal-r<확정라운드>.json" in window
+    assert window.index("eval-report-a<attempt>.json") < window.index("proposal-r<확정라운드>.json")
+
+
+def test_workflow_task_skill_fail_routing_references_section_2_template():
+    text = WORKFLOW_TASK_SKILL.read_text()
+    # tightened per this task's own review finding: the §4 restatement of the FAIL-retry
+    # dispatch previously drifted stale (said "attempt 번호만 넣는다", eval-report only) after
+    # §2 was fixed -- this asserts it can't silently drift back to that.
+    assert "spec에 방금 FAIL한 attempt 번호만 넣는다" not in text
+    start = text.index("- FAIL → 재시도 카운터 확인")
+    end = text.index("- ESCALATE →")
+    window = text[start:end]
+    assert "proposal-r<확정라운드>.json" in window
