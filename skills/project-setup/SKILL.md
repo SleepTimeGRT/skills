@@ -17,7 +17,9 @@ Code의 질문 UI)의 이름을 이 문서 본문에 넣지 않는다. 플랫폼
 
 없으면 사용자에게 직접 묻는다: ①이 repo가 GitHub Issues를 쓰는지, 다른 트래커(Jira/Linear 등)를
 쓰는지 ②(GitHub가 아니면) 그 tracker의 API를 부르는 데 필요한 최소 정보(Jira라면 site·cloudId·
-project key) ③"완료" transition/상태 이름 ④acceptance-criteria가 적히는 섹션 이름.
+project key) ③"완료" transition/상태 이름. (acceptance-criteria가 적히는 섹션 이름은 여기서 묻지
+않는다 — AC는 저장소 설정 시점의 고정값이 아니라 이슈마다 매번 새로 협상되는 값이고,
+`orca-evaluate` §1의 contract negotiation이 이미 소유한다.)
 
 **GitHub면 문서를 만들지 않고 이 섹션을 종료한다** — 숫자 ID 폴백(`~/.agents/orca-workflows/
 issue-trackers/selection.md` §2)이 문서 부재를 전제로 동작하므로, 여기서 GitHub 전용 문서를 만들면
