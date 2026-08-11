@@ -33,6 +33,7 @@ install -d -m 700 "$CONTRACT_DIR"
 | `proposal-r<n>.json` | orca-task-runner (generator) | 라운드 n 제안 |
 | `verdict-r<n>.json` | orca-evaluate (evaluator) | 라운드 n 판정 |
 | `override.json` | orca-task-runner | 2라운드에도 rejected일 때 결정권 행사 기록 |
+| `gate-flake-a<k>.json` | orca-task-runner (generator) | attempt k의 task 게이트가 재시도 후 통과(flake 재분류)했을 때만 |
 | `eval-report-a<k>.json` | orca-evaluate (evaluator) | 구현 attempt k의 평가 판정 기록 |
 
 ## proposal-r&lt;n&gt;.json
@@ -100,11 +101,49 @@ install -d -m 700 "$CONTRACT_DIR"
 - 2라운드에도 rejected일 때만 존재한다. evaluator의 verdict 파일은 수정하지 않는다 — 판정은
   rejected로 남고, 진행 결정만 여기 기록된다. `unresolved_reasons`는 `verdict-r2.json`의
   `reasons` 중 generator가 해소하지 못한 항목을 그대로 복사한다.
-- **override의 라우팅은 무조건 진행이 아니다** — 코디네이터(`orca-workflow-task` §1)가 이 파일의
-  `unresolved_reasons[].target`만 기계적으로 확인해 분기한다: `ac_fidelity`가 하나라도 남아 있으면
-  "무엇을 만들지" 자체에 이견이 남은 것이므로 코드 생성 없이 human escalate(`CONTRACT_ESCALATE`),
-  `plan_coverage`만 남았으면 검증 방법 이견일 뿐이므로 진행(그 항목은 `orca-evaluate` §3 리뷰어의
-  집중 검토 입력이 된다). 숫자 임계치가 아니라 target 범주가 기준이다.
+- **override의 라우팅은 무조건 진행이 아니다** — 코디네이터(`orca-workflow-task` §1)가 기계적으로
+  분기하되, **라우팅 입력은 이 파일이 아니라 evaluator 소유의 `verdict-r2.json`이다**:
+  `verdict-r2.json`의 `reasons[].target`에 `ac_fidelity`가 하나라도 있으면 "무엇을 만들지" 자체에
+  이견이 남은 것이므로 코드 생성 없이 human escalate(`CONTRACT_ESCALATE`), `plan_coverage`만 있으면
+  검증 방법 이견일 뿐이므로 진행(그 항목은 `orca-evaluate` §3 리뷰어의 집중 검토 입력이 된다).
+  숫자 임계치가 아니라 target 범주가 기준이다. `unresolved_reasons`를 라우팅 입력으로 쓰지 않는
+  이유: 이 파일은 generator가 쓰고, 어떤 항목을 "해소했다"고 볼지도 generator가 정한다 — 2라운드
+  한도 뒤에는 그 "해소"를 검증할 evaluator 라운드가 없으므로, generator의 자기 필터를 라우팅
+  기준으로 삼으면 자기평가 편향이 게이트를 그대로 통과한다
+  (`docs/references/anthropic-harness-design-long-running-apps.md`의 self-evaluation 편향 — 이
+  스키마의 "적대적 판정 지침"이 존재하는 이유와 같다). `unresolved_reasons`는 generator가 무엇을
+  우려로 인정했는지의 **기록**으로만 남는다.
+
+## gate-flake-a&lt;k&gt;.json
+
+```json
+{
+  "schema_version": 1,
+  "issue": "<issue id>",
+  "attempt": 1,
+  "gates": [
+    {
+      "gate": "e2e",
+      "failed_attempts": [
+        {"n": 1, "log": ".gate-e2e.attempt1.log", "spec": "<실패 spec 파일명>", "first_error": "<에러 첫 줄>"}
+      ],
+      "passed_attempt": 2
+    }
+  ],
+  "known_flake_list": "<대조한 목록 경로, 없으면 null>",
+  "known_flake_matched": ["<목록과 일치한 spec 파일명...>"]
+}
+```
+
+- generator(`orca-task-runner` §6)가 쓴다 — **task 게이트의 어떤 시도가 실패하고 이후 시도가
+  통과했을 때만**. 파일 부재 = flake 재분류가 없었다는 뜻이므로, 첫 시도에 전부 통과한 attempt에는
+  만들지 않는다. `<k>`는 `eval-report-a<k>.json`과 같은 구현 attempt 번호.
+- 소비자는 `orca-evaluate` §3의 code-reviewer다(리뷰어 입력 ⑧) — "재실행 green"이 정말 이 diff와
+  무관한 flake였는지는 generator 자신이 아니라 리뷰어가 판정한다. 코디네이터
+  (`orca-workflow-task`)는 이 파일을 읽지 않고 존재 여부도 중계하지 않는다 — evaluator가
+  결정론적 경로로 직접 확인한다.
+- `gate`는 `"e2e"` 또는 `"pgtap"`. `first_error`는 attempt 로그에서 추출한 에러 첫 줄 —
+  로그 전문을 넣지 않는다(로그 파일 자체는 worktree에 남아 있고 `log` 필드가 가리킨다).
 
 ## eval-report-a&lt;k&gt;.json
 

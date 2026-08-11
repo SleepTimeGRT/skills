@@ -313,16 +313,20 @@ bash -lc '<repo의 pgTAP 커맨드, 예: pg_prove> > <worktree 루트>/.gate-pgt
 
 실패 시 subtask 게이트(§4)와 같은 방식으로 스스로 고치고 재시도한다. 단 subtask 게이트와 달리 **재시도 한도 2회**(무한 자가치유가 아니다 — `orca-workflow-task` §4의 evaluate-FAIL 재시도 한도와 같은 숫자로 맞췄다). 2회 시도 후에도 통과 못하면 `orca-evaluate`를 호출하지 않고 `orca-workflow-task`에 **`GATE_FAIL`**을 직접 반환한다 — 기계적으로도 안 돌아가는 코드를 agent e2e·code review 같은 비싼 단계에 태울 이유가 없다.
 
-**재시도 후 통과("flake"로 재분류)를 §7 반환값 없이 조용히 넘기지 않는다.** 1회차가 실패하고 이후
-시도가 통과해 게이트를 넘겼다면, §7 반환값에 다음을 반드시 포함한다: 실패했던 attempt의 spec
-파일명·에러 첫 줄(위 attempt 로그에서 추출), 그리고 레포에 알려진 flake 목록(예:
-`.claude/memory/project_known_flaky_e2e.md`, 존재하는 repo에 한함)이 있으면 그 목록과 대조한 결과.
-이 기록이 없으면 `orca-evaluate`·`orca-workflow-task`가 "이 diff와 무관한 flake였다"는 재실행측 판단을 사후에
-검증할 방법이 없다 — 재실행-green과 "게이트 통과"를 구분하지 못하게 된다.
+**재시도 후 통과("flake"로 재분류)를 기록 없이 조용히 넘기지 않는다.** 1회차가 실패하고 이후
+시도가 통과해 게이트를 넘겼다면, `CONTRACT_DIR/gate-flake-a<attempt>.json`을 쓴다(스키마·필드 의미는
+`~/.agents/orca-workflows/contract-schema.md`의 해당 절 — 실패 attempt의 spec 파일명·에러 첫 줄을 위
+attempt 로그에서 추출하고, 레포에 알려진 flake 목록(예: `.claude/memory/project_known_flaky_e2e.md`,
+존재하는 repo에 한함)이 있으면 그 대조 결과 포함). **산문 반환값이 아니라 파일인 이유**: 이 증거의
+소비자는 `orca-evaluate` §3의 code-reviewer인데, 반환값은 "본문을 읽지 않는" `orca-workflow-task`를
+거치므로 산문에 실으면 소비자에게 도달할 경로가 없다 — evaluator가 결정론적 경로로 직접 읽는다.
+이 기록이 없으면 "이 diff와 무관한 flake였다"는 재실행측 판단을 사후에 검증할 방법이 없다 —
+재실행-green과 "게이트 통과"를 구분하지 못하게 된다. 첫 시도에 전부 통과했으면 파일을 만들지
+않는다(부재 자체가 신호다).
 
 ## 7. 완료
 
-Task 레벨 게이트(§6)를 통과하면 → task 전체 diff를 정리해 `orca-workflow-task`에 반환한다(diff 경로 + resolved providers/models + wave 구성 기록 + (§6에서 재시도 후 통과한 경우) flake 증거: 실패 attempt의 spec 파일명·에러 첫 줄 + 알려진 flake 목록 대조 결과). **`orca-evaluate`는 이 스킬이 직접 호출하지 않는다** — `orca-workflow-task`가 호출한다. (§6에서 `GATE_FAIL`을 반환한 경우엔 diff를 넘기지 않는다 — 그 자체가 반환값이다.)
+Task 레벨 게이트(§6)를 통과하면 → task 전체 diff를 정리해 `orca-workflow-task`에 반환한다(diff 경로 + resolved providers/models + wave 구성 기록). flake 증거는 반환값에 싣지 않는다 — §6이 이미 `CONTRACT_DIR/gate-flake-a<attempt>.json`으로 남겼고, `orca-evaluate`가 그 경로를 직접 읽는다. **`orca-evaluate`는 이 스킬이 직접 호출하지 않는다** — `orca-workflow-task`가 호출한다. (§6에서 `GATE_FAIL`을 반환한 경우엔 diff를 넘기지 않는다 — 그 자체가 반환값이다.)
 
 **Evaluate-FAIL 재시도로 재호출된 경우**(spec에 attempt 번호가 있음): contract 협상(§1)을 다시 하지 않는다 — 확정 AC는 그대로다. `CONTRACT_DIR`의 `eval-report-a<attempt>.json`과 `proposal-r<확정라운드>.json`을 이 순서로 직접 읽고(`orca-workflow-task`는 findings 본문도 확정 AC 본문도 중계하지 않는다 — `~/.agents/orca-workflows/contract-schema.md`의 "확정 AC의 정본"), 그 수정에 필요한 만큼만 §2~§5를 다시 태운 뒤 §6 task-레벨 게이트를 전체 재통과시키고 위 §7 반환을 반복한다. 수정 결과에 대한 서술형 해명을 evaluator에게 보내지 않는다 — 재평가의 입력은 diff의 사실 변화뿐이다(같은 문서의 "재시도 입력 격리").
 

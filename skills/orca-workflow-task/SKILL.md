@@ -71,13 +71,22 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
 if [ ! -f "<CONTRACT_DIR>/override.json" ]; then
   # 라운드 한도에 도달했는데 override.json이 없다 — generator가 §1의 기록 계약을 어긴 것.
   # 기록 없는 진행을 허용하지 않는다(fail-closed): outcome=CONTRACT_ESCALATE로 남기고 §5로.
-elif jq -e '[.unresolved_reasons[].target] | index("ac_fidelity")' "<CONTRACT_DIR>/override.json" >/dev/null; then
+elif [ ! -f "<CONTRACT_DIR>/verdict-r2.json" ]; then
+  # override는 있는데 최종 라운드 verdict가 없다 — evaluator 판정 없이 진행 기록만 있는 상태.
+  # 마찬가지로 fail-closed: outcome=CONTRACT_ESCALATE로 남기고 §5로.
+elif jq -e '[.reasons[].target] | index("ac_fidelity")' "<CONTRACT_DIR>/verdict-r2.json" >/dev/null; then
   # AC 자체("무엇을 만들지")에 이견이 남음 — 생성 비용을 쓰기 전에 사람에게 보낸다.
+  # 라우팅 입력은 generator가 쓴 override.json이 아니라 evaluator 소유의 verdict-r2.json이다
+  # (라운드 한도 = 2, §1 상단): override의 unresolved_reasons는 generator가 "해소 못 한" 항목만
+  # 골라 담은 자기 필터라, 그걸 기준으로 삼으면 generator가 ac_fidelity 반려를 "해소했다"고
+  # 자평하는 순간 이 게이트가 뚫린다 — 2라운드 뒤에는 그 자평을 검증할 evaluator 라운드가 없다
+  # (contract-schema.md override 절, docs/references/anthropic-harness-design-long-running-apps.md의
+  # self-evaluation 편향).
   # logging.md §1 outcome 레시피대로 outcome=CONTRACT_ESCALATE, round=<도달한 라운드 수>를 남기고
   # §2 없이 곧장 §5로.
 else
-  # plan_coverage 이견만 남음 — 검증 방법 이견은 §3 리뷰·e2e가 최종 AC 기준으로 재검증하므로 진행.
-  # logging.md §1 outcome 레시피대로 outcome=CONTRACT_FINALIZED_BY_GENERATOR,
+  # 최종 verdict의 반려가 plan_coverage뿐 — 검증 방법 이견은 §3 리뷰·e2e가 최종 AC 기준으로
+  # 재검증하므로 진행. logging.md §1 outcome 레시피대로 outcome=CONTRACT_FINALIZED_BY_GENERATOR,
   # round=<도달한 라운드 수>를 남기고 §2로 (issue #63).
 fi
 ```
