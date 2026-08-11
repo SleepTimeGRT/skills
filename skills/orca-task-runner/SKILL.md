@@ -15,7 +15,31 @@ description: Use when generating the implementation for one task (issue) — pro
   `--agent`·`--terminal` 두 조합 모두에서 `selector_not_found`로 항상 실패한다(라이브 확인, 2026-08-11).
   `--agent` 호출은 `--worktree current`를 쓰고, `--terminal` 호출은 터미널 핸들이 이미 worktree를
   고정하므로 `--worktree`를 아예 생략한다 — §5 템플릿 참조.
-- claude/codex 워커는 `worker-start --agent`로 스폰한다 — approval/sandbox(codex: `--dangerously-bypass-approvals-and-sandbox` 상당)는 Orca 계정 레벨 Agent 설정 프리셋이 맡는다. `--permission-mode` 같은 per-dispatch 플래그는 없고, 필요하지도 않다(`orca-workflows/self-recovery.md`의 `worker-release` 절, 2026-08-08/2026-08-11 라이브 검증). 이 결정을 다시 열지 않는다. agy만 예외: `--agent agy`는 구조적으로 지원되지 않으므로(`orca account list`에 gemini/agy 슬롯 자체가 없음) §3의 `terminal create --command` 템플릿으로 approval/sandbox를 명시적으로 계속 지정한다 — 근거·예외(headless read-only 등)는 `~/.agents/orca-workflows/models/codex.md`/`models/agy.md`가 정본이다. 안전 전제는 워크트리 격리이므로(§0 첫 불릿의 main 체크아웃 금지와 같은 전제), 격리 밖에서 이 posture로 launch하지 않는다.
+- claude 워커는 `worker-start --agent`로 스폰한다 — approval/sandbox는 Orca 계정 레벨 Agent 설정
+  프리셋이 맡는다. `--permission-mode` 같은 per-dispatch 플래그는 없고, 필요하지도 않다
+  (`orca-workflows/self-recovery.md`의 `worker-release` 절, 2026-08-08/2026-08-11 라이브 검증). 이
+  결정을 다시 열지 않는다.
+- **codex는 `--agent`를 쓰지 않는다(2026-08-11 라이브 재현으로 확정, MCP 부팅 대기와 무관).**
+  `worker-start --agent codex`는 codex TUI가 첫 프레임을 그리기도 전에 bracketed-paste로 task
+  프롬프트를 흘려보낸다 — 그 시점 터미널엔 아직 codex 프로세스의 alt-screen도 없으므로 paste는
+  스크롤백 잡음으로 사라지고 composer는 계속 빈 placeholder로 남는다(직접 `terminal read`로 확인,
+  이후 40초+ 관찰해도 회복 안 됨). `worker-show`는 이 상태에서도 `stage:"input_accepted"`를 반환한다
+  — 이 필드는 제출은커녕 **도달**도 보장하지 않는다. 반대로 터미널을 미리 만들어 완전히 정착시킨
+  뒤(§3 pre-create + `dispatch-verify.md`의 boot-quiesce 확인) `worker-start --terminal`로 배정하면
+  같은 프롬프트가 정상 전달되고 codex가 실제로 작업을 시작한다(같은 세션에서 직접 검증). 그러므로
+  codex는 agy와 같은 `--terminal` pre-create 경로를 쓴다 — 단 이유는 다르다: agy는 `--agent agy`가
+  구조적으로 없어서(아래), codex는 `--agent codex`가 있지만 그 내부 injection 타이밍이 codex TUI 준비
+  전이라 신뢰할 수 없어서다. `worker-release`는 codex에는 쓰지 않는다 — `--terminal` 경로로 배정한
+  dispatch는 provider와 무관하게 `ownershipState: "external"`이 되고, 그 상태의 `worker-release`는
+  `releaseState: "not_requested"`로 아무 것도 안 하는 형식적 no-op이다(라이브 확인, 2026-08-11 —
+  release 호출 후에도 터미널이 `terminal list`에 그대로 남음). agy도 원래부터 같은 이유로
+  `worker-release`를 쓰지 않았다 — codex가 새로 그 그룹에 합류한 것뿐이다.
+- agy만 `--agent` 자체가 없음: `--agent agy`는 구조적으로 지원되지 않으므로(`orca account list`에
+  gemini/agy 슬롯 자체가 없음) §3의 `terminal create --command` 템플릿으로 approval/sandbox를
+  명시적으로 계속 지정한다 — 근거·예외(headless read-only 등)는
+  `~/.agents/orca-workflows/models/codex.md`/`models/agy.md`가 정본이다. codex·agy 둘 다 안전 전제는
+  워크트리 격리이므로(§0 첫 불릿의 main 체크아웃 금지와 같은 전제), 격리 밖에서 이 posture로 launch
+  하지 않는다.
 - 모델·effort는 매 launch 전 아래 문서에서 subtask 유형(전사·기계적 / 통합·판단 / 아키텍처)에 맞게 고른다. 값을 이 스킬에 복제하지 않는다.
   - `~/.agents/orca-workflows/model-selection.md`
   - `~/.agents/orca-workflows/models/claude-code.md`
@@ -110,13 +134,22 @@ subtask spec 필수 항목: ①구체적 작업 내용(코드 블록 포함 그�
 
 wave 크기는 고정 상한 없이 머신 리소스 상황을 보며 판단한다(§5 wave telemetry가 적정치 계측의 근거 데이터다) — 단 무제한이 아니다: 한 wave에서 스폰 실패·timeout 재시도가 2회 이상 발생하면 그 즉시 wave 크기를 3 이하로 제한하고 사용자에게 보고한다. provider는 자유 선택(claude-code/codex/agy 아무거나, 토큰 효율을 위해 섞어도 됨) — 단 `model-selection.md`의 "Quota check before pinning"에서 제외된 provider는 후보에서 뺀다. 모델·effort는 subtask 성격에 맞게 provider 문서에서 고른다.
 
-**claude/codex는 여기서 미리 스폰하지 않는다.** `worker-start --agent`가 터미널 생성과 task 배정을
-한 호출로 처리하므로(§0 참고 — approval/sandbox는 계정 프리셋이 맡는다), verbatim 템플릿은 `task_id`를
-이미 아는 §5의 wave 루프에 있다. 여기서 미리 만들 idle 터미널이 없다. **agy만 예외**(구조적으로
-`--agent agy`가 없음, §0) — 아래처럼 여기서 미리 띄운다:
+**claude는 여기서 미리 스폰하지 않는다.** `worker-start --agent`가 터미널 생성과 task 배정을 한
+호출로 처리하므로(§0 참고 — approval/sandbox는 계정 프리셋이 맡는다), verbatim 템플릿은 `task_id`를
+이미 아는 §5의 wave 루프에 있다. **codex·agy는 여기서 미리 띄운다** — codex는 `--agent codex`의
+injection이 TUI 준비 전에 일어나 유실되므로(§0), agy는 `--agent agy` 자체가 없으므로:
 
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
+# codex
+orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
+  orca terminal create --worktree active --title task-impl-<n> \
+  --command "codex '--dangerously-bypass-approvals-and-sandbox'" --json
+orca terminal wait --terminal <impl-handle> --for tui-idle --timeout-ms 60000 --json
+# tui-idle만으로는 부족하다(§0) — dispatch-verify.md "Pre-dispatch — freshly launched REPL은
+# boot-quiesce 확인 후에만 inject (issue #84)"의 cursor-diff quiesce 확인을 여기서 실행하고, 통과할
+# 때까지(스폰 timeout 예산 내) §5의 worker-start --terminal을 보류한다.
+
 # agy — 프롬프트는 파일에 먼저 쓰고 command substitution으로 전달한다(인라인 '<...>' quoting은
 # 괄호·따옴표·개행이 있는 프롬프트에서 라이브 셸 파싱 에러를 낸다 — orca-workflows/spawn-failures.md)
 prompt_file="$(mktemp "${TMPDIR:-/tmp}/agy-prompt-XXXXXX.txt")"
@@ -131,7 +164,8 @@ orca terminal wait --terminal <impl-handle> --for tui-idle --timeout-ms 60000 --
 
 `terminal wait`가 timeout이거나 생성 직후 `terminal read`에 셸 에러(예: `zsh: parse error`)가 보이면
 스폰 실패다 — 처음부터 재진단하지 않고 `~/.agents/orca-workflows/spawn-failures.md`에서 known
-signature부터 확인한다.
+signature부터 확인한다. codex는 이 실패 판정과 별개로, boot-quiesce가 스폰 timeout 예산 안에 끝나지
+않으면 자체적으로 재시도하지 않고 그 사실을 로그에 남긴 뒤 §5 dispatch를 보류·보고한다.
 
 (구현자는 빌드·테스트 실행이 필요해 Bash 전체 허용 — worktree 격리가 전제. 권한 stall 발견 시 조합을 조정하고 이 스킬에 반영.)
 
@@ -158,9 +192,12 @@ spec_text="$(cat "$spec_sidecar")"   # 지금 재구성하지 않는다 — §2�
 # claude
 orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
   orca orchestration worker-start --task <task_id> --worktree current --agent claude --model <model> --effort <effort> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
-# codex
+# codex — §3에서 이미 만든 터미널에 배정(§0: --agent codex는 TUI 준비 전에 injection해 유실된다, 라이브
+# 확인). --worktree 생략 — <impl_handle>이 이미 그 worktree에 고정된 터미널이므로 --worktree active는
+# 불필요하고, 지정하면 selector_not_found로 실패한다(라이브 확인). §3의 boot-quiesce 확인을 통과한
+# 뒤에만 이 호출을 낸다.
 orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
-  orca orchestration worker-start --task <task_id> --worktree current --agent codex --model <model> --effort <effort> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
+  orca orchestration worker-start --task <task_id> --terminal <impl_handle> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
 # agy — §3에서 이미 만든 터미널에 배정(agy만 --agent가 없어 pre-create가 여전히 필요, §0). --worktree
 # 생략 — <impl_handle>이 이미 그 worktree에 고정된 터미널이므로 --worktree active는 불필요하고, 지정하면
 # selector_not_found로 실패한다(라이브 확인).
@@ -168,10 +205,11 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
   orca orchestration worker-start --task <task_id> --terminal <impl_handle> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
 # 위 세 갈래 중 이 subtask의 provider에 맞는 하나만 — wave 크기만큼 병렬로, 크기 규칙은 §3.
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43·#58 — worker-start에도
-# 동일하게 필요: stage:"input_accepted"는 실제 제출을 보장하지 않는다, 실측). codex는 --agent 경로도
-# `dispatch --inject`와 같은 MCP-boot-race를 탈 수 있다(issue #84 패턴, 2026-08-11 라이브 재현) — Orca가
-# 내부적으로 injection을 수행해 우리가 boot-quiesce를 직접 걸 지점이 없으므로, 이 케이스는 별도 재시도
-# 없이 self-recovery.md의 `dead` 판정(worker-abandon → worker-start --retry-of)에 맡긴다.
+# 동일하게 필요: stage:"input_accepted"는 제출은커녕 **도달**도 보장하지 않는다, 실측 — worker-show가
+# stage:"input_accepted"를 반환한 동일 dispatch에서 codex composer가 40초+ 빈 placeholder로 남아있는
+# 걸 직접 확인, issue #84/#150). codex는 §3의 boot-quiesce로 사전에 이 레이스를 막으므로, 그 확인을
+# 통과한 뒤의 실패는 별도 재시도 없이 self-recovery.md의 `dead` 판정(worker-abandon → worker-start
+# --retry-of)에 맡긴다.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. dispatch와 같은 블록에서 즉시 실행(누락 방지).
 #  logging.md §1 assign 이벤트: role="subtask-impl", issue=<issue-num>, task_id=<task_id>, wave_index=<n>,
 #    subtask_type=<전사|통합|아키텍처>, provider/model/effort=resolved 값, terminal=<impl_handle>,
@@ -203,9 +241,10 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
   # recv 이벤트 — logging.md §2 "첫 read" 레시피대로 $read_json에서 tail/nextCursor를 뽑아
   # term-<impl_handle>.jsonl에 append(이 터미널은 §5에서 sent만 기록했고 이후 한 번도 read하지
   # 않았으므로, 이 read가 곧 유일한 recv).
-  # claude/codex (worker-start --agent로 스폰 -- ownershipState: "owned"):
+  # claude (worker-start --agent로 스폰 -- ownershipState: "owned"):
   orca orchestration worker-release --dispatch <dispatch_id> --json
-  # agy (worker-start --terminal로 스폰 -- ownershipState: "external", worker-release는 no-op이라 쓰지 않는다):
+  # codex/agy (worker-start --terminal로 스폰 -- ownershipState: "external", worker-release는 no-op이라
+  # 쓰지 않는다 — 둘 다 라이브로 확인, 2026-08-11):
   orca terminal close --terminal <impl_handle> --tab --json
   rm -f "$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"   # 사이드카 회수는 여기서
   # 한다 — §5 dispatch 블록에서 즉시 지우면, 같은 task_id를 재스폰하는 스폰 실패 재시도나
@@ -214,15 +253,16 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
   # 기록할 수 있다.
   ```
 
-  claude/codex는 `worker-release`가 archive를 먼저 보존한 뒤 정확히 이 dispatch가 소유한 에이전트
-  터미널만 닫는다(post-completion cleanup, cancel 아님) — `release_pending`/`release_unknown`이 오면
-  `terminal close`로 대체하지 않고 응답이 지시하는 복구 동작을 그대로 따른다. agy는 `--tab` close를
-  반드시 붙인다 — 실측 결과 `--tab` close는 기저 프로세스를 실제로 종료시키고 메모리를 회수하지만
+  claude는 `worker-release`가 archive를 먼저 보존한 뒤 정확히 이 dispatch가 소유한 에이전트 터미널만
+  닫는다(post-completion cleanup, cancel 아님) — `release_pending`/`release_unknown`이 오면 `terminal
+  close`로 대체하지 않고 응답이 지시하는 복구 동작을 그대로 따른다. codex·agy는 `--tab` close를 반드시
+  붙인다 — 실측 결과 `--tab` close는 기저 프로세스를 실제로 종료시키고 메모리를 회수하지만
   (`diagnostics memory`에서 세션이 사라짐), `--tab` 없는 close는 pane만 닫고 프로세스가 남을 수 있다.
   정리 전에 `term-<impl_handle>.jsonl`에 마지막 `recv`를 남기는 이유는 클로즈/릴리스 후 스크롤백이
   사라져서, §6 task-레벨 게이트가 나중에 실패했을 때 "이 subtask가 뭘 했는지" 재확인할 방법이
-  없어지기 때문이다(단 claude/codex는 `worker-release`의 archive 덕분에 이후에도 `worker-read`로 다시
-  읽을 수 있다 — recv 로그는 그와 별개로 `logging.md`의 계약이라 여전히 남긴다). worker_done/유실 복구
+  없어지기 때문이다(단 claude는 `worker-release`의 archive 덕분에 이후에도 `worker-read`로 다시 읽을
+  수 있다 — codex·agy는 `--tab` close로 프로세스 자체가 종료되므로 이 archive 경로가 없고, recv 로그가
+  유일한 사후 기록이다). worker_done/유실 복구
   둘 다 확인 전에는(단순히 활동이 멈췄다는 이유만으로는) 정리하지 않는다 — 아직 파일 쓰기·커밋이
   끝나지 않은 프로세스를 죽일 위험이 있다. 이 정리는 매 wave 새 터미널을 스폰하는 구조라 재사용
   대상이 없다는 전제 위에서만 안전하다 — 이 스킬 밖(범용 `orchestration`, `orca-workflow-task` 자체
