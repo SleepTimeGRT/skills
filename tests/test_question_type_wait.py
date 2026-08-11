@@ -52,7 +52,7 @@ def test_wait_loop_types_includes_question_and_decision_gate():
 def test_routing_comment_documents_question_decision_gate_routing():
     text = SELF_RECOVERY_MD.read_text()
     start = text.index('# result.timedOut == "false"')
-    end = text.index('orca orchestration check --run "$RUN_ID" --ack')
+    end = text.index("# Set what the *next* iteration")
     window = text[start:end]
     # ac5 regression guard: the pre-existing worker_done/escalation routing survives untouched.
     assert "worker_done -> remove this task_id from the pending set" in window

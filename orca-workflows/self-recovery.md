@@ -81,7 +81,9 @@ per dispatch. `DISPATCH_CREATED_VIA` (`worker-start` or `dispatch-inject`) below
 Run this once per pending dispatch. `WORKER_HANDLE`/`TASK_ID`/`DISPATCH_ID`/`MY_HANDLE`/`RUN_ID`/
 `DISPATCH_CREATED_VIA`/`SPEC_TEXT` are caller-supplied for that dispatch (see the caller table above for
 `DISPATCH_CREATED_VIA`'s value per call site); `CALLING_SKILL` (`orca-task-runner`, `orca-workflow-task`,
-or `orca-workflow-epic`) and `ISSUE_NUM` are caller-supplied constants for the whole session. A wave has
+or `orca-workflow-epic`) and `ISSUE_NUM` are caller-supplied constants for the whole session. Set
+`prev_delivery_id=""` once, immediately before this loop's first iteration (loop-local, not
+caller-supplied) — the loop code below both reads and updates it every iteration. A wave has
 one pending-set entry per subtask, keyed by `task_id` (stable across retries for the `worker_abandon_retry`
 sub-branch — that retry changes only `dispatch_id`, so update the entry's `dispatch_id` in place rather
 than adding a second entry. The inject sub-branch's `task_recreate_retry` is **not** actually stable this
@@ -160,8 +162,21 @@ line, never "whatever is last") before it satisfies this section. The sidecar tr
 mechanism this document verifies end-to-end.
 
 ```bash
-result="$(orca orchestration check --run "$RUN_ID" --wait \
-  --types worker_done,escalation,question,decision_gate --timeout-ms 3600000 --json)"
+# prev_delivery_id="" before this loop's first iteration -- nothing to ack yet. Every iteration
+# after the first carries forward whatever this same variable held (see the tail of this loop):
+# combining that batch's ack into the very call that waits for the next one is Orca's own
+# documented idiom ("check --ack <id> --wait acknowledges, checks, and waits in one operation",
+# `orca skills get orchestration`, confirmed live against 1.4.180) -- not two separate round trips.
+# zsh does not word-split an unquoted ${var:+...} expansion the way bash/POSIX sh do (confirmed
+# live: it collapses "--ack $id" into one malformed argv word), so this is an explicit if/else, not
+# a one-line conditional flag (same portability constraint as scripts/log_dispatch.sh).
+if [ -n "$prev_delivery_id" ]; then
+  result="$(orca orchestration check --run "$RUN_ID" --ack "$prev_delivery_id" --wait \
+    --types worker_done,escalation,question,decision_gate --timeout-ms 3600000 --json)"
+else
+  result="$(orca orchestration check --run "$RUN_ID" --wait \
+    --types worker_done,escalation,question,decision_gate --timeout-ms 3600000 --json)"
+fi
 timed_out="$(printf '%s' "$result" | jq -r '.result.timedOut')"
 
 if [ "$timed_out" = "true" ]; then
@@ -381,7 +396,7 @@ if [ "$timed_out" = "true" ]; then
   # Loop back to the top (re-issue check --wait) unless escalated above.
 fi
 
-# result.timedOut == "false": process every message in the batch, then ack.
+# result.timedOut == "false": process every message in the batch.
 # for msg in result.messages: worker_done -> remove this task_id from the pending set;
 #                              escalation  -> route immediately (decision_gate reply, or escalate
 #                                             to the coordinator) -- do not wait for the rest of the
@@ -389,7 +404,17 @@ fi
 #                              question/decision_gate -> relay to the caller/human, then reply via
 #                                             `orca orchestration reply --id <msg_id> --body <answer> --json`
 #                                             -- routes immediately, before worker_done's pending-set removal, same as escalation.
-orca orchestration check --run "$RUN_ID" --ack "$(printf '%s' "$result" | jq -r '.result.deliveryId')" --json   # mandatory
+
+# Set what the *next* iteration's check --wait (top of this loop) must --ack. Whatever this
+# iteration itself passed as --ack (if prev_delivery_id was non-empty) has already been applied
+# server-side by this point -- ack happens before the wait portion of the same call, so this holds
+# whether or not this iteration also timed out. Overwriting prev_delivery_id here, unconditionally,
+# is therefore correct for both outcomes, not just the non-timeout path:
+if [ "$timed_out" = "true" ]; then
+  prev_delivery_id=""
+else
+  prev_delivery_id="$(printf '%s' "$result" | jq -r '.result.deliveryId')"
+fi
 # if pending set non-empty: loop back to the top with the remaining task_ids (re-issue check --wait,
 # never check --peek, for the next batch).
 ```
@@ -399,18 +424,19 @@ orca orchestration check --run "$RUN_ID" --ack "$(printf '%s' "$result" | jq -r 
 awaited new one, `replayed:true`). Skipping it either reprocesses the same message forever or masks
 the fact that the real event hasn't arrived yet.
 
-**Never combine this `--ack` call with `--peek`, and never try to `--ack` a `--peek` response.**
+**Never combine `--ack` with `--peek`, and never try to `--ack` a `--peek` response.**
 `--peek` returns unread messages without marking them read, so its response carries no `deliveryId`
 (confirmed live, Orca 1.4.178: `.result` keys are `count`/`messages`/`runId`/`acknowledged` only) —
 there is no delivery to ack. Passing a message id (`msg_...`) instead fails closed with
-`stale_delivery: "Delivery msg_... does not belong to this Run"`, not a partial success. The `--ack`
-call above always acks *this iteration's own* `$result` from the loop's `check --wait` at the top —
-the one non-peek call in this loop, and the only one that ever exposes a `deliveryId`. A caller that
-wants to inspect pending messages without consuming them (outside this loop) may still use
-`check --peek` for that — it is a legitimate read-only operation — but must never expect an ack
-target from its response, and must not fold peeking into this loop's mandatory ack step (issue
-#134: an earlier revision of this loop combined `--ack "<result.deliveryId>" --peek` on one line,
-which silently discarded the peeked batch's ability to ever be acked and caused it to replay).
+`stale_delivery: "Delivery msg_... does not belong to this Run"`, not a partial success. Every
+`--ack` this loop ever sends targets a `deliveryId` this same loop's own prior `check --wait`
+returned (carried forward as `prev_delivery_id`) — never a `--peek` response, and never a message
+id. `check --wait` is the only call in this loop that ever exposes a `deliveryId`; `--peek` is not
+used anywhere in this loop's mandatory path. A caller that wants to inspect pending messages
+without consuming them (outside this loop) may still use `check --peek` for that — it is a
+legitimate read-only operation — but must never expect an ack target from its response (issue #134:
+an earlier revision of this loop combined `--ack "<result.deliveryId>" --peek` on one line, which
+silently discarded the peeked batch's ability to ever be acked and caused it to replay).
 
 The liveness `terminal read` above does not count as "already reads that terminal's output" for
 `logging.md` §2's `recv`-logging rule (same carve-out as `dispatch-verify.md`'s own probe) — log no
