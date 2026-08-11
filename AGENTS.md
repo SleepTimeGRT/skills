@@ -19,6 +19,22 @@ be portable. See issue #2 for the installer-adoption discussion (catalog vs.
 flat layout, publishing this repo via `npx skills add`, plugin-marketplace
 distribution).
 
+## Methodology reference
+
+`docs/references/anthropic-building-skills-for-claude.pdf` ("The Complete Guide to Building
+Skills for Claude") is this repo's north star for skill design, testing, and iteration — when a
+skill-authoring choice here needs a tiebreaker, check this doc before improvising. Its "Testing
+and iteration" chapter names three test categories: **triggering tests** (does the skill load at
+the right times — should-trigger/should-NOT-trigger phrasing), **functional tests** (does the
+skill produce correct real outputs — live/simulated execution against Given/When/Then
+expectations), and **performance comparison** (with-skill vs without-skill baselines: message
+count, token count, failed calls). `tests/` in this repo currently covers none of these — it is a
+doc-schema regression suite (grep/parse `SKILL.md`/`orca-workflows/*.md` as text, assert specific
+strings/ordering/branches survive an edit; a few tests additionally execute extracted bash blocks
+against stubbed `orca` responses). That suite is real and load-bearing for its own purpose
+(catching silent regressions in documented procedures), but it is not a substitute for the guide's
+three categories — don't describe it as "tested per the guide" without that distinction.
+
 ## Fresh agent protocol
 
 1. Read this file.
