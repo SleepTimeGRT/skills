@@ -15,9 +15,10 @@ tracker 컨벤션이 바뀌어도 즉시 반영하기 위해서. 근거: `docs/s
 곧바로 GitHub 기본값으로 넘어가지 않고, 먼저 이슈 식별자의 모양을 본다:
 
 - 순수 숫자(`123`) → GitHub Issues 기본값(현재 동작과 동일). 아래 3의 `github.md`로.
-- `PROJECT-숫자` 형태(`VP-456`, `ENG-789`)인데 tracker 문서가 없음 → **온보딩**으로 넘어간다
-  (`skills/orca-workflow/SKILL.md` §0의 온보딩 서브플로우). cloudId 같은 값은 추측으로 채울 수 없다 —
-  여기서 GitHub로 조용히 넘어가면 안 된다. 온보딩이 끝나면(문서가 생기면) 다시 1로 돌아가 해석한다.
+- `PROJECT-숫자` 형태(`VP-456`, `ENG-789`)인데 tracker 문서가 없음 → 호출자(`orca-workflow`/
+  `orca-workflow-epic`/`orca-workflow-task` 중 무엇이든)가 사용자에게 `/project-setup` 실행을
+  안내하며 이번 실행을 중단한다. cloudId 같은 값은 추측으로 채울 수 없다 — 여기서 GitHub로
+  조용히 넘어가면 안 된다. `/project-setup`이 문서를 만든 뒤 재실행하면 다시 1로 돌아가 해석한다.
 
 ## 3. 백엔드별 adapter 로드
 
@@ -41,7 +42,8 @@ Linear 등 세 번째 백엔드를 추가할 때 adapter 파일만 만들면 끝
 - `linear.md`에 위 공통 오퍼레이션을 구현한다.
 - 이 파일 §3의 backend 목록에 Linear를 추가한다.
 - Jira와 Linear 모두 `PROJECT-123`형 식별자를 쓸 수 있으므로 §2에서 모양만 보고 둘을 구분하지 않는다.
-  tracker 문서가 없으면 기존처럼 온보딩으로 보내고, 온보딩 문서가 backend를 명시하게 한다.
+  tracker 문서가 없으면 위와 동일하게 `/project-setup`으로 안내하고, 그 결과 만들어질 문서가
+backend를 명시하게 한다.
 
 공통 오퍼레이션 시그니처가 유지되면 `orca-workflow`/`orca-workflow-epic`/`orca-workflow-task`의 실행
 단계는 변경하지 않아도 된다.
