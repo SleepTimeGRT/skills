@@ -39,12 +39,17 @@ and iteration" chapter names three test categories: **triggering tests** (does t
 the right times — should-trigger/should-NOT-trigger phrasing), **functional tests** (does the
 skill produce correct real outputs — live/simulated execution against Given/When/Then
 expectations), and **performance comparison** (with-skill vs without-skill baselines: message
-count, token count, failed calls). `tests/` in this repo currently covers none of these — it is a
-doc-schema regression suite (grep/parse `SKILL.md`/`orca-workflows/*.md` as text, assert specific
-strings/ordering/branches survive an edit; a few tests additionally execute extracted bash blocks
-against stubbed `orca` responses). That suite is real and load-bearing for its own purpose
-(catching silent regressions in documented procedures), but it is not a substitute for the guide's
-three categories — don't describe it as "tested per the guide" without that distinction.
+count, token count, failed calls). `tests/` in this repo covers **only the functional category, and
+only partially**. As of 2026-08-12 it is an execution suite: every remaining test file runs real
+code — the shell/python scripts (`deploy-skills.sh`, `orca_call_with_retry.sh`, `log_dispatch.sh`,
+`select_reviewer.py`, premerge/hook/audit scripts) or bash blocks extracted from skill docs and run
+against stubbed `orca` responses. The prose-pinning tests that asserted specific strings and
+ordering inside `SKILL.md`/`orca-workflows/*.md` were deleted that day: they froze current wording
+as the spec, so every intentional doc edit produced a false failure, and they verified nothing about
+whether a skill actually works. **Triggering tests and performance comparison remain uncovered**, so
+don't describe a skill here as "tested per the guide". Nothing enforces the suite automatically —
+no CI, no git hook; run `python3 -m pytest tests/ -q` yourself after touching a script or a
+documented bash procedure.
 
 ## Fresh agent protocol
 
