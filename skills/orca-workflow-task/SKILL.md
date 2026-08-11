@@ -249,7 +249,13 @@ log_dispatch --skill "orca-workflow-task" --role "contract-round" --issue "<issu
 
 ## 2. Generate
 
-`orca-task-runner` 호출, 결과로 **task 전체 diff 경로** 또는 **`GATE_FAIL`**을 받는다(`orca-task-runner`가 자기 task-레벨 게이트를 재시도 한도(2회) 안에 못 넘긴 경우 — `skills/orca-task-runner/SKILL.md` §6). §4의 FAIL 재시도로 돌아온 호출이면 spec에 직전 attempt 번호를 넣는다 — generator가 `CONTRACT_DIR`의 `eval-report-a<attempt>.json`을 직접 읽는다(이 스킬은 feedback 본문을 중계하지 않는다).
+`orca-task-runner` 호출, 결과로 **task 전체 diff 경로** 또는 **`GATE_FAIL`**을 받는다(`orca-task-runner`가 자기 task-레벨 게이트를 재시도 한도(2회) 안에 못 넘긴 경우 — `skills/orca-task-runner/SKILL.md` §6). §4의 FAIL 재시도로 돌아온 호출이면 spec을 아래 템플릿대로 구성한다 — findings를 prose로 요약하지 않고 파일 경로만 넘긴다:
+
+```
+spec_text="<... + 직전 attempt 번호 + \"CONTRACT_DIR의 eval-report-a<attempt>.json과 proposal-r<확정라운드>.json을 이 순서로 전부 읽어라 — findings를 요약해 넘기지 않는다\" + orphan-폴백 계약(§0) 전문>"
+```
+
+`<확정라운드>`는 이 세션이 §1에서 이미 로그로 남긴 `CONTRACT_APPROVED`/`CONTRACT_FINALIZED_BY_GENERATOR`의 `round` 값을 그대로 리터럴 치환한다(추가 조회 없음) — generator가 두 파일을 직접 읽는다(이 스킬은 feedback 본문도 확정 AC 본문도 중계하지 않는다).
 
 **GATE_FAIL 라우팅** — `orca-evaluate`를 호출하지 않고 바로 §5로 간다. `orca-task-runner`가 이미 자기 재시도 예산을 다 썼으므로 여기서 추가 재시도를 걸지 않는다(이중 카운팅 방지). §5 보고에 "evaluate 호출 안 됨(GATE_FAIL) — 기계적 게이트 실패"를 명시해 아래 FAIL/ESCALATE와 구분한다. 이때도 §4의 outcome 로그 라인을 `outcome:"GATE_FAIL"`로 남긴다(§4를 거치지 않으므로 여기서 직접).
 
