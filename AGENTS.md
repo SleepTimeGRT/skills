@@ -23,7 +23,18 @@ distribution).
 
 `docs/references/anthropic-building-skills-for-claude.pdf` ("The Complete Guide to Building
 Skills for Claude") is this repo's north star for skill design, testing, and iteration — when a
-skill-authoring choice here needs a tiebreaker, check this doc before improvising. Its "Testing
+skill-authoring choice here needs a tiebreaker, check this doc before improvising.
+
+**Skills in this repo must be developed against that guide.** Read
+`docs/references/anthropic-building-skills-for-claude.md` — a page-anchored summary of the PDF —
+before authoring or substantially changing a skill, and use its Reference A checklist before
+merging. Open the PDF pages the summary cites whenever the exact wording matters; the PDF stays
+canonical, the summary is an index. The summary also flags where the guide does *not* apply here
+(its Chapter 4 distribution path is Claude.ai/API-specific, ours is `scripts/deploy-skills.sh`;
+`allowed-tools` is listed as standard there but its enforcement behavior is Claude-Code-only per
+the cross-tool caveat above).
+
+The guide's "Testing
 and iteration" chapter names three test categories: **triggering tests** (does the skill load at
 the right times — should-trigger/should-NOT-trigger phrasing), **functional tests** (does the
 skill produce correct real outputs — live/simulated execution against Given/When/Then
@@ -39,7 +50,9 @@ three categories — don't describe it as "tested per the guide" without that di
 
 1. Read this file.
 2. Read `HANDOFF.md` when it exists; it contains the current work state and verified evidence.
-3. For skill creation or substantial skill changes, use the `skill-creator` skill before editing. Note: it's a
+3. For skill creation or substantial skill changes, read
+   `docs/references/anthropic-building-skills-for-claude.md` (see Methodology reference above), then
+   use the `skill-creator` skill before editing. Note: it's a
    Claude Code skill, so its packaging advice may not be tuned for Codex/Antigravity — sanity-check anything
    Claude-Code-specific it suggests against the cross-tool goal above.
 4. Load only the target skill and the resources directly required for the task.
