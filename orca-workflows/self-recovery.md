@@ -444,42 +444,39 @@ full hour of connection/keepalive durability. If a future session observes `conn
 dropped `check --wait` before the configured timeout, that is the first thing to revisit; the loop
 structure itself does not need to change.
 
-## Rejected candidate: `worker-release` — narrowed, not closed (re-verified 2026-08-10, Orca 1.4.178)
+## `worker-release` (re-verified 2026-08-10, Orca 1.4.178 — no longer a rejected candidate)
 
 `worker-release --dispatch <id>` (Orca 1.4.169+) archives a settled worker's output and closes its
 terminal automatically — but only for terminals Orca itself spawned as part of the dispatch
 (`worker-start --agent`, `ownershipState: "owned"`; an external, pre-created terminal attached via
 `worker-start --terminal` instead gets `ownershipState: "external"` and `worker-release` is a no-op
 on it, `state:"retained", reason:"external_terminal", archive:null, processAction:"none"` — confirmed
-live). The original rejection (Orca 1.4.169-1.4.175) rested on a three-part premise: neither
-`worker-start --agent` nor `worktree create --agent` exposed a `--model`/`--effort`/permission-mode
-equivalent, only whatever the CLI's stored account preset launched — forcing `orca-task-runner`
-§0/§3's explicit launch-control needs onto the external `terminal create` + `worker-start --terminal`
-path, which `worker-release` can never apply to.
+live).
 
-**Model/effort control is no longer missing** — `worker-start --agent` gained `--model <id>`/
-`--effort <level>` at Orca 1.4.176, still present at 1.4.178. Verified end-to-end, not just from
-`--help` text: `worker-start --agent claude --model claude-haiku-4-5-20251001 --effort low` (2026-08-10,
-dispatch `ctx_0d26ff46702c`) produced `launch.effective` identical to `launch.requested` — the spawned
-terminal's own model banner read "Haiku 4.5", not the account default — with `ownershipState: "owned"`.
+**Both original objections are resolved. Neither model/effort nor permission-mode blocks adoption —
+this is decided, not open for re-litigation.**
+
+- **Model/effort**: `worker-start --agent` gained `--model <id>`/`--effort <level>` at Orca 1.4.176,
+  still present at 1.4.178. Verified end-to-end: `worker-start --agent claude --model
+  claude-haiku-4-5-20251001 --effort low` (2026-08-10, dispatch `ctx_0d26ff46702c`) produced
+  `launch.effective` identical to `launch.requested` — the terminal's own model banner read "Haiku
+  4.5", not the account default.
+- **Permission-mode**: handled by Orca's account-level Agent-launch preset, not a per-dispatch flag —
+  by design, decided 2026-08-08. With the account's Agent settings configured once (Claude: no forced
+  `--advisor`; Codex: `--dangerously-bypass-approvals-and-sandbox`), a live `worker-start --agent codex
+  --model gpt-5.6-terra --effort medium` launch reproduced `orca-task-runner` §3's exact required
+  posture with zero flags. There is no `--permission-mode` flag on `worker-start`, none is expected,
+  and its absence is not a blocker.
+
 After that worker sent `worker_done`, `worker-release --dispatch ctx_0d26ff46702c` returned
 `state:"released", processAction:"closed_agent_terminal", archive:{source:"transcript",status:"captured"}`,
-and a subsequent `worker-read` on the same dispatch still returned the full transcript. This is a real
-`worker_done` → `worker-release` round trip (not a synthetic/chat-injected one), closing the "happy path
-never actually observed" gap noted in an earlier investigation of this same question.
+and a subsequent `worker-read` on the same dispatch still returned the full transcript — a real
+`worker_done` → `worker-release` round trip (not synthetic/chat-injected), closing the "happy path
+never actually observed" gap from the 2026-08-08 investigation.
 
-**Permission-mode is still not a `worker-start` flag.** That same live launch showed `bypass permissions
-on` in the TUI status line — inherited from a fixed per-account agent-launch preset (set in Orca's GUI
-Agent settings), not from any argument this call passed. There is still no `--permission-mode`/
-`--advisor`-equivalent flag on `worker-start --agent`, and whether the account preset matches what a
-given dispatch actually needs is unversioned and unreadable from the CLI (no `orca settings` command
-exists). `orca-task-runner`'s own launch templates (`skills/orca-task-runner/SKILL.md`) bake the required
-permission posture in explicitly per agent (`--dangerously-skip-permissions`,
-`--dangerously-bypass-approvals-and-sandbox`) precisely because relying on an invisible account default
-is not an acceptable substitute for that.
-
-**Do not re-propose adopting `worker-release` for `orca-task-runner`/`orca-workflow-task`'s own
-dispatches until that remaining gap closes** — a `--permission-mode`-equivalent flag on `worker-start`,
-or some other way to assert/verify the launch posture at coordinator-runtime rather than trust an
-unversioned GUI setting. Model/effort parity alone does not justify migrating off the external-terminal
-pattern while permission posture still can't be expressed as skill-owned argv the same way.
+**Known characteristic, not a blocker**: the account preset is a GUI-only setting, unversioned and
+unreadable from the CLI (no `orca settings` command exists). `orca-task-runner`'s launch templates
+(`skills/orca-task-runner/SKILL.md`) currently still bake the permission posture into explicit
+skill-owned argv per agent instead of using `--agent`+the account preset — that migration simply
+has not been done yet, not because anything blocks it. If a future session picks it up, the account
+preset already does the job (verified above); nothing else needs to happen first.
