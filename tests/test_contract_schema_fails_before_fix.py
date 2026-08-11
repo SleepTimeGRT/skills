@@ -152,14 +152,14 @@ def test_orca_evaluate_spec_text_line_mentions_fails_before_fix():
 
 
 # ---------------------------------------------------------------------------
-# ac8 -- skills/orca-set.version bumped to v1.1.8 (new assertion, separate from the
+# ac8 -- skills/orca-set.version bumped to v1.1.9 (new assertion, separate from the
 # existing_tests_affected update to tests/test_log_enum_schema.py)
 # ---------------------------------------------------------------------------
 
 
-def test_orca_set_version_line1_is_v1_1_8():
+def test_orca_set_version_line1_is_v1_1_9():
     lines = [l for l in SET_VERSION.read_text().splitlines() if l.strip()]
-    assert lines[0] == "v1.1.8"
+    assert lines[0] == "v1.1.9"
 
 
 # ---------------------------------------------------------------------------
