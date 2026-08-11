@@ -29,7 +29,8 @@ def _assert_boot_quiesce_site(window: str, handle: str) -> None:
     boot_start = window.index(BOOT_START)
     boot_end = window.index(BOOT_END)
     task_create = window.index("orca orchestration task-create")
-    dispatch = window.index("orca orchestration dispatch")
+    # issue #94 stage 1: these two sites attach the worker with worker-start, not dispatch --inject.
+    dispatch = window.index("orca orchestration worker-start")
 
     assert window.index(wait) < boot_start < boot_end < task_create < dispatch
 
@@ -45,10 +46,11 @@ def _assert_boot_quiesce_site(window: str, handle: str) -> None:
     assert 'if [ "$(date -u +%s)" -ge "$boot_deadline" ]; then' in boot
     assert "spawn-failures.md" in boot
     assert (
-        "# spawn-failures.md의 grep-first 절차를 따른다. task-create/dispatch --inject로 진행하지 않는다.\n"
+        "# spawn-failures.md의 grep-first 절차를 따른다. task-create/worker-start로 진행하지 않는다.\n"
         "    exit 1"
     ) in boot
     assert "orca orchestration task-create" not in boot
+    assert "orca orchestration worker-start" not in boot
     assert "orca orchestration dispatch" not in boot
     assert ".result.terminal.tail" not in boot
     assert "| grep" not in boot
@@ -76,8 +78,8 @@ def test_boot_quiesce_assertions_reject_each_required_site_element_mutation():
             window.replace(boot, "", 1),
             window.replace('boot_deadline=$(( $(date -u +%s) + 60 ))', "", 1),
             window.replace(
-                "# spawn-failures.md의 grep-first 절차를 따른다. task-create/dispatch --inject로 진행하지 않는다.\n    exit 1",
-                "# spawn-failures.md의 grep-first 절차를 따른다. task-create/dispatch --inject로 진행하지 않는다.",
+                "# spawn-failures.md의 grep-first 절차를 따른다. task-create/worker-start로 진행하지 않는다.\n    exit 1",
+                "# spawn-failures.md의 grep-first 절차를 따른다. task-create/worker-start로 진행하지 않는다.",
                 1,
             ),
         ):

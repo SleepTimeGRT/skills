@@ -88,6 +88,7 @@ fi
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 source ~/.agents/orca-workflows/scripts/log_dispatch.sh
+RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-workflow-task.txt")"   # §0에서 남긴 사이드카 — 아래 두 worker-start가 쓴다
 # task-runner 호출 (provider는 model-selection.md 기준 선택 — 코드 생성이라 Routine/High-Risk tier)
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
   orca terminal create --worktree active --title task-run-<n> \
@@ -113,7 +114,7 @@ while :; do
   fi
   cur="$(printf '%s' "$boot_read" | jq -r '.result.terminal.latestCursor')"
   if [ "$(date -u +%s)" -ge "$boot_deadline" ]; then
-    # spawn-failures.md의 grep-first 절차를 따른다. task-create/dispatch --inject로 진행하지 않는다.
+    # spawn-failures.md의 grep-first 절차를 따른다. task-create/worker-start로 진행하지 않는다.
     exit 1
   fi
 done
@@ -122,8 +123,8 @@ spec_text="<issue 번호 + CONTRACT_DIR 절대경로 + 제안서/구현 모드(�
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
-  orca orchestration dispatch --task <task_id> --to <run-handle> --retry-request "$(uuidgen)" --inject --json
-DISPATCH_CREATED_VIA=dispatch-inject   # self-recovery.md wait 루프의 dead-case 분기 입력
+  orca orchestration worker-start --task <task_id> --terminal <run-handle> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
+DISPATCH_CREATED_VIA=worker-start   # self-recovery.md wait 루프의 dead-case 분기 입력 — SPEC_TEXT는 worker-start 복구 분기가 참조하지 않으므로 배선하지 않는다
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43·#58 — "diff/report
 # 본문을 직접 읽지 않는다" 원칙과 충돌하지 않는 근거도 그 문서에 있다).
 # 로그 — logging.md §1 assign + §2 meta/sent를 log_dispatch()가 한 호출로 원자적으로 기록한다(issue #68).
@@ -135,19 +136,12 @@ DISPATCH_CREATED_VIA=dispatch-inject   # self-recovery.md wait 루프의 dead-ca
 log_dispatch --skill "orca-workflow-task" --role "task-runner" --issue "<issue-num>" --task-id "<task_id>" \
   --terminal "<run-handle>" --worktree "<worktree 경로>" --provider "<resolved provider (claude-code/codex/agy)>" \
   --model "<resolved model>" --effort "<resolved effort>" --spec-text "$spec_text"
-# SPEC_TEXT 사이드카 — self-recovery.md wait 루프가 이 dispatch의 dead-case 복구 시 참조하는 값을
-# 이 dispatch 자신의 task_id로 키잉된 파일에 즉시 못박는다(공유 스칼라를 evaluator 블록과 재사용/덮어쓰지
-# 않는다 — self-recovery.md:81-94, issue #112 eval-report-a1 critical). jq -ers는 sent 레코드 부재·
-# content가 문자열이 아니거나 빈 문자열이면 실패시켜 리터럴 "null"이 사이드카에 쓰이지 않게 한다
-# (issue #112 eval-report-a1 important 1). 실패/빈 값이면 사이드카를 쓰지 않고 넘어간다 — self-recovery.md
-# wait 루프 자신의 `[ -n "$SPEC_TEXT" ]` 게이트가(첫 mutation 전에 걸리므로 side effect 없이) fail-closed로 잡는다.
-SPEC_TEXT="$(jq -ers 'map(select(.direction=="sent")) | last | select(.content? and (.content|type=="string") and (.content|length>0)) | .content' "$HOME/.local/state/orca-workflows/logs/term-<run-handle>.jsonl")" || SPEC_TEXT=""
-if [ -n "$SPEC_TEXT" ]; then
-  printf '%s' "$SPEC_TEXT" > "$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"
-  chmod 600 "$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"
-fi
+# SPEC_TEXT 사이드카는 배선하지 않는다 — worker-start 복구 분기(worker-abandon → worker-start --retry-of)는
+# 같은 task_id를 재사용하므로 spec 원문을 다시 필요로 하지 않는다(self-recovery.md의 worker-start
+# sub-branch). issue #112가 이 자리에 넣었던 사이드카 쓰기는 dispatch-inject 복구 분기 전용이었고,
+# issue #94 1단계로 그 분기를 안 타게 되면서 함께 제거됐다.
 
-# evaluate 호출 — REPL 필수(one-shot은 이후 dispatch --inject를 못 받음), agy는 제외한다
+# evaluate 호출 — REPL 필수(one-shot은 종료된 프로세스라 worker-start가 넣는 task 입력을 못 받음), agy는 제외한다
 # (사유는 `~/.agents/orca-workflows/models/agy.md`가 정본). agy는 evaluate 내부 §2(agent e2e)의
 # headless sub-spawn일 뿐, 이 세션의 provider가 아니다. 구체 provider는 model-selection.md 기준 매
 # launch 시 resolve.
@@ -177,7 +171,7 @@ while :; do
   fi
   cur="$(printf '%s' "$boot_read" | jq -r '.result.terminal.latestCursor')"
   if [ "$(date -u +%s)" -ge "$boot_deadline" ]; then
-    # spawn-failures.md의 grep-first 절차를 따른다. task-create/dispatch --inject로 진행하지 않는다.
+    # spawn-failures.md의 grep-first 절차를 따른다. task-create/worker-start로 진행하지 않는다.
     exit 1
   fi
 done
@@ -186,8 +180,8 @@ spec_text="<orca-evaluate SKILL.md 지침 + CONTRACT_DIR 절대경로와 대상 
 orca_call_with_retry "orca-workflow-task" "evaluator" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-task" "evaluator" -- \
-  orca orchestration dispatch --task <task_id> --to <evaluate-handle> --retry-request "$(uuidgen)" --inject --json
-DISPATCH_CREATED_VIA=dispatch-inject   # self-recovery.md wait 루프의 dead-case 분기 입력
+  orca orchestration worker-start --task <task_id> --terminal <evaluate-handle> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
+DISPATCH_CREATED_VIA=worker-start   # self-recovery.md wait 루프의 dead-case 분기 입력 — SPEC_TEXT는 worker-start 복구 분기가 참조하지 않으므로 배선하지 않는다
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43·#58).
 # 로그 — logging.md §1 assign + §2 meta/sent를 log_dispatch()가 한 호출로 원자적으로 기록한다(issue #68).
 #   이 터미널에 대한 유일한 read도 마찬가지로 dispatch-verify.md의 liveness probe뿐이라
@@ -195,17 +189,7 @@ DISPATCH_CREATED_VIA=dispatch-inject   # self-recovery.md wait 루프의 dead-ca
 log_dispatch --skill "orca-workflow-task" --role "evaluator" --issue "<issue-num>" --task-id "<task_id>" \
   --terminal "<evaluate-handle>" --worktree "<worktree 경로>" --provider "<resolved provider (claude-code/codex/agy)>" \
   --model "<resolved model>" --effort "<resolved effort>" --spec-text "$spec_text"
-# SPEC_TEXT 사이드카 — 위 task-runner 블록과 동일한 이유·동일한 파일명 컨벤션(`spec-<task_id>.txt`,
-# orca-task-runner §2의 기존 사이드카와 같은 디렉토리·이름 규칙이지만 task_id가 전역적으로 유일하므로
-# 충돌하지 않는다)이되, 이 블록 자신의 task_id·터미널 handle을 쓴다. 이 블록의 SPEC_TEXT= 대입은 위
-# task-runner 블록의 SPEC_TEXT= 대입과 변수 이름은 같아도 서로 다른 시점에 서로 다른 사이드카로 즉시
-# 못박히므로, 이 대입이 나중에 다른 dispatch의 복구 시 읽히는 값이 되는 경로는 없다(공유 스칼라
-# 재사용이 아니다 — self-recovery.md:81-94, issue #112 eval-report-a1 critical).
-SPEC_TEXT="$(jq -ers 'map(select(.direction=="sent")) | last | select(.content? and (.content|type=="string") and (.content|length>0)) | .content' "$HOME/.local/state/orca-workflows/logs/term-<evaluate-handle>.jsonl")" || SPEC_TEXT=""
-if [ -n "$SPEC_TEXT" ]; then
-  printf '%s' "$SPEC_TEXT" > "$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"
-  chmod 600 "$HOME/.local/state/orca-workflows/logs/spec-<task_id>.txt"
-fi
+# SPEC_TEXT 사이드카는 위 task-runner 블록과 같은 이유로 배선하지 않는다(issue #94 1단계).
 ```
 
 **Contract 협상 relay — 라운드 2+ (반려된 경우만; 승인이면 곧장 §2)**: 라운드 1과 같은 task_id를 재사용하지
