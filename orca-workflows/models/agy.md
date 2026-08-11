@@ -72,9 +72,10 @@ agy -p '<complete instructions + artifact paths, fully resolved at launch time>'
 Do not route Routine or High Risk code judgment to agy. Technical judgment stays with a risk-tier worker
 even when agy executes the browser or synthesizes raw traces.
 
-For agent e2e, configure an accessibility-tree Playwright MCP and smoke-test the connection before relying
-on it. On quota or provider errors, use the fallback procedure owned by `orca-evaluate` or
-`orca-task-runner`.
+For agent e2e, configure the project-declared e2e tool (resolved by the consuming skill's
+`docs/agents/e2e-tooling.md`, not necessarily an MCP — e.g. a raw CLI) and smoke-test the
+connection/interface before relying on it. On quota or provider errors, use the fallback
+procedure owned by `orca-evaluate` or `orca-task-runner`.
 
 Load [the agy evidence reference](../references/models/agy.md) only when auditing, changing, or
 re-validating this mapping.
