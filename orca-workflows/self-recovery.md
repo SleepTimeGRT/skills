@@ -389,14 +389,28 @@ fi
 #                              question/decision_gate -> relay to the caller/human, then reply via
 #                                             `orca orchestration reply --id <msg_id> --body <answer> --json`
 #                                             -- routes immediately, before worker_done's pending-set removal, same as escalation.
-orca orchestration check --run "$RUN_ID" --ack "<result.deliveryId>" --peek --json   # mandatory
-# if pending set non-empty: loop back to the top with the remaining task_ids.
+orca orchestration check --run "$RUN_ID" --ack "$(printf '%s' "$result" | jq -r '.result.deliveryId')" --json   # mandatory
+# if pending set non-empty: loop back to the top with the remaining task_ids (re-issue check --wait,
+# never check --peek, for the next batch).
 ```
 
 `--ack` is not optional: a bound Run replays the same unacknowledged delivery on every subsequent
 `check`/`check --wait` call (confirmed live — an unacked stale message was replayed instead of the
 awaited new one, `replayed:true`). Skipping it either reprocesses the same message forever or masks
 the fact that the real event hasn't arrived yet.
+
+**Never combine this `--ack` call with `--peek`, and never try to `--ack` a `--peek` response.**
+`--peek` returns unread messages without marking them read, so its response carries no `deliveryId`
+(confirmed live, Orca 1.4.178: `.result` keys are `count`/`messages`/`runId`/`acknowledged` only) —
+there is no delivery to ack. Passing a message id (`msg_...`) instead fails closed with
+`stale_delivery: "Delivery msg_... does not belong to this Run"`, not a partial success. The `--ack`
+call above always acks *this iteration's own* `$result` from the loop's `check --wait` at the top —
+the one non-peek call in this loop, and the only one that ever exposes a `deliveryId`. A caller that
+wants to inspect pending messages without consuming them (outside this loop) may still use
+`check --peek` for that — it is a legitimate read-only operation — but must never expect an ack
+target from its response, and must not fold peeking into this loop's mandatory ack step (issue
+#134: an earlier revision of this loop combined `--ack "<result.deliveryId>" --peek` on one line,
+which silently discarded the peeked batch's ability to ever be acked and caused it to replay).
 
 The liveness `terminal read` above does not count as "already reads that terminal's output" for
 `logging.md` §2's `recv`-logging rule (same carve-out as `dispatch-verify.md`'s own probe) — log no
