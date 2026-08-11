@@ -21,6 +21,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SKILL = REPO_ROOT / "skills" / "orca-workflow-task" / "SKILL.md"
+EPIC_SKILL = REPO_ROOT / "skills" / "orca-workflow-epic" / "SKILL.md"
 SELF_RECOVERY_MD = REPO_ROOT / "orca-workflows" / "self-recovery.md"
 
 
@@ -70,6 +71,21 @@ def test_dispatch_created_via_wired_per_block_and_no_inject_site_remains():
         "orca orchestration worker-start --task <task_id> --terminal <evaluate-handle>"
         in evaluator_window
     )
+
+
+def test_epic_task_coordinator_wires_dispatch_created_via_explicitly():
+    # issue #94 stage 1 deleted self-recovery.md's `CALLING_SKILL = orca-workflow-epic ->
+    # dispatch-inject` derivation, so this site's explicit assignment is now the ONLY thing that keeps
+    # its dead-case recovery reachable. Without it the value reads empty, falls through the one
+    # remaining -z check, and the loop fails closed to escalated_spawn_failure with no recovery.
+    text = EPIC_SKILL.read_text()
+    assert text.count("DISPATCH_CREATED_VIA=worker-start") == 1
+    assert "DISPATCH_CREATED_VIA=dispatch-inject" not in text
+    assert "orca orchestration dispatch --task" not in text
+    worker_start_idx = text.index(
+        "orca orchestration worker-start --task <task_id> --terminal <coord-handle>"
+    )
+    assert text.index("DISPATCH_CREATED_VIA=worker-start") > worker_start_idx
 
 
 def test_dispatch_created_via_worker_start_wired_in_contract_round_window():

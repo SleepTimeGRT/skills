@@ -47,14 +47,15 @@ description: Single-issue coordinator for one task issue — invoked in-session 
   chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-workflow-task.txt"
   ```
 
-  이후 §1 라운드 2+ relay의 모든 `worker-start`/`check --wait`/`--ack` 호출 앞에서
-  `RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-workflow-task.txt")"`로 다시 읽는다 —
+  이후 §1의 모든 `worker-start`/`check --wait`/`--ack` 호출 앞에서
+  `RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-workflow-task.txt")"`로 다시 읽는다
+  (라운드 1 fenced block도 상단에서 한 번 읽는다 — 그 블록의 두 `worker-start`가 쓴다) —
   `orca-task-runner`/`orca-evaluate`가 각자 내부 fan-out에 쓰는 Run과는 별개다(섞이면 서로 다른
   세션의 `worker_done`이 잘못된 mailbox로 전달된다 — `~/.agents/orca-workflows/self-recovery.md`
-  참고). 라운드 1의 `task-create`/`dispatch`(§1 상단)는 `--run`을 명시하지 않지만, `task-create`가
-  `--run` 생략 시 호출 터미널에 바인딩된 Run을 그대로 물려받는 것으로 실측 확인했다(`--run` 없이 만든
-  task의 `.run_id`가 이미 바인딩돼 있던 Run과 일치) — 따라서 라운드 2+의 `check --wait --run "$RUN_ID"`와
-  `task-list --run "$RUN_ID"`는 라운드 1의 결과도 정상적으로 찾는다. 이 세션을 `orca-workflow-epic`이 스폰했더라도 epic의 Run을 재사용하지 않는다 — coordinator 세션마다 자기 Run 1개(`orca-task-runner` §0의 같은 규칙과 동일한 이유).
+  참고). 라운드 1의 `task-create`는 `--run`을 명시하지 않지만(그 블록의 두 `worker-start`는 명시한다),
+  `task-create`가 `--run` 생략 시 호출 터미널에 바인딩된 Run을 그대로 물려받는 것으로 실측 확인했다
+  (`--run` 없이 만든 task의 `.run_id`가 이미 바인딩돼 있던 Run과 일치) — 따라서 라운드 2+의
+  `check --wait --run "$RUN_ID"`와 `task-list --run "$RUN_ID"`는 라운드 1의 결과도 정상적으로 찾는다. 이 세션을 `orca-workflow-epic`이 스폰했더라도 epic의 Run을 재사용하지 않는다 — coordinator 세션마다 자기 Run 1개(`orca-task-runner` §0의 같은 규칙과 동일한 이유).
 - **Mode** — spec/인자로 `afk` 또는 `hitl`을 받는다(생략 시 `hitl`). 의미는 §5가 정의한다 — §1~§4의
   동작은 mode와 무관하게 동일하다.
 - **보고 채널** — spec에 "spawn된 coordinator" 지시가 있으면 최종 outcome은 `worker_done`으로, hitl
