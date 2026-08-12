@@ -133,6 +133,11 @@ override.json 먼저 — 크래시 시 재구성이 "override 없이 r3만 있�
   무결성을 깨고, 같은 diff를 서로 다른 두 계약으로 측정하게 만든다(#96에서 ESCALATE로 실측).
 - 이미 제자리 수정으로 손상된 경우의 교정: 손상 파일을 복구하려 들지 말고(그 시도 자체가 또 다른
   제자리 수정이다) **현재 내용**을 그대로 `proposal-r<n+1>.json`으로 복제하고 `round` 필드만 올린다.
+- **`proposal-r3.json`이 없다고 항상 위반은 아니다** — override.json이 이 절 자체의 도입(commit
+  79b7c3b, 2026-08-12T09:44:57+09:00) 이전에 완료된 세션은 규칙이 생기기 전에 끝난 것이므로
+  `CONTRACT_SCHEMA_STALE`로 별도 처리한다(issue #160). 도입 시각 상수(`R3_REQUIRED_SINCE`)와 비교
+  로직은 `orca-workflows/scripts/contract_resume.sh`와 `orca-workflow-task` SKILL.md §1 양쪽에
+  정의돼 있다 — 이 문서는 그 존재만 가리키고 상수 자체를 복제하지 않는다.
 
 ## gate-flake-a&lt;k&gt;.json
 

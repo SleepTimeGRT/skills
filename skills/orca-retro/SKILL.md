@@ -99,7 +99,9 @@ done
 2. **스킬 문구 기인 반복 FAIL** — 같은 FAIL 사유가 task·재시도에 걸쳐 반복되고, term 전사에서
    worker가 스킬 지시를 오독·누락한 정황이 보이는 경우.
 3. **예방 가능했던 ESCALATE·인간 개입** — `ESCALATE`·`*_HUMAN_DECISION` 계열 outcome 중, 전사를 보면
-   스킬 문구 보강으로 막을 수 있었던 것.
+   스킬 문구 보강으로 막을 수 있었던 것. 예외: `outcome`이 `CONTRACT_SCHEMA_STALE`인 레코드는 후보에서
+   제외한다 — 이미 스킬 문구가 보강돼 처리되는 마이그레이션 범주다(issue #160, ADR 0001의
+   `UNMAPPED_BRANCH` carve-out과 같은 근거).
 4. **spawn-failure 신규 시그니처** — `spawn-failures.jsonl`에서 `known_issue` 매칭이 없는 항목.
 5. **false PASS (사후 결함 회귀, issue #157)** — evaluator가 PASS를 줘서 머지됐는데 사후 결함으로
    판명된 경우. false FAIL은 재시도·escalate로 렌즈 2·3에 잡히지만 false PASS는 어떤 로그에도 남지
