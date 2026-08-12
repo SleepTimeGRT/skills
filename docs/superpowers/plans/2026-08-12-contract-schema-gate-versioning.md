@@ -49,7 +49,7 @@
 Add to `tests/test_contract_resume.py`, directly after `test_override_without_r3_reruns_override_step` (currently ending at line 220):
 
 ```python
-R3_REQUIRED_SINCE_EPOCH = 1786495497  # 2026-08-12T09:44:57+09:00 -- mirrors contract_resume.sh's R3_REQUIRED_SINCE
+R3_REQUIRED_SINCE_EPOCH = 1786495497  # 2026-08-12T09:44:57+09:00, commit 79b7c3b -- mirrors contract_resume.sh's R3_REQUIRED_SINCE
 
 
 def _set_mtime(path: Path, epoch: float) -> None:
@@ -105,7 +105,10 @@ In `orca-workflows/scripts/contract_resume.sh`, immediately after the closing `}
 # contract-schema.md "override 후속 라운드" 절 도입 시점(commit 79b7c3b, issue #130) -- 이 값을
 # 바꾸는 건 그 요구사항 자체가 또 바뀔 때뿐이다(현재 재도입 계획 없음, issue #160).
 # orca-workflow-task SKILL.md §1의 동일 상수와 짝이다 -- 바꾸면 함께 바꾼다.
-# touch -t 포맷 [[CC]YY]MMDDhhmm[.SS] -- 이 파이프라인이 도는 머신의 로컬 TZ(KST) 기준.
+# touch -t 포맷 [[CC]YY]MMDDhhmm[.SS], KST(Asia/Seoul) 기준으로 해석되도록 TZ를 아래서 명시
+# 고정한다 -- touch -t는 인자 없이 부르면 프로세스의 TZ 환경변수(호스트 로컬 설정)로 해석하므로,
+# 고정하지 않으면 이 머신이 KST가 아닌 곳에서 돌 때 최대 수 시간 오차가 생긴다(issue #160 리뷰에서
+# 실측: TZ=UTC로 같은 문자열을 해석하면 9시간 차이 나는 다른 epoch가 나옴).
 R3_REQUIRED_SINCE='202608120944.57'
 
 _cr_predates_r3_gate() {
@@ -115,7 +118,7 @@ _cr_predates_r3_gate() {
   # stat -f means "filesystem info", not mtime) silently feeding garbage into a numeric comparison.
   local ref
   ref="$(mktemp "${TMPDIR:-/tmp}/contract-resume-r3gate.XXXXXX")" || return $?
-  touch -t "$R3_REQUIRED_SINCE" "$ref" 2>/dev/null
+  TZ='Asia/Seoul' touch -t "$R3_REQUIRED_SINCE" "$ref" 2>/dev/null
   if [ -n "$(find "$(dirname "$1")" -maxdepth 1 -name "$(basename "$1")" -newer "$ref" 2>/dev/null)" ]; then
     printf '0'
   else
@@ -376,10 +379,12 @@ elif [ ! -f "<CONTRACT_DIR>/proposal-r3.json" ]; then
   # 자체의 도입(commit 79b7c3b, 2026-08-12T09:44:57+09:00) 이전에 완료됐을 수 있다(issue #160).
   # R3_REQUIRED_SINCE 상수(contract_resume.sh와 동일 — 바꾸면 함께 바꾼다)로 override.json의 mtime을
   # 그 시각과 비교한다(recent_write 가드와 같은 touch -t + find -newer 패턴 — stat -f/-c epoch
-  # 파싱은 GNU stat -f의 의미 충돌 위험이 있어 쓰지 않는다):
+  # 파싱은 GNU stat -f의 의미 충돌 위험이 있어 쓰지 않는다). touch -t는 TZ를 명시하지 않으면 호스트
+  # 로컬 설정으로 해석하므로(KST가 아닌 머신에서 최대 수 시간 오차 — issue #160 리뷰에서 실측),
+  # TZ=Asia/Seoul을 고정한다:
   R3_REQUIRED_SINCE='202608120944.57'
   ref="$(mktemp "${TMPDIR:-/tmp}/contract-r3gate.XXXXXX")"
-  touch -t "$R3_REQUIRED_SINCE" "$ref" 2>/dev/null
+  TZ='Asia/Seoul' touch -t "$R3_REQUIRED_SINCE" "$ref" 2>/dev/null
   if [ -n "$(find "<CONTRACT_DIR>" -maxdepth 1 -name override.json -newer "$ref" 2>/dev/null)" ]; then
     rm -f "$ref"
     # override.json이 게이트 도입 이후 — 기존 판단 그대로: 기록 계약 위반.
