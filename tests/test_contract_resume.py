@@ -25,7 +25,9 @@ SCRIPT = REPO_ROOT / "orca-workflows" / "scripts" / "contract_resume.sh"
 SHELLS = ["bash", "zsh"]
 
 
-def _run(contract_dir: Path, shell: str, extra_args: str = "") -> subprocess.CompletedProcess[str]:
+def _run(
+    contract_dir: Path, shell: str, extra_args: str = "", env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     if shutil.which(shell) is None:
         pytest.skip(f"{shell} not on PATH")
     full_script = f"source '{SCRIPT}'\ncontract_resume_state '{contract_dir}' {extra_args}\n"
@@ -35,13 +37,36 @@ def _run(contract_dir: Path, shell: str, extra_args: str = "") -> subprocess.Com
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         timeout=10,
+        env=env,
     )
 
 
-def _state(contract_dir: Path, shell: str, extra_args: str = "") -> dict:
-    result = _run(contract_dir, shell, extra_args)
+def _state(
+    contract_dir: Path, shell: str, extra_args: str = "", env: dict[str, str] | None = None
+) -> dict:
+    result = _run(contract_dir, shell, extra_args, env=env)
     assert result.returncode == 0, f"stderr: {result.stderr}"
     return json.loads(result.stdout)
+
+
+def _stub_touch_dir(tmp_path: Path) -> Path:
+    """A directory holding a `touch` shim that fails any `-t` invocation (simulating touch -t
+    itself failing) and delegates everything else to the real `touch`, resolved before the shim
+    is put on PATH so the delegation doesn't recurse into itself."""
+    real_touch = shutil.which("touch")
+    assert real_touch, "no real `touch` found on PATH to wrap"
+    bindir = tmp_path / "stub-bin"
+    bindir.mkdir()
+    shim = bindir / "touch"
+    shim.write_text(
+        "#!/usr/bin/env bash\n"
+        "for a in \"$@\"; do\n"
+        '  if [ "$a" = "-t" ]; then exit 1; fi\n'
+        "done\n"
+        f'exec "{real_touch}" "$@"\n'
+    )
+    shim.chmod(0o755)
+    return bindir
 
 
 def _age(path: Path, seconds: int = 3600) -> None:
@@ -241,6 +266,81 @@ def test_override_predating_r3_gate_reports_contract_schema_stale(tmp_path: Path
     state = _state(d, shell)
     assert state["contract"] == "escalated"
     assert state["resume"] == "section-5"
+    assert state["outcome"] == "CONTRACT_SCHEMA_STALE"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_post_gate_override_not_misclassified_stale_under_non_kst_host_tz(
+    tmp_path: Path, shell: str
+) -> None:
+    """The script pins TZ='Asia/Seoul' internally so its cutoff comparison is independent of the
+    calling environment's TZ (issue #160 review: an unpinned touch -t interprets R3_REQUIRED_SINCE
+    against the host's local TZ, producing an epoch off by hours on a non-KST host).
+
+    This fixture is deliberately placed inside the 9-hour KST/UTC skew window so the test actually
+    discriminates: R3_REQUIRED_SINCE_EPOCH ('202608120944.57') is 2026-08-12T09:44:57+09:00 KST.
+    Interpreted as UTC instead (i.e. if the TZ pin were missing/broken), the same digit string
+    means 2026-08-12T09:44:57+00:00 -- 2026-08-12T18:44:57+09:00, nine hours later. A fixture
+    mtime one hour AFTER the real (KST) cutoff -- so it should NOT be stale -- falls BEFORE the
+    wrongly-shifted (UTC-misread) cutoff, so an unpinned script would misreport it as
+    CONTRACT_SCHEMA_STALE. Force TZ=UTC on the subprocess (distinct from whatever TZ this test
+    runner's own host happens to have) and confirm the pin keeps the correct, not-stale
+    classification regardless."""
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
+    override_path = _write(d, "override.json", _override(), fresh=True)
+    _set_mtime(override_path, R3_REQUIRED_SINCE_EPOCH + 3600)  # 1 hour after the real (KST) gate
+    state = _state(d, shell, env={**os.environ, "TZ": "UTC"})
+    assert state["resume"] == "section-1-override"
+    assert state["round"] == 3
+    assert state["outcome"] != "CONTRACT_SCHEMA_STALE"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_touch_t_backdating_failure_falls_closed_not_stale(tmp_path: Path, shell: str) -> None:
+    """Finding-1 regression guard: if `touch -t` itself fails (backdating never happens), $ref is
+    left at its just-created "now" mtime. A naive `-newer`/`! -newer` polarity swap is a pure
+    boolean no-op for this case (proved empirically during the #160 final review: both the original
+    and a literal `! -newer` inversion reported CONTRACT_SCHEMA_STALE here), because any
+    already-written override.json is virtually always older than "now" regardless of polarity. The
+    actual fix checks touch -t's own exit status and refuses to compare at all on failure.
+
+    Fixture: a genuine POST-gate override.json (a real violation, NOT a legacy pre-gate session) --
+    exactly the case a fail-open mechanism failure would misreport as CONTRACT_SCHEMA_STALE.
+    Shadow PATH with a `touch` shim that fails any `-t` call, and confirm the result is still the
+    existing violation-suspecting path (resume=section-1-override), not CONTRACT_SCHEMA_STALE."""
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
+    override_path = _write(d, "override.json", _override(), fresh=True)
+    _set_mtime(override_path, R3_REQUIRED_SINCE_EPOCH + 3600)  # genuine post-gate violation
+    bindir = _stub_touch_dir(tmp_path)
+    env = {**os.environ, "PATH": f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}"}
+    state = _state(d, shell, env=env)
+    assert state["resume"] == "section-1-override"
+    assert state["round"] == 3
+    assert state["outcome"] != "CONTRACT_SCHEMA_STALE"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_override_at_exact_r3_gate_boundary_is_stale(tmp_path: Path, shell: str) -> None:
+    """mtime == cutoff (to the second) classifies as stale -- a deliberate boundary choice (design
+    doc: 'mtime이 상수와 정확히 같은 초면... stale로 분류된다'). After the Finding-1 fail-closed
+    inversion (! -newer instead of relying on the absence of -newer), '! -newer' still matches
+    'not newer than', which includes exact equality, so this boundary must still classify stale."""
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
+    override_path = _write(d, "override.json", _override(), fresh=True)
+    _set_mtime(override_path, R3_REQUIRED_SINCE_EPOCH)  # exactly at the gate
+    state = _state(d, shell)
     assert state["outcome"] == "CONTRACT_SCHEMA_STALE"
 
 

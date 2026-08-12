@@ -70,7 +70,10 @@
 작업물의 품질·AC에 대한 판정이 아니라 예외적이지만 처리된 워크플로 상태이기 때문. 처음엔 "§5로
 간다"는 이유로 verdict 축(`CONTRACT_ESCALATE`와 동급)에 놓으려 했으나, 이 축의 실제 기준은 "작업물에
 대한 판정이냐"이지 "어디로 라우팅되냐"가 아니다). 형제값(`CONTRACT_ESCALATE`/
-`CONTRACT_FINALIZED_BY_GENERATOR`)과 같은 필드 구성: `round`(도달 라운드 수, 이 게이트 한정 항상 2) +
+`CONTRACT_FINALIZED_BY_GENERATOR`)과 같은 필드 구성 — 단, 이 `round`는 `contract_resume.sh`의
+resume-state JSON이 아니라 outcome을 로깅하는 시점의 `log_outcome --round 2` 호출이 남기는 필드다
+(`logging.md`의 `CONTRACT_SCHEMA_STALE` 절 참고, 형제 `CONTRACT_ESCALATE`/
+`CONTRACT_FINALIZED_BY_GENERATOR` 절과 동일한 구성): `round`(도달 라운드 수, 이 게이트 한정 항상 2) +
 `detail`(두 시각 문자열, 아래 §5 문구 참고).
 
 ## 감지 메커니즘
@@ -84,17 +87,32 @@ GNU `stat -f`(파일시스템 정보 플래그, mtime 아님)와 충돌해 숫�
 ```bash
 # contract-schema.md "override 후속 라운드" 절 도입 시점(commit 79b7c3b, issue #130) — 이 값을
 # 바꾸는 건 그 요구사항 자체가 또 바뀔 때뿐이다(현재 재도입 계획 없음, issue #160).
-# touch -t 포맷 [[CC]YY]MMDDhhmm[.SS] — 이 파이프라인이 도는 머신의 로컬 TZ(KST) 기준.
+# touch -t 포맷 [[CC]YY]MMDDhhmm[.SS], KST(Asia/Seoul) 기준으로 해석되도록 TZ를 아래서 명시
+# 고정한다 -- touch -t는 인자 없이 부르면 프로세스의 TZ 환경변수(호스트 로컬 설정)로 해석하므로,
+# 고정하지 않으면 이 머신이 KST가 아닌 곳에서 돌 때 최대 수 시간 오차가 생긴다(issue #160 리뷰에서
+# 실측: TZ=UTC로 같은 문자열을 해석하면 9시간 차이 나는 다른 epoch가 나옴).
 R3_REQUIRED_SINCE='202608120944.57'
 
-_cr_predates_r3_gate() {   # $1 = probed file. echoes 1(stale)|0(on/after gate) to stdout.
+_cr_predates_r3_gate() {   # $1 = probed file. echoes 1(stale)|0(on/after gate, or mechanism failed) to stdout.
   local ref
   ref="$(mktemp "${TMPDIR:-/tmp}/contract-resume-r3gate.XXXXXX")" || return $?
-  touch -t "$R3_REQUIRED_SINCE" "$ref" 2>/dev/null
-  if [ -n "$(find "$(dirname "$1")" -maxdepth 1 -name "$(basename "$1")" -newer "$ref" 2>/dev/null)" ]; then
+  if ! TZ='Asia/Seoul' touch -t "$R3_REQUIRED_SINCE" "$ref" 2>/dev/null; then
+    # touch -t itself failed: $ref is stuck at its just-created "now" mtime, not the intended
+    # cutoff, so any comparison against it is meaningless (a written override.json is virtually
+    # always older than "now"). Report not-stale so the caller falls through to the existing
+    # violation-suspecting path instead of fabricating CONTRACT_SCHEMA_STALE. (An earlier revision
+    # of this fix only flipped `-newer` to `! -newer` — that's a pure boolean complement with the
+    # branch values swapped too, so it canceled out and left this exact failure mode unfixed;
+    # verified by forcing touch -t to fail against a known post-gate file and observing the bug
+    # persist under both polarities, issue #160 final review.)
+    rm -f "$ref"
     printf '0'
-  else
+    return 0
+  fi
+  if [ -n "$(find "$(dirname "$1")" -maxdepth 1 -name "$(basename "$1")" ! -newer "$ref" 2>/dev/null)" ]; then
     printf '1'
+  else
+    printf '0'
   fi
   rm -f "$ref"
 }
@@ -114,7 +132,9 @@ _cr_predates_r3_gate() {   # $1 = probed file. echoes 1(stale)|0(on/after gate) 
 **`contract_resume.sh`** — `elif [ "$maxp" -lt 3 ]`(override 있음, r3 없음) 분기 진입 시
 `_cr_predates_r3_gate "$dir/override.json"`을 먼저 확인:
 - `1`(stale) → `contract="escalated"; resume="section-5"; outcome='"CONTRACT_SCHEMA_STALE"'`,
-  `round=2`, `detail`에 override mtime과 게이트 도입 시각을 사람이 읽을 수 있는 형태로 기록.
+  `detail`에 override mtime과 게이트 도입 시각을 사람이 읽을 수 있는 형태로 기록. (`round`는 이
+  JSON에는 담기지 않는다 — `null`로 남는다, 형제 `CONTRACT_ESCALATE` 분기들과 동일. `round=2`는
+  이 outcome을 실제로 로깅하는 `log_outcome --round 2` 호출 쪽 필드다.)
 - `0`(그 외) → 기존 그대로("죽다 재-태움", `resume="section-1-override"`).
 
 **`orca-workflow-task` §1** — `elif [ ! -f proposal-r3.json ]` 분기도 같은 판정을 앞에 두어
@@ -158,7 +178,8 @@ lens 3("예방 가능했던 ESCALATE·인간 개입")이 `CONTRACT_SCHEMA_STALE`
 
 `tests/test_contract_resume.py`에 두 케이스 추가:
 - override mtime이 `R3_REQUIRED_SINCE` 이전 → `outcome="CONTRACT_SCHEMA_STALE"`,
-  `resume="section-5"`, `round=2`.
+  `resume="section-5"`(`round`은 `contract_resume.sh`의 JSON에서 `null`로 남는다 — `round=2`는
+  `log_outcome`이 이 outcome을 로깅할 때 붙이는 필드이지 이 스크립트의 출력 필드가 아니다).
 - override mtime이 이후(기존 `test_override_without_r3_reruns_override_step`과 동일 시나리오, 회귀
   없음 확인) → 기존 `resume="section-1-override"`, `round=3` 그대로.
 

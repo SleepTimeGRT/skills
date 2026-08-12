@@ -104,23 +104,34 @@ elif [ ! -f "<CONTRACT_DIR>/proposal-r3.json" ]; then
   # 쓰다 죽은 게 아니다. 그렇다고 곧장 "기록 계약 위반"도 아니다 — override.json이 이 r3 요구사항
   # 자체의 도입(commit 79b7c3b, 2026-08-12T09:44:57+09:00) 이전에 완료됐을 수 있다(issue #160).
   # R3_REQUIRED_SINCE 상수(contract_resume.sh와 동일 — 바꾸면 함께 바꾼다)로 override.json의 mtime을
-  # 그 시각과 비교한다(recent_write 가드와 같은 touch -t + find -newer 패턴 — stat -f/-c epoch
-  # 파싱은 GNU stat -f의 의미 충돌 위험이 있어 쓰지 않는다). touch -t는 TZ를 명시하지 않으면 호스트
-  # 로컬 설정으로 해석하므로(KST가 아닌 머신에서 최대 수 시간 오차 — issue #160 리뷰에서 실측),
-  # TZ=Asia/Seoul을 고정한다:
+  # 그 시각과 비교한다(recent_write 가드와 같은 touch -t + find -newer 패턴을 기반으로 하되, touch -t
+  # 실패를 별도로 체크한다 — 아래 참고. stat -f/-c epoch 파싱은 GNU stat -f의 의미 충돌 위험이 있어
+  # 쓰지 않는다). touch -t는 TZ를 명시하지 않으면 호스트 로컬 설정으로 해석하므로(KST가 아닌 머신에서
+  # 최대 수 시간 오차 — issue #160 리뷰에서 실측), TZ=Asia/Seoul을 고정한다:
   R3_REQUIRED_SINCE='202608120944.57'
   ref="$(mktemp "${TMPDIR:-/tmp}/contract-r3gate.XXXXXX")"
-  TZ='Asia/Seoul' touch -t "$R3_REQUIRED_SINCE" "$ref" 2>/dev/null
-  if [ -n "$(find "<CONTRACT_DIR>" -maxdepth 1 -name override.json -newer "$ref" 2>/dev/null)" ]; then
+  # 두 가지 실패 양상을 각각 다른 가드로 막는다 — 하나의 find 극성 반전으로 뭉치면 안 된다는 걸
+  # issue #160 최종 리뷰에서 실측으로 확인했다: touch -t 자체가 실패하면 $ref는 의도한 cutoff가
+  # 아니라 방금 만든 "지금" mtime에 머문다. 이미 쓰인 override.json은 "지금"보다 newer일 리 거의
+  # 없으므로, -newer든 ! -newer든(분기와 printf 값을 맞바꿔도) "cutoff보다 newer 아님"이라는 결과가
+  # 똑같이 나온다 — find 극성만 뒤집는 건 이 실패 양상에서 순수 무의미한 재작성이었다(원본과
+  # "반전"판 모두 CONTRACT_SCHEMA_STALE을 오보하는 것을 스텁 touch로 직접 재현해 확인). 그래서
+  # touch -t의 종료 코드를 직접 확인해 실패 시 비교 자체를 건너뛴다:
+  if ! TZ='Asia/Seoul' touch -t "$R3_REQUIRED_SINCE" "$ref" 2>/dev/null; then
     rm -f "$ref"
-    # override.json이 게이트 도입 이후 — 기존 판단 그대로: 기록 계약 위반.
-    # fail-closed: outcome=CONTRACT_ESCALATE, round=2로 남기고 §5로.
+    # 백데이팅 자체가 실패 — $ref의 mtime은 무의미하므로 비교하지 않는다. 기존 판단 그대로: 기록
+    # 계약 위반. fail-closed: outcome=CONTRACT_ESCALATE, round=2로 남기고 §5로.
+  elif [ -n "$(find "<CONTRACT_DIR>" -maxdepth 1 -name override.json ! -newer "$ref" 2>/dev/null)" ]; then
+    rm -f "$ref"
+    # touch -t는 성공했고, override.json이 그 cutoff보다 newer가 아님 = 게이트 도입 이전(또는
+    # 정확히 동시)이라는 양성 증거 — 위반이 아니라 구버전 세션. outcome=CONTRACT_SCHEMA_STALE,
+    # round=2, detail에 override.json mtime과 $R3_REQUIRED_SINCE를 사람이 읽을 수 있는 형태로
+    # 남기고 §5로(§5 문구 참고 — "자동 재개"를 암시하지 않는다).
   else
     rm -f "$ref"
-    # override.json이 게이트 도입 이전(또는 정확히 동시) — 위반이 아니라 구버전 세션.
-    # outcome=CONTRACT_SCHEMA_STALE, round=2, detail에 override.json mtime과
-    # $R3_REQUIRED_SINCE를 사람이 읽을 수 있는 형태로 남기고 §5로(§5 문구 참고 — "자동 재개"를
-    # 암시하지 않는다).
+    # touch -t는 성공했고, override.json이 cutoff보다 newer(게이트 도입 이후) — 또는 find 자체가
+    # mtime과 무관한 이유로(경로 없음 등) 아무것도 못 찾음 — 둘 다 기존 판단 그대로: 기록 계약
+    # 위반. fail-closed: outcome=CONTRACT_ESCALATE, round=2로 남기고 §5로.
   fi
   # (§0 재개 분기는 override.json mtime이 게이트 도입 이후인 상태만 "쓰다 죽음"으로 보고 override
   # 스텝을 재-태운다 — worker_done 수신 여부가 그 두 해석을 가른다. 게이트 도입 이전인 상태는 §0도

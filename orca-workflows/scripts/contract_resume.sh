@@ -60,17 +60,45 @@ _cr_json_object() {
 R3_REQUIRED_SINCE='202608120944.57'
 
 _cr_predates_r3_gate() {
-  # $1 = probed file. Echoes 1 (mtime on/before R3_REQUIRED_SINCE -> stale) or 0 (after -> not
-  # stale) to stdout. Reuses the touch-a-reference-file + find -newer mechanism the recent_write
-  # guard below already proves out: stat -f/-c epoch parsing risks a BSD/GNU flag collision (GNU
-  # stat -f means "filesystem info", not mtime) silently feeding garbage into a numeric comparison.
+  # $1 = probed file. Echoes 1 (mtime on/before R3_REQUIRED_SINCE -> stale) or 0 (after, OR the
+  # mechanism itself failed -> not stale) to stdout. Reuses the touch-a-reference-file + find
+  # -newer mechanism the recent_write guard below already proves out: stat -f/-c epoch parsing
+  # risks a BSD/GNU flag collision (GNU stat -f means "filesystem info", not mtime) silently
+  # feeding garbage into a numeric comparison.
+  #
+  # Two distinct failure modes, two distinct guards -- do not collapse them into one `find`
+  # polarity choice, that was tried and empirically disproven (issue #160 final review):
+  #   1. touch -t itself fails (backdating didn't happen): $ref is left at its just-created "now"
+  #      mtime instead of the intended cutoff. `-newer $ref` and `! -newer $ref` are pure
+  #      complements of each other, and swapping which branch prints which value cancels out --
+  #      "if P then 0 else 1" and "if !P then 1 else 0" are the same function of P. Since any
+  #      already-written override.json predates "now" virtually always, EITHER polarity says
+  #      "not newer than $ref" and reports stale=1 when backdating silently failed -- verified by
+  #      forcing touch -t to fail against a known post-gate override.json and observing
+  #      CONTRACT_SCHEMA_STALE either way. The only fix for this mode is checking touch -t's own
+  #      exit status directly, below -- not any find-polarity trick.
+  #   2. find itself errors or matches nothing for reasons unrelated to mtime (probed path
+  #      missing, directory unreadable): this is genuine "absence of evidence", where `! -newer`
+  #      (require positive proof of "not newer than cutoff") correctly falls through to 0 instead
+  #      of the old code's default-to-stale on no match.
   local ref
   ref="$(mktemp "${TMPDIR:-/tmp}/contract-resume-r3gate.XXXXXX")" || return $?
-  TZ='Asia/Seoul' touch -t "$R3_REQUIRED_SINCE" "$ref" 2>/dev/null
-  if [ -n "$(find "$(dirname "$1")" -maxdepth 1 -name "$(basename "$1")" -newer "$ref" 2>/dev/null)" ]; then
+  if ! TZ='Asia/Seoul' touch -t "$R3_REQUIRED_SINCE" "$ref" 2>/dev/null; then
+    # Backdating failed outright -- $ref's mtime is meaningless (mode 1 above). Don't compare
+    # against it at all; report not-stale so the caller falls through to the existing
+    # violation-suspecting path instead of fabricating CONTRACT_SCHEMA_STALE.
+    rm -f "$ref"
     printf '0'
-  else
+    return 0
+  fi
+  if [ -n "$(find "$(dirname "$1")" -maxdepth 1 -name "$(basename "$1")" ! -newer "$ref" 2>/dev/null)" ]; then
+    # override.json exists and is NOT newer than the (successfully backdated) cutoff -- positive
+    # stale evidence.
     printf '1'
+  else
+    # Either override.json IS newer than the cutoff, or find found nothing (mode 2 above) --
+    # both fall through to the non-stale, violation-suspecting path.
+    printf '0'
   fi
   rm -f "$ref"
 }
@@ -185,7 +213,7 @@ contract_resume_state() {
         # no r3 to write under the rules that existed when it ran. Escalate distinctly so a human
         # doesn't misread this as generator misconduct.
         contract="escalated"; resume="section-5"; outcome='"CONTRACT_SCHEMA_STALE"'
-        detail='"override.json predates the proposal-r3 requirement (commit 79b7c3b, 2026-08-12T09:44:57+09:00) — not a violation, a pre-gate session"'
+        detail='"override.json predates the proposal-r3 requirement (commit 79b7c3b, 2026-08-12T09:44:57+09:00) — not a violation, a pre-gate session — see the override.json mtime (ls -la or stat) for the exact pre-gate timestamp"'
       else
         # The override step writes override.json THEN proposal-r3.json (the final contract —
         # contract-schema.md "override 후속 라운드", issue #130). override without r3 on resume
