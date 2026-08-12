@@ -1,17 +1,17 @@
 ---
 name: orca-retro
 description: >-
-  Use right after an orca-workflow invocation ends (retro runs regardless of how the invocation ended)
-  — analyzes only that invocation's logs under ~/.local/state/orca-workflows/logs/
-  (assignments/outcome events, spawn-failures, term transcripts) through four defect lenses
-  (documented-schema violations, repeated FAILs attributable to skill prose, preventable escalations
-  or human interventions, new spawn-failure signatures) and files at most 3 evidence-backed
-  skill-defect issues on the sleeptimegrt-skills repo, deduplicating against open issues via
-  recurrence comments. Never edits skills directly — output is issues only; fixes flow through the
-  normal /orca-workflow pipeline later. Best-effort by contract: no retro failure may block the
-  invocation. Self-relative. Do NOT use for general retrospectives, ad-hoc log analysis, or
-  multi-agent coordination (use the `orchestration` or `orca-cli` skills) — this skill runs only as
-  the closing step of an orca-workflow invocation.
+  Use right after an orca-workflow invocation ends, regardless of how it ended — analyzes that
+  invocation's logs under ~/.local/state/orca-workflows/logs/ (assignments/outcome events,
+  spawn-failures, term transcripts) through five defect lenses (documented-schema violations,
+  repeated FAILs attributable to skill prose, preventable escalations or human interventions, new
+  spawn-failure signatures, and false-PASS regressions: tracker issues with a regressed-by trailer
+  pointing back at merged PASS verdicts — the one lens crossing invocation boundaries) and files at
+  most 3 evidence-backed skill-defect issues on the sleeptimegrt-skills repo, deduplicating against
+  open issues via recurrence comments. Never edits skills directly — output is issues only; fixes
+  flow through the normal /orca-workflow pipeline later. Best-effort by contract: no retro failure
+  may block the invocation. Self-relative. Do NOT use for general retrospectives or ad-hoc log
+  analysis — runs only as the closing step of an orca-workflow invocation.
 compatibility: Requires the `orca` CLI (skill set last verified against Orca app 1.4.180), the `~/.agents/orca-workflows/` symlink to this repo's orca-workflows/, and the `gh` CLI. Reads logs under ~/.local/state/orca-workflows/logs/.
 ---
 
@@ -25,12 +25,15 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
 ## 0. 입력·전제
 
 - 입력 3개: root issue 번호, 대상 repo, skills repo(sleeptimegrt-skills)의 GitHub slug.
+- **이슈 트래커 해석**(실행 시작 시 1회): `~/.agents/orca-workflows/issue-trackers/selection.md`
+  절차로 백엔드를 정한다 — §2 렌즈 5의 `find_regressions`가 항상 쓰고, 큐 목록 해석이 필요할 때
+  `list_children`도 쓴다.
 - 큐 issue 목록: 호출자(`orca-workflow` §2)가 spec_text로 넘긴 목록을 그대로 쓴다. 목록 자체가 안
-  넘어온 경우에만 `~/.agents/orca-workflows/issue-trackers/selection.md` 절차로 백엔드를 정해
-  `list_children(root-num)`으로 해석한다(child 없는 issue면 빈 목록). root issue ∪ 이 목록(중복 제거)이
-  이번 분석의 issue 집합이다 — size-1 큐면 root 1건이다.
+  넘어온 경우에만 `list_children(root-num)`으로 해석한다(child 없는 issue면 빈 목록). root issue ∪
+  이 목록(중복 제거)이 이번 분석의 issue 집합이다 — size-1 큐면 root 1건이다.
 - 로그 루트 `~/.local/state/orca-workflows/logs/`가 없거나 비어 있으면 §5 요약(filed=[])으로 즉시
-  종료한다 — harness 밖에서 처리된 실행은 정상 케이스다.
+  종료한다 — harness 밖에서 처리된 실행은 정상 케이스다. 단 렌즈 5는 로그가 아니라 트래커·
+  CONTRACT_DIR 기반이므로, 로그 공집합 종료 전에 렌즈 5 스캔만은 수행한다(§2 렌즈 5의 스코프 예외).
 
 ## 1. 수집
 
@@ -61,14 +64,15 @@ done
 **날짜 범위**: issue 필터에 걸린 레코드의 최소 `ts`부터 현재까지. §2 렌즈 1은 이 범위의 dated 파일
 전체 내용을 대상으로 한다(아래).
 
-**필터 공집합**: issue 필터에 걸린 레코드가 0개면 여기서 §5 요약(`filed=[]`)으로 즉시 종료한다 — 로그
-루트에 다른 실행의 기록만 있는 경우가 이에 해당한다. `spawn-failures.jsonl`에는 `issue` 필드가
+**필터 공집합**: issue 필터에 걸린 레코드가 0개면 렌즈 1~4를 건너뛴다 — 로그 루트에 다른 실행의
+기록만 있는 경우가 이에 해당한다. 이때도 렌즈 5(로그 비의존)는 수행한 뒤 §5로 간다. `spawn-failures.jsonl`에는 `issue` 필드가
 없으므로 렌즈 4도 이 날짜 범위(`ts` 기준)로 한정한다 — 범위 밖 항목은 이번 실행의 후보가 아니다.
 
-## 2. 결함 후보 — 렌즈 4개
+## 2. 결함 후보 — 렌즈 5개
 
 각 렌즈의 표적은 "스킬 문서를 고치면 사라질 결함"이다. 에이전트의 일회성 실수는 표적이 아니다 —
-같은 지점에서 재발했거나, 스킬 문구가 그 실수를 유도·방치했다는 근거가 있어야 한다.
+같은 지점에서 재발했거나, 스킬 문구가 그 실수를 유도·방치했다는 근거가 있어야 한다(예외: 렌즈 5 —
+아래).
 
 1. **문서화된 스키마 위반** — 각 스킬과 `~/.agents/orca-workflows/logging.md`가 명시한 스키마(enum
    값, 이벤트명, 필드 타입)를 벗어난 로그 레코드. **이 렌즈만은 issue 필터를 거치지 않고** §1 날짜
@@ -84,11 +88,36 @@ done
 3. **예방 가능했던 ESCALATE·인간 개입** — `ESCALATE`·`*_HUMAN_DECISION` 계열 outcome 중, 전사를 보면
    스킬 문구 보강으로 막을 수 있었던 것.
 4. **spawn-failure 신규 시그니처** — `spawn-failures.jsonl`에서 `known_issue` 매칭이 없는 항목.
+5. **false PASS (사후 결함 회귀, issue #157)** — evaluator가 PASS를 줘서 머지됐는데 사후 결함으로
+   판명된 경우. false FAIL은 재시도·escalate로 렌즈 2·3에 잡히지만 false PASS는 어떤 로그에도 남지
+   않는 비대칭이 있고, 이 신호 없이는 evaluator 판정 기준의 보정이 원천적으로 불가능하다. **이
+   렌즈만은 이번 invocation 경계를 넘는다** — false PASS는 머지 뒤에야 드러나므로, 표적은 과거
+   invocation들의 산출물이고 입력은 로그가 아니라 트래커와 CONTRACT_DIR이다:
+
+   1. 대상 repo 트래커에서 `find_regressions()`(adapter 문서의 오퍼레이션 — `regressed-by` trailer
+      컨벤션도 그쪽이 정의)로 (결함 이슈, 지목된 task issue `<n>`) 쌍을 수집한다.
+   2. 각 `<n>`이 이 파이프라인의 PASS로 머지된 것인지 CONTRACT_DIR로 확인한다 — PASS eval-report가
+      없으면 파이프라인 밖 머지이므로 후보가 아니다:
+
+      ```bash
+      cdir="$HOME/.local/state/orca-workflows/contracts/<project-slug>/issue-<n>"
+      for k in 1 2 3; do   # attempt 상한 3 (orca-workflow-task §4의 FAIL 재시도 예산)
+        f="$cdir/eval-report-a$k.json"
+        [ -f "$f" ] && jq -e '.verdict=="PASS"' "$f" >/dev/null 2>&1 && echo "$f"
+      done
+      ```
+
+   3. PASS 파일이 있으면 후보다 — 대상 스킬은 `orca-evaluate`, 프레임은 "PASS를 준
+      `eval-report-a<k>.json`의 findings·리뷰 범위가 이 결함을 왜 못 봤는가". 단건이라도 후보다
+      (재발 요건의 예외) — evaluator 오판은 파이프라인에서 가장 비싼 결함 종류이고, 이 렌즈가
+      유일한 관측 경로다. 수집된 사례를 evaluator 판정 지침으로 되먹이는 것은 별도 단계다(#157의
+      2번) — 이 렌즈는 관측·이슈화까지만 한다.
 
 ## 3. 증거 기준·상한
 
 - 후보마다 **로그 파일 경로 + 원문 인용(레코드 라인 그대로) 최소 1개**. 인용을 못 붙이는 후보는
-  이슈화하지 않고 폐기 카운트에만 넣는다.
+  이슈화하지 않고 폐기 카운트에만 넣는다. 렌즈 5는 로그 대신 **결함 이슈의 `regressed-by` 라인
+  인용 + PASS `eval-report-a<k>.json` 절대경로와 그 `verdict` 라인**이 같은 기준을 충족한다.
 - 신규 이슈는 **실행(root issue)당 최대 3개**. 우선순위: 재발 횟수 → 영향 범위(걸린 스킬·사이트 수). 4번째
   이하 후보는 가장 우선순위 높은 신규 이슈 본문의 "부록" 섹션에 목록으로 넣는다.
 
@@ -131,6 +160,10 @@ gh issue list --repo <skills-repo-slug> --state open --json number,title,labels 
 - 기존 open 이슈가 같은 결함을 다루면 **새 이슈 대신 그 이슈에 재발 코멘트**를 단다(증거 인용 +
   root issue 번호 + 위에서 조립한 "## 환경/버전" 섹션): `gh issue comment <num> --repo <skills-repo-slug>
   --body "..."`. 재발 코멘트 횟수가 이 루프의 우선순위 신호다.
+- **렌즈 5 전용 대조**: 같은 (결함 이슈, task issue) 쌍은 "재발"이 없다 — 한 번 관측되면 끝이다.
+  skills repo를 `--state all`로 결함 이슈 참조 문자열(`<target-repo>#<결함 이슈 번호>`)까지 검색해,
+  open이든 closed든 그 쌍을 이미 다룬 이슈가 있으면 코멘트 없이 폐기한다. 신규 이슈 본문에는 그
+  대조가 기계적으로 되도록 `false-pass: <target-repo>#<결함>→#<task>` 한 줄을 넣는다.
 - spawn-failure 후보는 `~/.agents/orca-workflows/spawn-failures.md`가 이미 부여한 known_issue
   번호와도 대조한다.
 - 신규 결함이면, 라벨은 `retro`를 쓴다:
