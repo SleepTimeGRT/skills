@@ -19,7 +19,7 @@
 #     "approved_round": <n|null>,  // final contract round: approved verdict round, or max r<n> post-override (#130)
 #     "attempt": <k|null>,         // section-2: attempt to run; section-4/5: last evaluated attempt
 #     "retry": <n|null>,           // §4 FAIL-retry counter to carry (attempt k runs with retry k-1)
-#     "outcome": <string|null>,    // section-4: PASS; section-5: CONTRACT_ESCALATE|FAIL|ESCALATE
+#     "outcome": <string|null>,    // section-4: PASS; section-5: CONTRACT_ESCALATE|CONTRACT_SCHEMA_STALE|FAIL|ESCALATE
 #     "detail": <string|null>,
 #     "recent_write": true|false   // any artifact modified within --recent-secs (default 600):
 #   }                              //   the dead session's worker may still be writing — don't resume
@@ -35,6 +35,11 @@
 # - The override gate below MIRRORS orca-workflow-task §1's inline routing block (verdict-r2.json
 #   is the routing input, never override.json's generator-filtered unresolved_reasons). Change them
 #   together; tests/test_contract_resume.py pins this side.
+# - CONTRACT_SCHEMA_STALE (issue #160): override.json without proposal-r3.json is not always a
+#   violation — if override.json predates the proposal-r3 requirement itself (R3_REQUIRED_SINCE
+#   above), the step legitimately had no r3 to write. That case escalates to section-5 with a
+#   distinct outcome instead of being silently re-run or misreported as a recording-contract
+#   violation.
 #
 # PORTABILITY: sourced into whatever shell runs the SKILL.md block — zsh on this machine, bash in
 # tests. Same portable subset as log_dispatch.sh: no arrays, no [[ ]], no ${!var}, no glob loops
@@ -43,6 +48,28 @@
 
 _cr_json_object() {
   jq -e 'type=="object"' "$1" >/dev/null 2>&1
+}
+
+# contract-schema.md "override 후속 라운드" 절 도입 시점(commit 79b7c3b, issue #130) -- 이 값을
+# 바꾸는 건 그 요구사항 자체가 또 바뀔 때뿐이다(현재 재도입 계획 없음, issue #160).
+# orca-workflow-task SKILL.md §1의 동일 상수와 짝이다 -- 바꾸면 함께 바꾼다.
+# touch -t 포맷 [[CC]YY]MMDDhhmm[.SS] -- 이 파이프라인이 도는 머신의 로컬 TZ(KST) 기준.
+R3_REQUIRED_SINCE='202608120944.57'
+
+_cr_predates_r3_gate() {
+  # $1 = probed file. Echoes 1 (mtime on/before R3_REQUIRED_SINCE -> stale) or 0 (after -> not
+  # stale) to stdout. Reuses the touch-a-reference-file + find -newer mechanism the recent_write
+  # guard below already proves out: stat -f/-c epoch parsing risks a BSD/GNU flag collision (GNU
+  # stat -f means "filesystem info", not mtime) silently feeding garbage into a numeric comparison.
+  local ref
+  ref="$(mktemp "${TMPDIR:-/tmp}/contract-resume-r3gate.XXXXXX")" || return $?
+  touch -t "$R3_REQUIRED_SINCE" "$ref" 2>/dev/null
+  if [ -n "$(find "$(dirname "$1")" -maxdepth 1 -name "$(basename "$1")" -newer "$ref" 2>/dev/null)" ]; then
+    printf '0'
+  else
+    printf '1'
+  fi
+  rm -f "$ref"
 }
 
 contract_resume_state() {
@@ -149,13 +176,22 @@ contract_resume_state() {
       contract="escalated"; resume="section-5"; outcome='"CONTRACT_ESCALATE"'
       detail='"ac_fidelity disagreement unresolved at the round limit"'
     elif [ "$maxp" -lt 3 ]; then
-      # The override step writes override.json THEN proposal-r3.json (the final contract —
-      # contract-schema.md "override 후속 라운드", issue #130). override without r3 on resume
-      # means the step died between the two writes — re-burn it. (The in-session §1 gate treats
-      # the same file state as a recording-contract violation and escalates instead: there the
-      # generator claimed completion via worker_done, so "died mid-write" is ruled out.)
-      contract="negotiating"; resume="section-1-override"; round=3
-      detail='"override recorded but proposal-r3 (final contract) missing — override step died mid-write; re-run it"'
+      if [ "$(_cr_predates_r3_gate "$dir/override.json")" = "1" ]; then
+        # override.json predates the proposal-r3 requirement itself (issue #160) — not a
+        # recording-contract violation and not "died mid-write" either: the step legitimately had
+        # no r3 to write under the rules that existed when it ran. Escalate distinctly so a human
+        # doesn't misread this as generator misconduct.
+        contract="escalated"; resume="section-5"; outcome='"CONTRACT_SCHEMA_STALE"'
+        detail='"override.json predates the proposal-r3 requirement (commit 79b7c3b, 2026-08-12T09:44:57+09:00) — not a violation, a pre-gate session"'
+      else
+        # The override step writes override.json THEN proposal-r3.json (the final contract —
+        # contract-schema.md "override 후속 라운드", issue #130). override without r3 on resume
+        # means the step died between the two writes — re-burn it. (The in-session §1 gate treats
+        # the same file state as a recording-contract violation and escalates instead: there the
+        # generator claimed completion via worker_done, so "died mid-write" is ruled out.)
+        contract="negotiating"; resume="section-1-override"; round=3
+        detail='"override recorded but proposal-r3 (final contract) missing — override step died mid-write; re-run it"'
+      fi
     else
       contract="finalized"
       approved="$maxp"   # correction rounds (r4+, #130) supersede r3 as the final contract

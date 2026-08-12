@@ -220,6 +220,46 @@ def test_override_without_r3_reruns_override_step(tmp_path: Path, shell: str) ->
     assert state["round"] == 3
 
 
+R3_REQUIRED_SINCE_EPOCH = 1786495497  # 2026-08-12T09:44:57+09:00 -- mirrors contract_resume.sh's R3_REQUIRED_SINCE
+
+
+def _set_mtime(path: Path, epoch: float) -> None:
+    """Set an absolute mtime (unlike _age, which subtracts a delta from 'now')."""
+    os.utime(path, (epoch, epoch))
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_override_predating_r3_gate_reports_contract_schema_stale(tmp_path: Path, shell: str) -> None:
+    """override.json completed before the proposal-r3 requirement existed -- not a violation (#160)."""
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
+    override_path = _write(d, "override.json", _override(), fresh=True)
+    _set_mtime(override_path, R3_REQUIRED_SINCE_EPOCH - 3600)  # 1 hour before the gate
+    state = _state(d, shell)
+    assert state["contract"] == "escalated"
+    assert state["resume"] == "section-5"
+    assert state["outcome"] == "CONTRACT_SCHEMA_STALE"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_override_after_r3_gate_still_reruns_override_step(tmp_path: Path, shell: str) -> None:
+    """Regression guard: an override.json written on/after the gate keeps the pre-existing
+    "died mid-write, re-run it" behavior -- only pre-gate overrides get CONTRACT_SCHEMA_STALE."""
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
+    override_path = _write(d, "override.json", _override(), fresh=True)
+    _set_mtime(override_path, R3_REQUIRED_SINCE_EPOCH + 3600)  # 1 hour after the gate
+    state = _state(d, shell)
+    assert state["resume"] == "section-1-override"
+    assert state["round"] == 3
+
+
 @pytest.mark.parametrize("shell", SHELLS)
 def test_r3_without_override_or_approval_escalates(tmp_path: Path, shell: str) -> None:
     """proposal-r3+ may only exist after override — anything else is an out-of-contract state."""
