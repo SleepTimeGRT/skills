@@ -162,11 +162,17 @@ override는 협상의 종착점이지 계약의 종착점이 아니다 — overr
 고정:
 override.json 먼저 — 크래시 시 재구성이 "override 없이 r3만 있는" 비정상 상태를 만들지 않게).
 
-- `proposal-r3.json` = `verdict-r2.json`의 `reasons` 중 generator가 해소한 항목을 반영한 **최종
-  확정 계약**이다. `round: 3`, 나머지 필드는 proposal 스키마 그대로. `proposal-r2.json`/
-  `override.json`은 그대로 둔다(append-only).
-- **`verdict-r3.json`은 존재하지 않는 것이 정상이다** — 이 라운드는 evaluator 재검토를 구하지
-  않는다(협상 라운드 한도는 2). 검증은 `orca-evaluate` §3 diff 리뷰가 최종 AC 기준으로 한다.
+- override 시점의 확정 계약(`final_round: 2`면 `proposal-r3.json`, "라운드 2→3 조건부 연장"이
+  발동해 `final_round: 3`이면 `proposal-r4.json`)은 그 직전 라운드의 `verdict-r<final_round>.json`의
+  `reasons` 중 generator가 해소한 항목을 반영한 **최종 확정 계약**이다. `round`는
+  `final_round + 1`(2→3 또는 3→4), 나머지 필드는 proposal 스키마 그대로. 이전 라운드 파일들은
+  그대로 둔다(append-only).
+- **override 시점에 만들어지는 확정 계약(final_round+1번째 proposal)에는 그 라운드의 verdict가
+  존재하지 않는 것이 정상이다** — 이 라운드는 evaluator 재검토를 구하지 않는다(예: `final_round: 2`
+  override면 `verdict-r3.json` 없음, `final_round: 3` override면 `verdict-r4.json` 없음). 검증은
+  `orca-evaluate` §3 diff 리뷰가 최종 AC 기준으로 한다. **주의**: "라운드 2→3 조건부 연장"이 발동한
+  경우의 `verdict-r3.json`은 이것과 다르다 — 그건 override 산출물이 아니라 정식 협상 라운드의
+  verdict이므로 정상적으로 존재한다.
 - **override 이후 계약 자체의 결함이 발견되면**(eval FAIL findings가 코드가 아니라 proposal 필드를
   지적) 동결된 라운드 파일을 절대 제자리 수정하지 않는다 — 다음 라운드 번호(`proposal-r4.json`, …)로
   새 파일을 쓴다. 제자리 수정은 이미 그 파일을 인용해 둔 `verdict-r*`/`override.json`의 인용
@@ -252,6 +258,10 @@ override.json 먼저 — 크래시 시 재구성이 "override 없이 r3만 있�
   verdict를 갖지 않는다(위 절). 반대로 override가 있는데 `proposal-r3.json`이 없으면 override 스텝이
   쓰다 죽은 것이므로 그 스텝을 다시 태운다. 이때 같은 번호 파일을 덮어쓰는
   것은 append-only 위반이 아니다 — append-only는 라운드 간(r1을 r2에서 수정 금지) 규칙이다.
+- **"라운드 2→3 조건부 연장"의 신규 정상 상태**: `override.json`이 없고 `proposal-r3.json`만 있고
+  `verdict-r3.json`이 아직 없는 상태는 모호 상태가 아니라 정상이다 — 라운드3 협상이 진행 중이며
+  evaluator 재검토를 기다리는 것뿐이다(`orca-evaluate` §1 재호출 대기). 이는 위 예외(override.json
+  있을 때의 verdict-less proposal-r3+)와는 다른, 별개의 정상 상태다.
 - override 라우팅 게이트(위 override 절)는 재개 경로에서도 동일하게 적용된다 —
   `contract_resume.sh`가 `orca-workflow-task` §1의 인라인 분기를 미러링한다. 한쪽을 바꾸면 함께
   바꾼다.
