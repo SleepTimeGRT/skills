@@ -416,6 +416,24 @@ def test_r3_proposal_without_verdict_resumes_verdict_step(tmp_path: Path, shell:
 
 
 @pytest.mark.parametrize("shell", SHELLS)
+def test_r3_without_override_and_verdict_r2_has_ac_fidelity_escalates(tmp_path: Path, shell: str) -> None:
+    """proposal-r3 without override is legitimate ONLY when the round-cap extension actually
+    fired (verdict-r2 valid+rejected+plan_coverage-only). If verdict-r2 has ac_fidelity, the
+    extension never should have produced proposal-r3 -- out-of-contract, fail-closed to
+    CONTRACT_ESCALATE rather than silently waiting on verdict-r3 (which would launder an
+    unresolved ac_fidelity disagreement toward code generation)."""
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage", "ac_fidelity"]))
+    _write(d, "proposal-r3.json", _proposal(3))
+    state = _state(d, shell)
+    assert state["resume"] == "section-5"
+    assert state["outcome"] == "CONTRACT_ESCALATE"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
 def test_r4_without_override_or_approval_escalates(tmp_path: Path, shell: str) -> None:
     """proposal-r4+ may only exist after a final_round=3 override -- anything else is
     out-of-contract (the extension's equivalent of the old r3 guard)."""

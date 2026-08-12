@@ -29,9 +29,15 @@
 #   value is outside its schema enum, is treated as ABSENT — its producing step re-runs. Rewriting
 #   the same-numbered file on that re-run is legal: contract-schema.md's append-only rule is a
 #   cross-round rule (don't edit r1 during r2), not a crash-resume prohibition.
-# - proposal-r3+ never has a verdict by design (override follow-up rounds, contract-schema.md
-#   "override 후속 라운드", issue #130): with a valid override.json it is the final contract, not an
-#   ambiguous state; without one it is an out-of-contract state and escalates.
+# - proposal-r3 CAN have its own verdict now (round-cap conditional extension, contract-schema.md
+#   "라운드 2→3 조건부 연장"): a negotiated round 3 that fires only when verdict-r2 is valid,
+#   rejected, and plan_coverage-only (no ac_fidelity). proposal-r3 without override.json is
+#   therefore legitimate ONLY under that same condition (verdict-r2 valid+rejected+plan_coverage-
+#   only) -- any other verdict-r2 state (missing/invalid/wrong-round, or ac_fidelity present) means
+#   proposal-r3 was written when it shouldn't have been, an out-of-contract state that escalates.
+#   proposal-r4+ without override.json is unconditionally out-of-contract and escalates (override
+#   follow-up rounds only, contract-schema.md "override 후속 라운드", issue #130): with a valid
+#   final_round=3 override.json it is the final contract, not an ambiguous state.
 # - The override gate below MIRRORS orca-workflow-task §1's inline routing block (verdict-r2.json
 #   is the routing input, never override.json's generator-filtered unresolved_reasons). Change them
 #   together; tests/test_contract_resume.py pins this side.
@@ -64,14 +70,17 @@ R3_REQUIRED_SINCE='202608120944.57'
 # (final_round=2, finalizing at proposal-r3). After this gate, that same rejection instead gets one
 # more negotiated round (proposal-r3/verdict-r3) before override -- and override.json's final_round
 # becomes 3, with proposal-r4 the final contract. Same touch -t + find -newer mechanism as
-# R3_REQUIRED_SINCE (via _cr_predates_gate above), disambiguates a final_round=2 override.json's
+# R3_REQUIRED_SINCE (via _cr_predates_gate below), disambiguates a final_round=2 override.json's
 # plan_coverage-only "finalized" reading (legacy, pre-gate) from an inconsistency (post-gate,
 # should never happen if orca-workflow-task §1 routes correctly).
-# orca-workflow-task SKILL.md §1's identical constant -- bump it together with this one.
+# This constant exists only in this script (§0/crash-resume) -- orca-workflow-task SKILL.md §1 does
+# NOT use it, since the live coordinator (once running the round-cap extension) never produces the
+# ambiguous state it disambiguates (see contract-schema.md's "라운드 2→3 조건부 연장" section).
 ROUND3_NEGOTIATION_SINCE='202608130052.00'
 
 _cr_predates_gate() {
-  # $1 = probed file. Echoes 1 (mtime on/before R3_REQUIRED_SINCE -> stale) or 0 (after, OR the
+  # $1 = probed file. $2 = cutoff (touch -t format, e.g. R3_REQUIRED_SINCE or
+  # ROUND3_NEGOTIATION_SINCE). Echoes 1 (mtime on/before cutoff -> stale) or 0 (after, OR the
   # mechanism itself failed -> not stale) to stdout. Reuses the touch-a-reference-file + find
   # -newer mechanism the recent_write guard below already proves out: stat -f/-c epoch parsing
   # risks a BSD/GNU flag collision (GNU stat -f means "filesystem info", not mtime) silently
@@ -263,6 +272,17 @@ contract_resume_state() {
       # override-first, same as the old r3 rule) or never otherwise. Out-of-contract state.
       contract="escalated"; resume="section-5"; outcome='"CONTRACT_ESCALATE"'
       detail='"proposal-r4+ exists without override.json or an approved verdict (out-of-contract state)"'
+    elif [ "$maxp" -eq 3 ] && [ "$maxp" -gt "$maxv" ] && { [ "$maxv" -ne 2 ] || jq -e '[.reasons[]?.target] | index("ac_fidelity")' "$dir/verdict-r2.json" >/dev/null 2>&1; }; then
+      # proposal-r3 without a round-3 verdict decision yet (maxp > maxv, so verdict-r3 doesn't
+      # exist/isn't valid) is legitimate ONLY when the round-cap extension actually fired:
+      # verdict-r2 valid+rejected+plan_coverage-only (maxv==2, no ac_fidelity -- maxv is only set
+      # when verdict-r2 parsed with a valid status, per the scan loop above, so maxv==2 already
+      # implies validity). Anything else (verdict-r2 missing/invalid/wrong-round, or ac_fidelity
+      # present) means proposal-r3 was written when it shouldn't have been -- out-of-contract,
+      # fail-closed. (maxv==3, i.e. a valid round-3 verdict already exists, is excluded by the
+      # maxp>maxv guard -- that legitimate state is handled below.)
+      contract="escalated"; resume="section-5"; outcome='"CONTRACT_ESCALATE"'
+      detail='"proposal-r3 exists without override.json, but verdict-r2 is missing/invalid or has an ac_fidelity disagreement -- the round-cap extension condition is not met (out-of-contract state)"'
     elif [ "$maxp" -gt "$maxv" ]; then
       contract="negotiating"; resume="section-1-verdict"; round="$maxp"
     else
