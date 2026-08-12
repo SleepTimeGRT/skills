@@ -17,6 +17,28 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
   §1의 두 spec_text에 절대경로로 넣는다. acceptance criteria는 issue 본문의 사전 섹션이 아니라 §1
   협상에서 초안·승인된다 — 산출물 파일(proposal/verdict/override)과 확정 AC의 정본 위치는 같은
   문서가 정의한다.
+- **재개(crash-resume) 분기**(CONTRACT_DIR 계산 직후 1회, issue #156) — round/attempt/retry 카운터의
+  정본은 이 세션의 대화 컨텍스트가 아니라 CONTRACT_DIR 아티팩트의 파일명 번호다. 산출물이 하나라도
+  있으면 이 실행은 새 시작이 아니라 재개다:
+
+  ```bash
+  source ~/.agents/orca-workflows/scripts/contract_resume.sh
+  contract_resume_state "<CONTRACT_DIR>"
+  ```
+
+  출력 JSON의 `resume` 필드가 가리키는 §로 점프한다 — `section-1-proposal`/`-verdict`/`-override`는
+  §1의 해당 스텝부터(`round` 필드의 라운드), `section-2`는 §2부터(`attempt`/`retry`/`approved_round`
+  필드를 §2 spec과 §4 재시도 카운터로 이어받는다), `section-4`는 §4의 PASS 라우팅부터(PR 확보와
+  merge 루프는 재실행-안전 — #72), `section-5`는 `outcome` 필드 값으로 §5로. 규칙:
+  - `recent_write`가 true면(기본 10분 내 아티팩트 수정) 이전 세션의 워커가 아직 쓰고 있을 수 있다 —
+    점프하지 않는다. hitl이면 사람에게 확인하고, afk면 10분 대기 후 1회 재스캔, 그래도 true면 §5
+    afk 보존 절차로 가서 outcome=ESCALATE로 보고한다(근거: "재개 모호 — 이전 세션 워커 생존 의심").
+  - 이전 세션의 Run·터미널·task는 재사용하지 않는다 — 아래 "Run 생성"을 새로 수행해 사이드카를
+    덮어쓰고, 점프한 §가 요구하는 터미널은 새로 스폰한다.
+  - 재개가 §1을 건너뛰는 경우 `CONTRACT_APPROVED`/`CONTRACT_FINALIZED_BY_GENERATOR` outcome 로그를
+    다시 남기지 않는다 — 아티팩트가 상태 정본이고, 중복 기록하면 issue당 계약 확정이 2회로 집계된다.
+  - `section-1-*` 재개(같은 라운드 재-태움)는 같은 번호 파일을 덮어쓸 수 있다 — append-only는 라운드
+    간 규칙이다(`contract-schema.md` 크래시-재개 절).
 - CLI 기반 coordinator(Codex/agy)는 launch 시 approval·sandbox를 명시한다. codex posture는 `--dangerously-bypass-approvals-and-sandbox` — 근거·예외(headless read-only 등)는 `~/.agents/orca-workflows/models/codex.md`가 정본이다. 안전 전제는 워크트리 격리다.
 - 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 —
   `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다. §1의 두 `terminal create` 호출
@@ -65,7 +87,7 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
 
 ## 1. Contract 협상 relay
 
-`orca-task-runner`를 "제안서 작성" 모드로 호출(제안서 = `contract-schema.md` 스키마의 `proposal-r<n>.json`, **AC 초안 포함**) → `orca-evaluate`에 "검토" 모드로 전달(판정 = `verdict-r<n>.json`) → 반려면 다시 `orca-task-runner`에 전달. 산출물 경로는 §0의 `CONTRACT_DIR`와 라운드 번호로 결정론적이므로 **이 스킬은 파일을 읽지도, 경로를 추출하지도 않고 CONTRACT_DIR·라운드 번호만 중계**한다. 최대 2라운드, 그 이후는 `orca-task-runner`가 결정권을 가질 수 있다(`override.json` 존재가 그 기록이다) — 단 무조건 §2로 가는 것이 아니다. **라운드 한도 도달 시점에** — §2로 넘어가기 전에 — 다음 기계적 분기를 먼저 태운다(구조 필드 1개 추출이라 "diff/report 본문을 읽지 않는다" 원칙과 충돌하지 않는다 — dispatch-verify의 불투명 비교와 같은 결):
+`orca-task-runner`를 "제안서 작성" 모드로 호출(제안서 = `contract-schema.md` 스키마의 `proposal-r<n>.json`, **AC 초안 포함**) → `orca-evaluate`에 "검토" 모드로 전달(판정 = `verdict-r<n>.json`) → 반려면 다시 `orca-task-runner`에 전달. 산출물 경로는 §0의 `CONTRACT_DIR`와 라운드 번호로 결정론적이므로 **이 스킬은 파일을 읽지도, 경로를 추출하지도 않고 CONTRACT_DIR·라운드 번호만 중계**한다. 최대 2라운드, 그 이후는 `orca-task-runner`가 결정권을 가질 수 있다(`override.json` 존재가 그 기록이다) — 단 무조건 §2로 가는 것이 아니다. **라운드 한도 도달 시점에** — §2로 넘어가기 전에 — 다음 기계적 분기를 먼저 태운다(구조 필드 1개 추출이라 "diff/report 본문을 읽지 않는다" 원칙과 충돌하지 않는다 — dispatch-verify의 불투명 비교와 같은 결). 이 분기는 §0 재개 분기의 `contract_resume.sh`가 미러링한다 — 여기를 바꾸면 그쪽도 함께 바꾼다(`tests/test_contract_resume.py`가 스크립트 쪽을 고정한다):
 
 ```bash
 if [ ! -f "<CONTRACT_DIR>/override.json" ]; then
@@ -265,7 +287,7 @@ log_dispatch --skill "orca-workflow-task" --role "contract-round" --issue "<issu
 spec_text="<issue 번호 + CONTRACT_DIR 절대경로 + 구현 모드 + 직전 attempt 번호 + \"CONTRACT_DIR의 eval-report-a<attempt>.json과 proposal-r<확정라운드>.json을 이 순서로 전부 읽어라 — findings를 요약해 넘기지 않는다\" + orphan-폴백 계약(§0) 전문>"
 ```
 
-`<확정라운드>`는 이 세션이 §1에서 이미 로그로 남긴 `CONTRACT_APPROVED`/`CONTRACT_FINALIZED_BY_GENERATOR`의 `round` 값을 그대로 리터럴 치환한다(추가 조회 없음) — generator가 두 파일을 직접 읽는다(이 스킬은 feedback 본문도 확정 AC 본문도 중계하지 않는다).
+`<확정라운드>`는 이 세션이 §1에서 이미 로그로 남긴 `CONTRACT_APPROVED`/`CONTRACT_FINALIZED_BY_GENERATOR`의 `round` 값을 그대로 리터럴 치환한다(추가 조회 없음; §0 재개 분기로 §1을 건너뛴 세션은 그 출력의 `approved_round` 값을 쓴다) — generator가 두 파일을 직접 읽는다(이 스킬은 feedback 본문도 확정 AC 본문도 중계하지 않는다).
 
 **GATE_FAIL 라우팅** — `orca-evaluate`를 호출하지 않고 바로 §5로 간다. `orca-task-runner`가 이미 자기 재시도 예산을 다 썼으므로 여기서 추가 재시도를 걸지 않는다(이중 카운팅 방지). §5 보고에 "evaluate 호출 안 됨(GATE_FAIL) — 기계적 게이트 실패"를 명시해 아래 FAIL/ESCALATE와 구분한다. 이때도 §4의 outcome 로그 라인을 `outcome:"GATE_FAIL"`로 남긴다(§4를 거치지 않으므로 여기서 직접).
 
@@ -361,7 +383,8 @@ MERGE_CONFLICT·NO_DONE_TRANSITION)이면 아래 보고 내용을 조립한 뒤 
 - **afk** — 질문 없이 작업을 보존하고 outcome을 확정한다. 보존 = worktree·branch를 삭제하지 않고,
   CONTRACT_DIR 산출물·eval-report·로그를 그대로 두고(전부 워크스페이스 밖 영속이라 추가 복사 없음),
   §4에서 남긴 outcome 이벤트가 기록의 정본이다. spawn된 세션이면 `worker_done`으로 outcome을 전달하고
-  종료. 재개 경로는 같은 issue로의 재호출이다.
+  종료. 재개 경로는 같은 issue로의 재호출이다 — 재호출된 세션은 §0의 재개 분기가 CONTRACT_DIR
+  아티팩트 스캔으로 진행 상태를 복원해 해당 §부터 이어간다(§1부터 다시 시작하지 않는다).
 
 ## 폴백
 

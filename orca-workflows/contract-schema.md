@@ -20,7 +20,8 @@ install -d -m 700 "$CONTRACT_DIR"
 - 워크트리 밖(전역)인 이유: worktree는 merge 후 삭제되지만 retro(`orca-retro`)는 root issue close 후에
   이 기록을 읽는다. 실수 커밋 위험도 없다. per-project 폴더는 repo가 다른 같은 issue 번호끼리의
   충돌을 막는다.
-- 파일은 라운드별 append-only — r1 파일을 r2에서 수정하지 않는다. 파일은 `chmod 600`.
+- 파일은 라운드별 append-only — r1 파일을 r2에서 수정하지 않는다(라운드 간 규칙 — 크래시-재개의
+  같은 라운드 재-태움은 예외, 아래 크래시-재개 절). 파일은 `chmod 600`.
 - **launch posture 전제**: 이 경로는 워크스페이스 밖이므로, contract 파일을 쓰는 역할
   (task-runner/evaluator)을 codex로 띄울 때 `-s workspace-write` 샌드박스로는 쓸 수 없다 —
   워크스페이스 밖 쓰기가 가능한 posture여야 한다. 현행 codex posture
@@ -172,6 +173,22 @@ install -d -m 700 "$CONTRACT_DIR"
 - **이 파일이 FAIL feedback의 정본이다.** 경로가 `CONTRACT_DIR`와 attempt 번호로 결정론적이므로
   코디네이터는 attempt 번호와 확정 라운드 번호만 중계하고 본문을 요약·중계하지 않는다 — 재-dispatch된 generator가
   직접 읽는다(협상 라운드 2+의 verdict 전달과 같은 원칙).
+
+## 크래시-재개 (crash-resume)
+
+이 디렉토리의 파일명 번호(`r<n>`, `a<k>`)가 round/attempt 진행 상태의 **정본**이다 — 코디네이터
+세션의 대화 컨텍스트가 아니다(issue #156). 코디네이터 세션이 죽고 같은 issue로 재호출되면,
+`orca-workflows/scripts/contract_resume.sh`의 `contract_resume_state <CONTRACT_DIR>`가 파일 스캔만으로
+재개 지점을 재구성한다(소비자: `orca-workflow-task` §0의 재개 분기; 동작은
+`tests/test_contract_resume.py`가 고정한다).
+
+- 모호 상태(파일은 있는데 JSON 무효, 또는 `status`/`verdict` 값이 스키마 밖 — 쓰다 죽은 것)는 없는
+  것으로 취급해 그 파일의 생산 스텝을 fail-closed로 다시 태운다. 이때 같은 번호 파일을 덮어쓰는
+  것은 append-only 위반이 아니다 — append-only는 라운드 간(r1을 r2에서 수정 금지) 규칙이다.
+- override 라우팅 게이트(위 override 절)는 재개 경로에서도 동일하게 적용된다 —
+  `contract_resume.sh`가 `orca-workflow-task` §1의 인라인 분기를 미러링한다. 한쪽을 바꾸면 함께
+  바꾼다.
+- `gate-flake-a<k>.json`은 재개 라우팅에 영향을 주지 않는다(평가 입력용 정보 파일).
 
 ## 재시도 입력 격리 (evaluate attempt 2+)
 
