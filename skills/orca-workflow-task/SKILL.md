@@ -369,7 +369,14 @@ find "$HOME/.local/state/orca-workflows/logs" -name 'assignments-*.jsonl' 2>/dev
   merge_budget=1800   # CI e2e 완주까지 기다릴 수 있는 예산
   merged=false; merge_outcome=""
   while :; do
-    if gh pr merge "$pr_num" --squash --delete-branch; then merged=true; break; fi
+    # 머지 판정 근거는 gh pr merge의 종료 코드가 아니라 PR의 실제 상태다(issue #135):
+    # --squash --delete-branch는 원격 머지에 성공한 뒤 로컬 브랜치 정리에서 비-0 종료할 수 있고
+    # (main이 다른 worktree에 체크아웃 — 이 스킬의 기본 배치에서 구조적), 이미 머지된 PR은
+    # mergeStateStatus=UNKNOWN이라 아래 어느 분기에도 안 걸려 예산 소진까지 폴링하게 된다.
+    # 매 회차 진입 시(재실행 재개 케이스, #72) + merge 시도 직후 두 곳에서 상태로 판정한다.
+    if [ "$(gh pr view "$pr_num" --json state -q .state)" = "MERGED" ]; then merged=true; break; fi
+    gh pr merge "$pr_num" --squash --delete-branch || true   # 종료 코드는 판정에 쓰지 않는다
+    if [ "$(gh pr view "$pr_num" --json state -q .state)" = "MERGED" ]; then merged=true; break; fi
     state="$(gh pr view "$pr_num" --json mergeStateStatus -q .mergeStateStatus)"
     if [ "$state" = "DIRTY" ]; then
       merge_outcome=MERGE_CONFLICT; break        # base와 텍스트 충돌 — 자동 해소하지 않는다
@@ -388,6 +395,12 @@ find "$HOME/.local/state/orca-workflows/logs" -name 'assignments-*.jsonl' 2>/dev
     sleep 30
   done
   rm -f "$merge_started_file"   # 어느 분기로 끝나든 회수
+  if [ "$merged" = "true" ]; then
+    # 원격 브랜치 정리 — 머지 판정과 분리된 best-effort 후처리(issue #135). --delete-branch가
+    # 로컬 정리 단계에서 죽으면 원격 브랜치가 남을 수 있다. 실패해도(이미 삭제됨 포함) outcome에
+    # 영향을 주지 않는다.
+    git push origin --delete "<task-branch>" 2>/dev/null || true
+  fi
   # merge_outcome이 비어있지 않으면 merge되지 않은 것이다 — logging.md §1 outcome 레시피대로 그 값을
   # 남기고(GATE_FAIL과 같은 원칙: 추가 재시도 없이) 바로 §5로 분기한다. printf가 남긴
   # 마지막 state와 실패 check 이름·링크(gh pr checks "$pr_num")를 §5 보고에 첨부한다.
