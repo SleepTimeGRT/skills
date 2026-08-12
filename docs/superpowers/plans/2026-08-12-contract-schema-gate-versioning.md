@@ -431,11 +431,21 @@ In `skills/orca-workflow-task/SKILL.md`, line 432 (the single long paragraph sta
 **CONTRACT_SCHEMA_STALE**는 override 완료(override.json mtime)가 proposal-r3 요구사항 도입 시각
 (commit 79b7c3b, 2026-08-12T09:44:57+09:00)보다 이전이라는 뜻이다 — 위반이 아니라 구버전 세션이므로
 이 두 시각을 그대로 표시한다. 사람의 선택지: (a) `verdict-r2.json`의 미해소 `reasons`를 반영해
-`proposal-r3.json`을 수동으로 작성한 뒤, worktree에 구현이 이미 있다면 **§2를 재실행하지 말고 §1의
-evaluate-dispatch 블록만 그 diff를 가리켜 수동으로 재사용**한다(§2 재실행은 이미 완료된 구현을 다시
-만들 위험이 있다 — 별도 공백, issue #161). 구현이 없으면 정상적으로 §2부터 재개한다. (b) 완료된
-작업을 폐기하고 재협상을 지시한다.
+`proposal-r3.json`을 수동으로 작성한다 — 이때 worktree에 구현이 이미 있어도 **§2를 기계적으로
+재실행해 이미 끝난 구현을 덮어쓰지 않도록 주의한다**: §2 "Dispatch 실행부"는 "`orca-task-runner`를
+dispatch하지 않고 코디네이터가 직접 코드를 작성·수정해 §3로 가는 경로는 존재하지 않는다"(issue #128)고
+명시하므로, 기존 diff를 그대로 §3 evaluate로 넘기는 정식 경로가 이 스킬에 현재 없다 — 이 공백은 별도
+issue #161로 추적하며, 사람이 상황을 보고 직접 진행 방식을 정한다. 구현이 없으면 정상적으로 §2부터
+재개한다. (b) 완료된 작업을 폐기하고 재협상을 지시한다.
 ```
+
+**수정 이력(Task 3 구현 중 발견, 이 plan 원문을 정정)**: 위 문단은 원래 "§2를 재실행하지 말고 §1의
+evaluate-dispatch 블록만 재사용"을 제안했으나, 이는 실재하지 않는 경로다 — §2 "Dispatch 실행부"(issue
+#128)가 "코디네이터가 직접 코드를 작성·수정해 §3로 가는 경로는 존재하지 않는다"고 명시하고, §3
+"Generate 감사 게이트"(issue #128)가 매 evaluate dispatch 전에 해당 attempt의 `role="task-runner"`
+assign 기록 존재를 기계적으로 확인해 없으면 §2로 되돌린다 — 즉 "이미 있는 diff를 evaluate에 바로
+넘기는" 우회로가 이 스킬에 없다. Task 3 구현자가 이 모순을 발견해 위 문단을 정정했다(advisor 검증
+2회 거침). 이 공백 자체는 issue #161이 이미 다루는 범위와 같은 결이다 — 별도 이슈를 새로 열지 않는다.
 
 - [ ] **Step 4: Manually re-read the edited sections for consistency**
 

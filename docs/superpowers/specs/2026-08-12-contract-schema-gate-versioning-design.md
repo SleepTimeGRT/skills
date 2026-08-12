@@ -128,10 +128,18 @@ _cr_predates_r3_gate() {   # $1 = probed file. echoes 1(stale)|0(on/after gate) 
 
 > **`CONTRACT_SCHEMA_STALE`**: override 완료(mtime `<t1>`)가 이 게이트 도입 시각(`<t2>`, commit
 > 79b7c3b) 이전 — 위반이 아니라 구버전 세션. 사람의 선택지: (a) `verdict-r2.json`의 미해소
-> `reasons`를 반영해 `proposal-r3.json`을 수동 작성한 뒤, **worktree에 구현이 이미 있다면 §2를
-> 재실행하지 말고 §1의 evaluate-dispatch 블록만 그 diff를 가리켜 수동으로 재사용**한다(§2 재실행은
-> 이미 완료된 구현을 다시 만들 위험이 있다 — 별도 공백, issue #161). 구현이 없으면 정상적으로
-> §2부터 재개한다. (b) 완료된 작업을 폐기하고 재협상을 지시한다.
+> `reasons`를 반영해 `proposal-r3.json`을 수동 작성한다 — 이때 worktree에 구현이 이미 있어도
+> **§2를 기계적으로 재실행해 이미 끝난 구현을 덮어쓰지 않도록 주의한다**: §2 "Dispatch 실행부"는
+> "코디네이터가 직접 코드를 작성·수정해 §3로 가는 경로는 존재하지 않는다"(issue #128)고 명시하므로,
+> 기존 diff를 그대로 §3 evaluate로 넘기는 정식 경로가 이 스킬에 현재 없다 — 이 공백은 issue #161로
+> 추적하며, 사람이 상황을 보고 직접 진행 방식을 정한다. 구현이 없으면 정상적으로 §2부터 재개한다.
+> (b) 완료된 작업을 폐기하고 재협상을 지시한다.
+
+**정정(구현 단계에서 발견)**: 이 문단은 애초 "§2를 재실행하지 말고 §1의 evaluate-dispatch 블록만
+재사용"을 제안했으나, 이는 실재하지 않는 경로였다 — §2 "Dispatch 실행부"(issue #128)와 §3 "Generate
+감사 게이트"(issue #128, 매 evaluate dispatch 전 `role="task-runner"` assign 기록을 기계적으로 확인)가
+함께 "이미 있는 diff를 evaluate에 바로 넘기는" 우회를 명시적으로 차단한다. 구현 중 이 모순이 발견돼
+위 문단을 정정했다.
 
 ## enum 등록
 
