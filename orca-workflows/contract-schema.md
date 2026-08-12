@@ -32,9 +32,9 @@ install -d -m 700 "$CONTRACT_DIR"
 
 | file | writer | when |
 |---|---|---|
-| `proposal-r<n>.json` | orca-task-runner (generator) | 라운드 n 제안 (r3+는 override 후속 라운드 — 아래 절) |
+| `proposal-r<n>.json` | orca-task-runner (generator) | 라운드 n 제안 (r3는 라운드 2→3 조건부 연장 시 정식 협상 라운드, 그 외에는 r3+가 override 후속 라운드 — 아래 두 절) |
 | `verdict-r<n>.json` | orca-evaluate (evaluator) | 라운드 n 판정 |
-| `override.json` | orca-task-runner | 2라운드에도 rejected일 때 결정권 행사 기록 |
+| `override.json` | orca-task-runner | 2라운드에도 rejected일 때 결정권 행사 기록 (라운드 2→3 조건부 연장이 발동했으면 3라운드 — 아래 두 절) |
 | `gate-flake-a<k>.json` | orca-task-runner (generator) | attempt k의 task 게이트가 재시도 후 통과(flake 재분류)했을 때만 |
 | `eval-report-a<k>.json` | orca-evaluate (evaluator) | 구현 attempt k의 평가 판정 기록 |
 
@@ -59,7 +59,7 @@ install -d -m 700 "$CONTRACT_DIR"
   "명시적으로 없음"이다 — 필드가 아예 없으면 스키마 위반이므로 "언급 안 함" 상태는 존재할 수
   없다(종전 prose 제안서의 "공란 vs 없음" 구분을 스키마 필수성이 대체한다). `verification_plan[].fails_before_fix`도 같은 규칙이다 — 비어 있거나 필드 자체가 없으면 스키마 위반이다. 변별 불가일 때도 침묵이 아니라 그 사실을 명시적으로 적는다 — 예: 이 항목이 fix 전후 구분이 불가능한 이유를 그대로 서술한다. **무동작(no-op) 통과 금지**: `fails_before_fix`를 채울 때, 이 검증 방법이 stub/no-op(빈 구현, 아무 것도 하지 않는 구현)에서도 통과하는지 스스로 점검한다. 통과한다면 그 검증 방법 자체가 스키마 위반이다 — 구조적 존재 확인(예: 특정 API 호출 문자열이 소스에 있는지)만으로는 무동작 구현을 배제하지 못하는 경우가 이에 해당한다. 여러 경로를 커버해도 전부 구조적 확인이면 여전히 무동작을 통과시킨다는 점에 유의한다(happy-path만 커버 금지 규칙과는 별개 축).
 - **설득 서술 필드는 의도적으로 없다.** "왜 이 제안이 충분한가"류 정당화는 어떤 필드에도 넣지
-  않는다(`scope.summary` 포함 — 사실 서술만). `verification_plan[].fails_before_fix`도 같은 경계를 따른다 — pre-fix 동작에 대한 사실 서술이지 "왜 이 항목이 검증으로 충분한가" 정당화가 아니다. 근거는 아래 "라운드 2 입력 격리".
+  않는다(`scope.summary` 포함 — 사실 서술만). `verification_plan[].fails_before_fix`도 같은 경계를 따른다 — pre-fix 동작에 대한 사실 서술이지 "왜 이 항목이 검증으로 충분한가" 정당화가 아니다. 근거는 아래 "라운드 2+ 입력 격리".
 - `verification_plan[].covers`는 `draft_acceptance_criteria`의 id만 참조한다. 어떤 plan 항목도
   커버하지 않는 ac id가 남으면 evaluator가 기계적으로 잡을 수 있다. `fails_before_fix`가 비어 있거나 없거나 "fix 이후에도 동일하다"고 스스로 적은 항목도 evaluator가 기계적으로 반려할 수 있다.
 - `draft_acceptance_criteria`의 각 항목은 (a) **binary**(판정 가능 — "좋다/나쁘다" 같은 주관적
@@ -277,7 +277,7 @@ override.json 먼저 — 크래시 시 재구성이 "override 없이 r3만 있�
 attempt 2+의 리뷰 입력에 추가되는 것은 **자신의 직전 `eval-report-a<k-1>.json`의 findings**뿐이다
 (지적 항목이 실제 수정됐는지 확인용 — 협상 라운드 2가 자신의 `verdict-r1.json`을 입력으로 받는
 것과 동일). generator의 수정 요약·서술형 해명은 입력에 넣지 않는다 — 판정을 바꾸는 근거는 diff의
-사실 변화뿐이다("라운드 2 입력 격리"와 같은 근거, arXiv:2509.16533).
+사실 변화뿐이다("라운드 2+ 입력 격리"와 같은 근거, arXiv:2509.16533).
 
 ## 확정 AC의 정본
 
@@ -298,11 +298,13 @@ adversarial-review 프롬프트 차용 + grounding 제약):
 - "무동작(no-op) 구현을 상상해 이 `verification_plan` 항목이 통과하는지 자문한다 — 통과하면 그
   자체로 결함이다."
 
-## 라운드 2 입력 격리 (sycophancy 방어)
+## 라운드 2+ 입력 격리 (sycophancy 방어)
 
-evaluator의 라운드 2 입력은 정확히 셋: **원본 issue 전문, `proposal-r2.json`, 자신의
-`verdict-r1.json`.** generator의 서술형 반박·해명은 입력에 존재하지 않는다 — proposal 스키마에
-그런 필드가 없어서 구조적으로 배제된다. 판정 지침에 다음을 명시한다:
+evaluator의 라운드 N(N≥2) 입력은 정확히 셋: **원본 issue 전문, `proposal-r<N>.json`, 자신의
+`verdict-r<N-1>.json`.** 라운드 3(조건부 연장이 발동한 경우)도 동일하게 적용한다 — 입력은 원본
+issue 전문·`proposal-r3.json`·`verdict-r2.json` 셋뿐이다. generator의 서술형 반박·해명은 입력에
+존재하지 않는다 — proposal 스키마에 그런 필드가 없어서 구조적으로 배제된다. 판정 지침에 다음을
+명시한다:
 
 > "직전 판정을 뒤집을 때는 proposal의 사실 변화(필드 수준 차이)에 근거해야 한다. 단순 재제출·표현
 > 변경은 뒤집을 근거가 아니다."

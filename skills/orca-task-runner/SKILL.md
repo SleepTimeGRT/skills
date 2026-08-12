@@ -98,7 +98,7 @@ spec으로 받은 `CONTRACT_DIR`에 `proposal-r<라운드>.json`으로,
   완료 기준. 항목마다 id를 부여한다. issue 본문에 AC류 섹션이 이미 있으면 초안의 입력으로 쓰되,
   정본은 이 초안이다.
 - 구현 범위(`scope`) — 무엇을 만들 것인가, 어떤 파일을 건드릴 것인가. **사실 서술만** — "왜
-  충분한가"류 정당화는 어떤 필드에도 넣지 않는다(스키마 문서의 "라운드 2 입력 격리" 참고).
+  충분한가"류 정당화는 어떤 필드에도 넣지 않는다(스키마 문서의 "라운드 2+ 입력 격리" 참고).
 - 검증 방법(`verification_plan`) — 구체적인 파일/함수/테스트로, 항목마다 커버하는 ac id를
   `covers`로 참조하고 이 항목이 fix 이전에 어떻게 실패하는지(또는 왜 실패할 수 없는지)를 `fails_before_fix`에 적는다. 어떤 항목도 커버하지 않는 ac id가 남거나 `fails_before_fix`가 비어 있거나 없으면 반려 대상이다.
 - 의도된 destructive 오퍼레이션(`destructive_operations`) — 빈 배열이 "명시적 없음"이다. 이 선언은
@@ -108,7 +108,7 @@ spec으로 받은 `CONTRACT_DIR`에 `proposal-r<라운드>.json`으로,
   단언 중 이 변경으로 red가 될 것은 여기 별도로 열거한다(정확 일치 단언, 게이트 자체를 막는 회귀를
   특히 놓치기 쉽다).
 
-`orca-evaluate`가 이 제안(AC 초안 포함)을 **원본 issue 전문**에 대조해 검토하고 `verdict-r<라운드>.json`으로 판정을 남긴다. 반려되면 그 `reasons`를 읽고 **수정된 사실로** 다시 제안한다(`proposal-r2.json` — 서술형 반박이 아니라 필드 수준의 변경으로 응답한다). 각 라운드는 별도 dispatch로 도착한다: 제안서를 쓰고 나면 이번 턴을 끝낸다(주입된 preamble의 worker_done 지시대로), 같은 턴 안에서 반려 여부를 기다리거나 폴링하지 않는다. **최대 2 라운드.** 2라운드 안에 합의가 안 되면 이 스킬(generator)이 결정권을 가지고 진행한다 — evaluator의 verdict 파일은 수정하지 않고, `override.json`(스키마 문서 참고)에 미해소 `reasons`를 복사해 남긴 **직후 같은 스텝에서 `proposal-r3.json`을 새로 쓴다**(`verdict-r2.json`의 reasons 중 해소한 항목을 반영한 최종 확정 계약, `round: 3`, verdict 없음 — 쓰기 순서는 override.json 먼저, 스키마 문서의 "override 후속 라운드" 절이 정본, issue #130). 동결된 이전 라운드 파일(`proposal-r1/r2`)은 절대 제자리 수정하지 않는다. 이후 모든 단계(§2 subtask 분해 포함)가 참조하는 확정 AC는 최종 라운드(가장 큰 n) proposal의 `draft_acceptance_criteria`다.
+`orca-evaluate`가 이 제안(AC 초안 포함)을 **원본 issue 전문**에 대조해 검토하고 `verdict-r<라운드>.json`으로 판정을 남긴다. 반려되면 그 `reasons`를 읽고 **수정된 사실로** 다시 제안한다(`proposal-r2.json` — 서술형 반박이 아니라 필드 수준의 변경으로 응답한다). 각 라운드는 별도 dispatch로 도착한다: 제안서를 쓰고 나면 이번 턴을 끝낸다(주입된 preamble의 worker_done 지시대로), 같은 턴 안에서 반려 여부를 기다리거나 폴링하지 않는다. **최대 2 라운드(조건부로 3 — 아래 "라운드 2→3 조건부 연장" 문단 참고).** 2라운드 안에 합의가 안 되면 이 스킬(generator)이 결정권을 가지고 진행한다 — evaluator의 verdict 파일은 수정하지 않고, `override.json`(스키마 문서 참고)에 미해소 `reasons`를 복사해 남긴 **직후 같은 스텝에서 `proposal-r3.json`을 새로 쓴다**(`verdict-r2.json`의 reasons 중 해소한 항목을 반영한 최종 확정 계약, `round: 3`, verdict 없음 — 쓰기 순서는 override.json 먼저, 스키마 문서의 "override 후속 라운드" 절이 정본, issue #130). 동결된 이전 라운드 파일(`proposal-r1/r2`)은 절대 제자리 수정하지 않는다. 이후 모든 단계(§2 subtask 분해 포함)가 참조하는 확정 AC는 최종 라운드(가장 큰 n) proposal의 `draft_acceptance_criteria`다.
 
 **라운드 2→3 조건부 연장**(`contract-schema.md`): 라운드2 반려 사유가 `plan_coverage`뿐이면,
 코디네이터가 override 모드 대신 "라운드3 제안서 작성" 모드로 재호출할 수 있다 — 그 경우 이 스킬은
