@@ -98,6 +98,31 @@ install -d -m 700 "$CONTRACT_DIR"
   소비자(generator, coordinator의 기계적 검사)는 이 불변식으로 파일 정합성을 확인한다.
 - `"rejected"`면 `reasons`는 비어 있을 수 없다.
 
+## 라운드 2→3 조건부 연장 (issue: contract-sprint-improvements, 2026-08-12)
+
+`verdict-r2.json`이 `rejected`이고 `reasons[].target`이 전부 `"plan_coverage"`(즉
+`"ac_fidelity"`가 하나도 없음)면, 아래 "override" 절의 라운드 한도(2)에 아직 도달한 것으로 보지
+않는다 — override 대신 `proposal-r3.json`(정식 협상 라운드, verdict 있음)을 한 번 더 허용한다.
+
+- `verdict-r3.json` → `approved`: 확정 AC = `proposal-r3`("확정 AC의 정본" 절이 이미 라운드
+  번호에 열려 있어 별도 처리 불필요), 정상 종료.
+- `verdict-r3.json` → `rejected`이고 `reasons[].target`에 `"ac_fidelity"`가 하나라도 있음: 아래
+  "override" 절의 `ac_fidelity` 규칙을 그대로 적용 — `CONTRACT_ESCALATE`(단 `round=3`으로 기록).
+- `verdict-r3.json` → `rejected`이고 여전히 `plan_coverage`-only: 아래 "override" 절차를 그대로
+  한 라운드 밀어서 수행 — `override.json`(`final_round: 3`) 작성 직후 같은 스텝에서
+  `proposal-r4.json`(신규 최종 확정 계약, verdict 없음)을 작성한다.
+
+`ac_fidelity`가 라운드2에 이미 있으면 이 연장은 발동하지 않는다 — 아래 "override" 절의 라운드1→2
+규칙이 그대로 적용된다(이 연장은 라운드1→2 게이트를 변경하지 않는다).
+
+**`ROUND3_NEGOTIATION_SINCE`**(이 절 도입 시각 — 아래 "override" 절의 `R3_REQUIRED_SINCE`와 동일
+패턴, `orca-workflows/scripts/contract_resume.sh`와 `orca-workflow-task` SKILL.md §1이 정의): 이
+연장 도입 이전에는 `verdict-r2.json`이 `plan_coverage`-only로 반려되면 항상 즉시 override했다
+(`final_round: 2`). 도입 이후에는 이 절의 규칙대로 라운드3을 먼저 시도한다. `override.json`의
+`final_round: 2` + `plan_coverage`-only 조합을 만났을 때, 그 `override.json`의 mtime이 이 상수
+이전이면 legacy(정상 종료)로, 이후면 이례 상태(코디네이터/생성기 불일치)로 구분한다 — 정확한
+비교 메커니즘은 위 `R3_REQUIRED_SINCE`와 동일(`touch -t` + `find -newer`, TZ=Asia/Seoul 고정).
+
 ## override.json
 
 ```json
@@ -111,7 +136,9 @@ install -d -m 700 "$CONTRACT_DIR"
 }
 ```
 
-- 2라운드에도 rejected일 때만 존재한다. evaluator의 verdict 파일은 수정하지 않는다 — 판정은
+- 2라운드에도 rejected일 때만 존재한다(위 "라운드 2→3 조건부 연장" 절의 조건에 해당하면 3라운드에
+  도달할 때까지 미룬다 — 그 경우 `final_round: 3`). evaluator의 verdict 파일은 수정하지 않는다 —
+  판정은
   rejected로 남고, 진행 결정만 여기 기록된다. `unresolved_reasons`는 `verdict-r2.json`의
   `reasons` 중 generator가 해소하지 못한 항목을 그대로 복사한다.
 - **override의 라우팅은 무조건 진행이 아니다** — 코디네이터(`orca-workflow-task` §1)가 기계적으로
@@ -130,7 +157,9 @@ install -d -m 700 "$CONTRACT_DIR"
 ## override 후속 라운드 (proposal-r3+, issue #130)
 
 override는 협상의 종착점이지 계약의 종착점이 아니다 — override 발동 시 generator는
-`override.json`을 쓴 **직후, 같은 스텝에서** `proposal-r3.json`을 새로 쓴다(쓰기 순서 고정:
+`override.json`을 쓴 **직후, 같은 스텝에서** 확정 계약(`final_round: 2`면 `proposal-r3.json`,
+"라운드 2→3 조건부 연장"이 발동해 `final_round: 3`이면 `proposal-r4.json`)을 새로 쓴다(쓰기 순서
+고정:
 override.json 먼저 — 크래시 시 재구성이 "override 없이 r3만 있는" 비정상 상태를 만들지 않게).
 
 - `proposal-r3.json` = `verdict-r2.json`의 `reasons` 중 generator가 해소한 항목을 반영한 **최종
