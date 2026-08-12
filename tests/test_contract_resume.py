@@ -220,7 +220,7 @@ def test_override_without_r3_reruns_override_step(tmp_path: Path, shell: str) ->
     assert state["round"] == 3
 
 
-R3_REQUIRED_SINCE_EPOCH = 1786495497  # 2026-08-12T09:44:57+09:00 -- mirrors contract_resume.sh's R3_REQUIRED_SINCE
+R3_REQUIRED_SINCE_EPOCH = 1786495497  # 2026-08-12T09:44:57+09:00, commit 79b7c3b -- mirrors contract_resume.sh's R3_REQUIRED_SINCE
 
 
 def _set_mtime(path: Path, epoch: float) -> None:

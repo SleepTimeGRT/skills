@@ -53,7 +53,10 @@ _cr_json_object() {
 # contract-schema.md "override 후속 라운드" 절 도입 시점(commit 79b7c3b, issue #130) -- 이 값을
 # 바꾸는 건 그 요구사항 자체가 또 바뀔 때뿐이다(현재 재도입 계획 없음, issue #160).
 # orca-workflow-task SKILL.md §1의 동일 상수와 짝이다 -- 바꾸면 함께 바꾼다.
-# touch -t 포맷 [[CC]YY]MMDDhhmm[.SS] -- 이 파이프라인이 도는 머신의 로컬 TZ(KST) 기준.
+# touch -t 포맷 [[CC]YY]MMDDhhmm[.SS], KST(Asia/Seoul) 기준으로 해석되도록 TZ를 아래서 명시
+# 고정한다 -- touch -t는 인자 없이 부르면 프로세스의 TZ 환경변수(호스트 로컬 설정)로 해석하므로,
+# 고정하지 않으면 이 머신이 KST가 아닌 곳에서 돌 때 최대 수 시간 오차가 생긴다(issue #160 리뷰에서
+# 실측: TZ=UTC로 같은 문자열을 해석하면 9시간 차이 나는 다른 epoch가 나옴).
 R3_REQUIRED_SINCE='202608120944.57'
 
 _cr_predates_r3_gate() {
@@ -63,7 +66,7 @@ _cr_predates_r3_gate() {
   # stat -f means "filesystem info", not mtime) silently feeding garbage into a numeric comparison.
   local ref
   ref="$(mktemp "${TMPDIR:-/tmp}/contract-resume-r3gate.XXXXXX")" || return $?
-  touch -t "$R3_REQUIRED_SINCE" "$ref" 2>/dev/null
+  TZ='Asia/Seoul' touch -t "$R3_REQUIRED_SINCE" "$ref" 2>/dev/null
   if [ -n "$(find "$(dirname "$1")" -maxdepth 1 -name "$(basename "$1")" -newer "$ref" 2>/dev/null)" ]; then
     printf '0'
   else
