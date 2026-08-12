@@ -110,6 +110,13 @@ spec으로 받은 `CONTRACT_DIR`에 `proposal-r<라운드>.json`으로,
 
 `orca-evaluate`가 이 제안(AC 초안 포함)을 **원본 issue 전문**에 대조해 검토하고 `verdict-r<라운드>.json`으로 판정을 남긴다. 반려되면 그 `reasons`를 읽고 **수정된 사실로** 다시 제안한다(`proposal-r2.json` — 서술형 반박이 아니라 필드 수준의 변경으로 응답한다). 각 라운드는 별도 dispatch로 도착한다: 제안서를 쓰고 나면 이번 턴을 끝낸다(주입된 preamble의 worker_done 지시대로), 같은 턴 안에서 반려 여부를 기다리거나 폴링하지 않는다. **최대 2 라운드.** 2라운드 안에 합의가 안 되면 이 스킬(generator)이 결정권을 가지고 진행한다 — evaluator의 verdict 파일은 수정하지 않고, `override.json`(스키마 문서 참고)에 미해소 `reasons`를 복사해 남긴 **직후 같은 스텝에서 `proposal-r3.json`을 새로 쓴다**(`verdict-r2.json`의 reasons 중 해소한 항목을 반영한 최종 확정 계약, `round: 3`, verdict 없음 — 쓰기 순서는 override.json 먼저, 스키마 문서의 "override 후속 라운드" 절이 정본, issue #130). 동결된 이전 라운드 파일(`proposal-r1/r2`)은 절대 제자리 수정하지 않는다. 이후 모든 단계(§2 subtask 분해 포함)가 참조하는 확정 AC는 최종 라운드(가장 큰 n) proposal의 `draft_acceptance_criteria`다.
 
+**라운드 2→3 조건부 연장**(`contract-schema.md`): 라운드2 반려 사유가 `plan_coverage`뿐이면,
+코디네이터가 override 모드 대신 "라운드3 제안서 작성" 모드로 재호출할 수 있다 — 그 경우 이 스킬은
+평소 라운드 갱신과 동일하게(§1 본문의 "반려되면...다시 제안") `verdict-r2.json`을 읽고
+`proposal-r3.json`을 작성한다(override.json 작성 없음). 라운드3도 반려되면 그때 override
+모드로 재호출된다 — 그 경우 `override.json`(`final_round: 3`) + `proposal-r4.json`(최종
+확정)을 쓴다(위 override 절차와 동일하되 라운드 번호만 한 칸씩 밀림).
+
 ## 2. Subtask DAG 구성
 
 합의된 범위로 subtask를 쪼갠다. 각 subtask가 만들/수정할 파일 목록을 비교: **겹치면 `--deps` 순차 의존, 독립이면 같은 wave.** 판정이 애매하면 보수적으로 의존 처리.
