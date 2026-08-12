@@ -57,11 +57,17 @@ install -d -m 700 "$CONTRACT_DIR"
 
 - **모든 필드 필수.** `destructive_operations`/`existing_tests_affected`의 빈 배열 `[]`은
   "명시적으로 없음"이다 — 필드가 아예 없으면 스키마 위반이므로 "언급 안 함" 상태는 존재할 수
-  없다(종전 prose 제안서의 "공란 vs 없음" 구분을 스키마 필수성이 대체한다). `verification_plan[].fails_before_fix`도 같은 규칙이다 — 비어 있거나 필드 자체가 없으면 스키마 위반이다. 변별 불가일 때도 침묵이 아니라 그 사실을 명시적으로 적는다 — 예: 이 항목이 fix 전후 구분이 불가능한 이유를 그대로 서술한다.
+  없다(종전 prose 제안서의 "공란 vs 없음" 구분을 스키마 필수성이 대체한다). `verification_plan[].fails_before_fix`도 같은 규칙이다 — 비어 있거나 필드 자체가 없으면 스키마 위반이다. 변별 불가일 때도 침묵이 아니라 그 사실을 명시적으로 적는다 — 예: 이 항목이 fix 전후 구분이 불가능한 이유를 그대로 서술한다. **무동작(no-op) 통과 금지**: `fails_before_fix`를 채울 때, 이 검증 방법이 stub/no-op(빈 구현, 아무 것도 하지 않는 구현)에서도 통과하는지 스스로 점검한다. 통과한다면 그 검증 방법 자체가 스키마 위반이다 — 구조적 존재 확인(예: 특정 API 호출 문자열이 소스에 있는지)만으로는 무동작 구현을 배제하지 못하는 경우가 이에 해당한다. 여러 경로를 커버해도 전부 구조적 확인이면 여전히 무동작을 통과시킨다는 점에 유의한다(happy-path만 커버 금지 규칙과는 별개 축).
 - **설득 서술 필드는 의도적으로 없다.** "왜 이 제안이 충분한가"류 정당화는 어떤 필드에도 넣지
   않는다(`scope.summary` 포함 — 사실 서술만). `verification_plan[].fails_before_fix`도 같은 경계를 따른다 — pre-fix 동작에 대한 사실 서술이지 "왜 이 항목이 검증으로 충분한가" 정당화가 아니다. 근거는 아래 "라운드 2 입력 격리".
 - `verification_plan[].covers`는 `draft_acceptance_criteria`의 id만 참조한다. 어떤 plan 항목도
   커버하지 않는 ac id가 남으면 evaluator가 기계적으로 잡을 수 있다. `fails_before_fix`가 비어 있거나 없거나 "fix 이후에도 동일하다"고 스스로 적은 항목도 evaluator가 기계적으로 반려할 수 있다.
+- `draft_acceptance_criteria`의 각 항목은 (a) **binary**(판정 가능 — "좋다/나쁘다" 같은 주관적
+  기준 금지) (b) **independent**(정확히 한 가지만 검증 — 여러 조건을 접속사로 묶지 않음) (c) 배열에
+  쓰는 순서가 곧 **중요도 순서**(ordered by importance)여야 한다. 새 필드를 추가하지 않는다 — 배열
+  순서 자체가 우선순위다. evaluator는 이 3원칙 위반을 `ac_fidelity` 반려 사유로 삼을 수 있다(Spec-
+  Driven Development 관행 — round1 반려율 88%의 근본 원인이 AC 자체 품질이라는 실측 근거,
+  `docs/superpowers/specs/2026-08-12-contract-sprint-improvements-design.md`).
 
 ## verdict-r&lt;n&gt;.json
 
@@ -240,6 +246,8 @@ adversarial-review 프롬프트 차용 + grounding 제약):
 - "선의, 부분적 커버, '후속에서 보완 예정'에 점수를 주지 않는다."
 - "happy-path만 커버하는 검증 계획은 그 자체로 결함으로 보고한다."
 - "결함을 지어내지 않는다 — 모든 reason은 원본 issue 또는 proposal의 구체 필드를 가리켜야 한다."
+- "무동작(no-op) 구현을 상상해 이 `verification_plan` 항목이 통과하는지 자문한다 — 통과하면 그
+  자체로 결함이다."
 
 ## 라운드 2 입력 격리 (sycophancy 방어)
 
