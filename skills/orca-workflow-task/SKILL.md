@@ -91,7 +91,7 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
 
 `orca-task-runner`를 "제안서 작성" 모드로 호출(제안서 = `contract-schema.md` 스키마의 `proposal-r<n>.json`, **AC 초안 포함**) → `orca-evaluate`에 "검토" 모드로 전달(판정 = `verdict-r<n>.json`) → 반려면 다시 `orca-task-runner`에 전달. 산출물 경로는 §0의 `CONTRACT_DIR`와 라운드 번호로 결정론적이므로 **이 스킬은 파일을 읽지도, 경로를 추출하지도 않고 CONTRACT_DIR·라운드 번호만 중계**한다. 최대 2라운드, 그 이후는 `orca-task-runner`가 결정권을 가질 수 있다(`override.json` 존재가 그 기록이다) — 단 무조건 §2로 가는 것이 아니다. **라운드 한도 도달 시점에** — §2로 넘어가기 전에 — 다음 기계적 분기를 먼저 태운다(구조 필드 1개 추출이라 "diff/report 본문을 읽지 않는다" 원칙과 충돌하지 않는다 — dispatch-verify의 불투명 비교와 같은 결). 이 분기는 §0 재개 분기의 `contract_resume.sh`가 미러링한다 — 여기를 바꾸면 그쪽도 함께 바꾼다(`tests/test_contract_resume.py`가 스크립트 쪽을 고정한다):
 
-**라운드 2→3 조건부 연장** — 위 "라운드 한도 도달 시점" 분기를 태우기 전에, `verdict-r2.json`이
+**라운드 2→3 조건부 연장** — 아래 "라운드 한도 도달 시점" 분기를 태우기 전에, `verdict-r2.json`이
 `rejected`이고 `reasons[].target`이 전부 `"plan_coverage"`면(즉 `ac_fidelity`가 하나도 없으면)
 아래 분기 대신 이 분기를 태운다 — 아직 라운드 한도(2)에 도달한 것으로 보지 않는다:
 
@@ -112,7 +112,7 @@ else
 fi
 ```
 
-라운드3이 반려됐을 때(`verdict-r3.json` 존재, `rejected`)의 분기 — 위와 동일한 구조를 한 라운드
+라운드3이 반려됐을 때(`verdict-r3.json` 존재, `rejected`)의 분기 — 아래와 동일한 구조를 한 라운드
 밀어서:
 
 ```bash
@@ -121,9 +121,10 @@ if [ ! -f "<CONTRACT_DIR>/override.json" ]; then
 elif [ ! -f "<CONTRACT_DIR>/verdict-r3.json" ]; then
   # override는 있는데 라운드3 verdict가 없다 — fail-closed: outcome=CONTRACT_ESCALATE로 남기고 §5로.
 elif [ ! -f "<CONTRACT_DIR>/proposal-r4.json" ]; then
-  # override 기록은 있는데 확정 계약(proposal-r4, final_round=3)이 없다 — 쓰다 죽은 것, 다시 태운다.
-  # (이 경로는 ROUND3_NEGOTIATION_SINCE 이후에만 존재할 수 있으므로 R3_REQUIRED_SINCE류의
-  # predates-게이트가 필요 없다 — 이 확장 자체가 그 게이트 도입과 동시에 생긴 기능이다.)
+  # override 기록(final_round=3)과 verdict-r3.json은 있는데 확정 계약(proposal-r4)이 없다.
+  # worker_done까지 왔으므로 쓰다 죽은 게 아니다 — 기록 계약 위반이다. final_round=3은 이 확장
+  # 자체가 도입한 개념이라 legacy 세션이 있을 수 없으므로(R3_REQUIRED_SINCE류의 staleness 구분
+  # 자체가 불필요) 곧장 fail-closed: outcome=CONTRACT_ESCALATE, round=3으로 남기고 §5로.
 elif jq -e '[.reasons[].target] | index("ac_fidelity")' "<CONTRACT_DIR>/verdict-r3.json" >/dev/null; then
   # AC 자체에 이견이 남음 — outcome=CONTRACT_ESCALATE, round=3으로 남기고 §5로.
 else
@@ -131,15 +132,6 @@ else
   # 남기고 §2로(확정 AC=proposal-r4).
 fi
 ```
-
-**`ROUND3_NEGOTIATION_SINCE`**: `override.json`의 `final_round`가 `2`이고 verdict-r2가
-`plan_coverage`-only인데, 그 `override.json`의 mtime이 이 상수(`contract-schema.md` "라운드 2→3
-조건부 연장" 절, `contract_resume.sh`와 동일 — 바꾸면 함께 바꾼다) 이전이면 legacy 세션(정상
-종료, 위 "라운드 한도 도달 시점" 분기의 기존 `else` 그대로), 이후면 이례 상태
-(outcome=CONTRACT_ESCALATE, detail에 "override.json(final_round=2, plan_coverage-only)이 라운드
-2→3 조건부 연장 도입 이후 발견됨 — 코디네이터/생성기 불일치" 기록). 비교 메커니즘은 위
-`R3_REQUIRED_SINCE` 블록과 동일한 `touch -t` + `find -newer` 패턴을 상수만
-바꿔 재사용한다.
 
 ```bash
 if [ ! -f "<CONTRACT_DIR>/override.json" ]; then
