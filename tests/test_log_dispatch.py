@@ -173,6 +173,40 @@ def test_missing_required_argument_returns_nonzero_and_writes_nothing(tmp_path, 
 
 
 @pytest.mark.parametrize("shell", SHELLS)
+def test_attempt_written_as_number(tmp_path, shell):
+    """Issue #128: the implementation-mode dispatch carries an attempt number so the assign record
+    joins mechanically with CONTRACT_DIR's eval-report-a<k>.json -- without it, "was the FAIL
+    re-dispatch really sent to orca-task-runner" is unanswerable from logs alone."""
+    result, home = _run(tmp_path, CALL + " --attempt 2", shell=shell)
+    assert result.returncode == 0, result.stderr
+    rec = _assign_lines(home)[0]
+    assert rec["attempt"] == 2  # a JSON number, not the string "2"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_attempt_omitted_when_not_passed(tmp_path, shell):
+    result, home = _run(tmp_path, CALL, shell=shell)
+    assert result.returncode == 0, result.stderr
+    assert "attempt" not in _assign_lines(home)[0]
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_attempt_empty_value_omits_the_field(tmp_path, shell):
+    """Same policy as log_outcome's optional flags (#127): empty value means omit, never ""."""
+    result, home = _run(tmp_path, CALL + ' --attempt ""', shell=shell)
+    assert result.returncode == 0, result.stderr
+    assert "attempt" not in _assign_lines(home)[0]
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_attempt_non_numeric_is_a_caller_error(tmp_path, shell):
+    script = CALL + " --attempt abc\necho rc=$?"
+    result, home = _run(tmp_path, script, shell=shell)
+    assert "rc=64" in result.stdout
+    assert not _assign_lines(home)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
 def test_missing_repo_returns_nonzero_and_writes_nothing(tmp_path, shell):
     """Issue #158: repo is a required field -- without it, records from different repositories
     sharing an issue number are indistinguishable, which is exactly the cross-repo log pollution

@@ -54,7 +54,11 @@ chmod 600 "$target"
 ```
 
 Extra fields (`wave_index`, `subtask_type`, `advisor`, ...) are added per call site exactly as each
-`SKILL.md` already does — only the target path changes.
+`SKILL.md` already does — only the target path changes. `attempt`(정수)는 `orca-workflow-task` §2의
+구현 모드 dispatch 전용 extra field다(`log_dispatch`의 `--attempt` 플래그, issue #128) — 그 assign을
+CONTRACT_DIR의 `eval-report-a<attempt>.json`과 join 가능하게 만들어, "attempt k가 정말
+orca-task-runner에 dispatch됐는가"를 로그만으로 판정할 수 있게 한다. §1의 제안서 모드 dispatch는
+구현 attempt가 아니므로 넘기지 않는다.
 
 `provider`의 허용값은 `~/.agents/orca-workflows/models/*.md`의 basename을 정본으로 못박는다 — 현재
 `claude-code`|`codex`|`agy` 3개(각각 `models/claude-code.md`/`models/codex.md`/`models/agy.md`). `claude`는

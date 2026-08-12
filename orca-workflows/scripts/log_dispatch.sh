@@ -90,9 +90,15 @@ LOG_SELF_RECOVERY_ACTION_ENUM="resumed_wait retried_enter worker_abandon_retry t
 # pipeline invocation received it as "대상 repo" (GitHub: owner/name) — passed down the spec
 # chain, never re-derived per writer (e.g. from `git remote`), so orca-retro's (repo, issue)
 # composite filter can rely on string equality.
+# `--attempt` (issue #128) is the optional implementation-attempt number for orca-workflow-task
+# §2's generate dispatch: it joins the assign record with CONTRACT_DIR's eval-report-a<k>.json, so
+# "was attempt k really dispatched to orca-task-runner" is answerable from logs alone (issue #114
+# had zero role=task-runner assigns against 4 evaluator rounds — indistinguishable from the
+# coordinator editing code itself). Empty value = omit the field entirely (#127's omission rule,
+# same policy as log_outcome's optional flags); non-integer = caller error.
 log_dispatch() {
   local skill="" role="" issue="" repo="" task_id="" task_id_set=0 terminal="" worktree="" \
-        provider="" model="" effort="" spec_text=""
+        provider="" model="" effort="" spec_text="" attempt=""
   while [ $# -gt 0 ]; do
     # Guard against a flag with no following value (e.g. a truncated call site) *before* the case's
     # `shift 2`: without this check, `shift 2` on the last remaining argument fails (out-of-range)
@@ -117,6 +123,7 @@ log_dispatch() {
       --model) model="$2"; shift 2 ;;
       --effort) effort="$2"; shift 2 ;;
       --spec-text) spec_text="$2"; shift 2 ;;
+      --attempt) attempt="$2"; shift 2 ;;
       *) echo "log_dispatch: unknown argument: $1" >&2; return 64 ;;
     esac
   done
@@ -137,6 +144,13 @@ log_dispatch() {
   if [ -n "$missing" ]; then
     echo "log_dispatch: missing required argument(s):$missing" >&2
     return 64
+  fi
+
+  if [ -n "$attempt" ]; then
+    case "$attempt" in *[!0-9]*)
+      echo "log_dispatch: --attempt must be a non-negative integer (got: \"$attempt\")" >&2
+      return 64 ;;
+    esac
   fi
 
   # --task-id explicitly passed but empty is a caller error, not a relay dispatch — see the
@@ -172,26 +186,29 @@ log_dispatch() {
   install -d -m 700 "$logs_dir" || return $?
 
   local assign_target="$logs_dir/assignments-$(date -u +%F).jsonl"
+  local assign_line
   if [ "$task_id_set" = "1" ]; then
-    jq -cn --arg ts "$(date -u +%FT%TZ)" --arg skill "$skill" --arg role "$role" --arg issue "$issue" \
+    assign_line="$(jq -cn --arg ts "$(date -u +%FT%TZ)" --arg skill "$skill" --arg role "$role" --arg issue "$issue" \
       --arg repo "$repo" \
       --arg task_id "$task_id" --arg provider "$provider" --arg model "$model" --arg effort "$effort" \
       --arg terminal "$terminal" --arg worktree "$worktree" \
       '{ts:$ts, event:"assign", skill:$skill, role:$role, issue:$issue, repo:$repo, task_id:$task_id,
-        provider:$provider, model:$model, effort:$effort, terminal:$terminal, worktree:$worktree}' \
-      >> "$assign_target" || return $?
+        provider:$provider, model:$model, effort:$effort, terminal:$terminal, worktree:$worktree}')" \
+      || return $?
   else
     # logging.md §1's relay/omit rule: no real task_id → omit the field (never an empty string)
     # and flag relay:true.
-    jq -cn --arg ts "$(date -u +%FT%TZ)" --arg skill "$skill" --arg role "$role" --arg issue "$issue" \
+    assign_line="$(jq -cn --arg ts "$(date -u +%FT%TZ)" --arg skill "$skill" --arg role "$role" --arg issue "$issue" \
       --arg repo "$repo" \
       --arg provider "$provider" --arg model "$model" --arg effort "$effort" \
       --arg terminal "$terminal" --arg worktree "$worktree" \
       '{ts:$ts, event:"assign", skill:$skill, role:$role, issue:$issue, repo:$repo,
         provider:$provider, model:$model, effort:$effort, terminal:$terminal, worktree:$worktree,
-        relay:true}' \
-      >> "$assign_target" || return $?
+        relay:true}')" \
+      || return $?
   fi
+  [ -n "$attempt" ] && { assign_line="$(printf '%s' "$assign_line" | jq -c --argjson v "$attempt" '. + {attempt:$v}')" || return $?; }
+  printf '%s\n' "$assign_line" >> "$assign_target" || return $?
   chmod 600 "$assign_target" || return $?
 
   local term_log="$logs_dir/term-${terminal}.jsonl"

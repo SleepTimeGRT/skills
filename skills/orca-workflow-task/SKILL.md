@@ -299,9 +299,41 @@ spec_text="<issue 번호 + 대상 repo(logging.md §1 repo 필드용, issue #158
 
 확정 계약 라운드 번호는 이 스킬이 치환하지 않는다 — 확정 AC의 정본은 "최종 라운드(가장 큰 n) proposal"이고(contract-schema.md — override 경로에서는 정정 라운드(r4+)가 나중에 추가될 수 있어 코디네이터가 아는 번호가 낡을 수 있다, issue #130), generator가 CONTRACT_DIR에서 직접 확인한다(이 스킬은 feedback 본문도 확정 AC 본문도 중계하지 않는다).
 
+**Dispatch 실행부**(issue #128 — 이 사이트는 §1의 task-runner 사이트와 동일한 강제를 받는다): 구현
+모드 호출은 즉석 경로가 아니라 §1 round-1 task-runner 블록의 레시피 그대로다 — §1 협상에서 쓴
+`<run-handle>` 터미널이 살아 있으면 `terminal create`/boot-quiesce만 건너뛰고 `task-create` →
+`dispatch --inject` → 미전송 확인(dispatch-verify.md) → `log_dispatch` → SPEC_TEXT 사이드카 →
+self-recovery 대기를 같은 순서로 태우고, 죽었거나 없으면 §1 블록 전체(스폰부터)를 태운다.
+`orca-task-runner`를 dispatch하지 않고 코디네이터가 직접 코드를 작성·수정해 §3로 가는 경로는
+존재하지 않는다(이 스킬 서두의 "코드를 생성하지도, 평가하지도 않는다" — issue #128에서 관측된
+이탈이 정확히 이것이거나, 최소한 로그로 반증 불가능했다). 로그는 dispatch와 같은 블록에서 즉시,
+`--attempt`를 실어 남긴다(§1 제안서 모드 dispatch와 유일하게 다른 인자 — eval-report-a<attempt>.json과
+join되는 키):
+
+```bash
+log_dispatch --skill "orca-workflow-task" --role "task-runner" --issue "<issue-num>" --repo "<대상 repo>" \
+  --task-id "<task_id>" --terminal "<run-handle>" --worktree "<worktree 경로>" \
+  --provider "<resolved provider>" --model "<resolved model>" --effort "<resolved effort>" \
+  --spec-text "$spec_text" --attempt <attempt 번호 — 1부터, §4 FAIL 재시도마다 +1>
+```
+
 **GATE_FAIL 라우팅** — `orca-evaluate`를 호출하지 않고 바로 §5로 간다. `orca-task-runner`가 이미 자기 재시도 예산을 다 썼으므로 여기서 추가 재시도를 걸지 않는다(이중 카운팅 방지). §5 보고에 "evaluate 호출 안 됨(GATE_FAIL) — 기계적 게이트 실패"를 명시해 아래 FAIL/ESCALATE와 구분한다. 이때도 §4의 outcome 로그 라인을 `outcome:"GATE_FAIL"`로 남긴다(§4를 거치지 않으므로 여기서 직접).
 
 ## 3. Evaluate
+
+**Generate 감사 게이트**(issue #128, evaluator dispatch 전에 기계적으로 1회): 이번 attempt의
+`role="task-runner"` assign 레코드가 실제로 남아 있는지 확인한다 — 없으면 §2가 정식 dispatch 없이
+통과된 것이므로(코디네이터 직접 편집 포함, 어느 쪽이든 §2 위반) evaluate로 넘어가지 않고 §2로
+돌아가 레시피대로 실행한다. 직접 만든 변경이 이미 worktree에 있어도 그것을 평가에 넘기는 경로는
+없다:
+
+```bash
+find "$HOME/.local/state/orca-workflows/logs" -name 'assignments-*.jsonl' 2>/dev/null | sort | xargs cat 2>/dev/null \
+  | jq -e -s --arg issue "<issue-num>" --arg repo "<대상 repo>" --argjson k <attempt 번호> \
+      '[.[] | select(.event=="assign" and .skill=="orca-workflow-task" and .role=="task-runner"
+                     and .issue==$issue and .repo==$repo and .attempt==$k)] | length > 0' >/dev/null \
+  || echo "GENERATE-AUDIT-FAIL: attempt <attempt 번호>의 task-runner assign 없음 — §2로 돌아간다" >&2
+```
 
 (§2가 diff 경로를 반환했을 때만) `orca-evaluate` 호출(diff 경로 + attempt 번호 전달 — attempt는 1부터, FAIL 재시도마다 +1), PASS / FAIL / ESCALATE 중 하나를 결과로 받는다. evaluator는 판정을 `CONTRACT_DIR`의 `eval-report-a<attempt>.json`으로도 남긴다(스키마는 `contract-schema.md` — 이 스킬은 그 파일을 읽지 않는다).
 
