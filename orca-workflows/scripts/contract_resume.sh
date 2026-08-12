@@ -59,7 +59,18 @@ _cr_json_object() {
 # 실측: TZ=UTC로 같은 문자열을 해석하면 9시간 차이 나는 다른 epoch가 나옴).
 R3_REQUIRED_SINCE='202608120944.57'
 
-_cr_predates_r3_gate() {
+# Round-cap conditional extension (docs/superpowers/specs/2026-08-12-contract-sprint-improvements-design.md):
+# before this gate, a round-2 rejection with plan_coverage-only reasons went straight to override
+# (final_round=2, finalizing at proposal-r3). After this gate, that same rejection instead gets one
+# more negotiated round (proposal-r3/verdict-r3) before override -- and override.json's final_round
+# becomes 3, with proposal-r4 the final contract. Same touch -t + find -newer mechanism as
+# R3_REQUIRED_SINCE (via _cr_predates_gate above), disambiguates a final_round=2 override.json's
+# plan_coverage-only "finalized" reading (legacy, pre-gate) from an inconsistency (post-gate,
+# should never happen if orca-workflow-task §1 routes correctly).
+# orca-workflow-task SKILL.md §1's identical constant -- bump it together with this one.
+ROUND3_NEGOTIATION_SINCE='202608130052.00'
+
+_cr_predates_gate() {
   # $1 = probed file. Echoes 1 (mtime on/before R3_REQUIRED_SINCE -> stale) or 0 (after, OR the
   # mechanism itself failed -> not stale) to stdout. Reuses the touch-a-reference-file + find
   # -newer mechanism the recent_write guard below already proves out: stat -f/-c epoch parsing
@@ -81,26 +92,23 @@ _cr_predates_r3_gate() {
   #      missing, directory unreadable): this is genuine "absence of evidence", where `! -newer`
   #      (require positive proof of "not newer than cutoff") correctly falls through to 0 instead
   #      of the old code's default-to-stale on no match.
-  local ref
-  ref="$(mktemp "${TMPDIR:-/tmp}/contract-resume-r3gate.XXXXXX")" || return $?
-  if ! TZ='Asia/Seoul' touch -t "$R3_REQUIRED_SINCE" "$ref" 2>/dev/null; then
-    # Backdating failed outright -- $ref's mtime is meaningless (mode 1 above). Don't compare
-    # against it at all; report not-stale so the caller falls through to the existing
-    # violation-suspecting path instead of fabricating CONTRACT_SCHEMA_STALE.
+  local ref cutoff="$2"
+  ref="$(mktemp "${TMPDIR:-/tmp}/contract-resume-gate.XXXXXX")" || return $?
+  if ! TZ='Asia/Seoul' touch -t "$cutoff" "$ref" 2>/dev/null; then
     rm -f "$ref"
     printf '0'
     return 0
   fi
   if [ -n "$(find "$(dirname "$1")" -maxdepth 1 -name "$(basename "$1")" ! -newer "$ref" 2>/dev/null)" ]; then
-    # override.json exists and is NOT newer than the (successfully backdated) cutoff -- positive
-    # stale evidence.
     printf '1'
   else
-    # Either override.json IS newer than the cutoff, or find found nothing (mode 2 above) --
-    # both fall through to the non-stale, violation-suspecting path.
     printf '0'
   fi
   rm -f "$ref"
+}
+
+_cr_predates_r3_gate() {
+  _cr_predates_gate "$1" "$R3_REQUIRED_SINCE"
 }
 
 contract_resume_state() {
@@ -131,8 +139,9 @@ contract_resume_state() {
     return 64 ;;
   esac
 
-  # Counter cap: rounds are limited to 2 and FAIL retries to 2 (max attempt 3) by
-  # orca-workflow-task §1/§4, so 20 is unreachable headroom, not a tunable.
+  # Counter cap: rounds are limited to 2 (or 3 with the plan_coverage-only conditional extension)
+  # and FAIL retries to 2 (max attempt 3) by orca-workflow-task §1/§4, so 20 is unreachable
+  # headroom, not a tunable.
   local cap=20
 
   # ── scan negotiation rounds ──────────────────────────────────────────────────────────────
@@ -197,53 +206,85 @@ contract_resume_state() {
     contract="approved"
     approved="$approved_round"
   elif [ "$override_ok" = "1" ]; then
-    # Round limit reached with a recorded override — run the §1 mechanical gate (mirror; see
-    # the header note). Routing input is evaluator-owned verdict-r2.json, fail-closed when it
-    # is missing/invalid.
-    if [ ! -f "$dir/verdict-r2.json" ] || ! _cr_json_object "$dir/verdict-r2.json"; then
-      contract="escalated"; resume="section-5"; outcome='"CONTRACT_ESCALATE"'
-      detail='"override.json exists without a valid verdict-r2.json (fail-closed)"'
-    elif jq -e '[.reasons[]?.target] | index("ac_fidelity")' "$dir/verdict-r2.json" >/dev/null 2>&1; then
-      contract="escalated"; resume="section-5"; outcome='"CONTRACT_ESCALATE"'
-      detail='"ac_fidelity disagreement unresolved at the round limit"'
-    elif [ "$maxp" -lt 3 ]; then
-      if [ "$(_cr_predates_r3_gate "$dir/override.json")" = "1" ]; then
-        # override.json predates the proposal-r3 requirement itself (issue #160) — not a
-        # recording-contract violation and not "died mid-write" either: the step legitimately had
-        # no r3 to write under the rules that existed when it ran. Escalate distinctly so a human
-        # doesn't misread this as generator misconduct.
-        contract="escalated"; resume="section-5"; outcome='"CONTRACT_SCHEMA_STALE"'
-        detail='"override.json predates the proposal-r3 requirement (commit 79b7c3b, 2026-08-12T09:44:57+09:00) — not a violation, a pre-gate session — see the override.json mtime (ls -la or stat) for the exact pre-gate timestamp"'
+    local final_round
+    final_round="$(jq -r 'if type=="object" then (.final_round // "") else "" end' "$dir/override.json" 2>/dev/null || printf '')"
+    if [ "$final_round" = "3" ]; then
+      # New-style override after the round-3 extension: routing input is verdict-r3.json,
+      # completion artifact is proposal-r4.json.
+      if [ ! -f "$dir/verdict-r3.json" ] || ! _cr_json_object "$dir/verdict-r3.json"; then
+        contract="escalated"; resume="section-5"; outcome='"CONTRACT_ESCALATE"'
+        detail='"override.json (final_round=3) exists without a valid verdict-r3.json (fail-closed)"'
+      elif jq -e '[.reasons[]?.target] | index("ac_fidelity")' "$dir/verdict-r3.json" >/dev/null 2>&1; then
+        contract="escalated"; resume="section-5"; outcome='"CONTRACT_ESCALATE"'
+        detail='"ac_fidelity disagreement unresolved at the round-3 extension"'
+      elif [ "$maxp" -lt 4 ]; then
+        contract="negotiating"; resume="section-1-override"; round=4
+        detail='"override recorded (final_round=3) but proposal-r4 (final contract) missing — override step died mid-write; re-run it"'
       else
-        # The override step writes override.json THEN proposal-r3.json (the final contract —
-        # contract-schema.md "override 후속 라운드", issue #130). override without r3 on resume
-        # means the step died between the two writes — re-burn it. (The in-session §1 gate treats
-        # the same file state as a recording-contract violation and escalates instead: there the
-        # generator claimed completion via worker_done, so "died mid-write" is ruled out.)
-        contract="negotiating"; resume="section-1-override"; round=3
-        detail='"override recorded but proposal-r3 (final contract) missing — override step died mid-write; re-run it"'
+        contract="finalized"
+        approved="$maxp"
       fi
     else
-      contract="finalized"
-      approved="$maxp"   # correction rounds (r4+, #130) supersede r3 as the final contract
+      # Legacy path (final_round=2, or missing/malformed -- fail-closed to the pre-extension
+      # behavior). Routing input is evaluator-owned verdict-r2.json.
+      if [ ! -f "$dir/verdict-r2.json" ] || ! _cr_json_object "$dir/verdict-r2.json"; then
+        contract="escalated"; resume="section-5"; outcome='"CONTRACT_ESCALATE"'
+        detail='"override.json exists without a valid verdict-r2.json (fail-closed)"'
+      elif jq -e '[.reasons[]?.target] | index("ac_fidelity")' "$dir/verdict-r2.json" >/dev/null 2>&1; then
+        contract="escalated"; resume="section-5"; outcome='"CONTRACT_ESCALATE"'
+        detail='"ac_fidelity disagreement unresolved at the round limit"'
+      elif [ "$maxp" -lt 3 ]; then
+        if [ "$(_cr_predates_r3_gate "$dir/override.json")" = "1" ]; then
+          contract="escalated"; resume="section-5"; outcome='"CONTRACT_SCHEMA_STALE"'
+          detail='"override.json predates the proposal-r3 requirement (commit 79b7c3b, 2026-08-12T09:44:57+09:00) — not a violation, a pre-gate session — see the override.json mtime (ls -la or stat) for the exact pre-gate timestamp"'
+        else
+          contract="negotiating"; resume="section-1-override"; round=3
+          detail='"override recorded but proposal-r3 (final contract) missing — override step died mid-write; re-run it"'
+        fi
+      else
+        # plan_coverage-only, final_round=2, proposal-r3 present -- only valid if this predates
+        # the round-3-negotiation extension (post-gate, plan_coverage-only should never reach
+        # override at round 2 -- it goes through the round-3 extension instead).
+        if [ "$(_cr_predates_gate "$dir/override.json" "$ROUND3_NEGOTIATION_SINCE")" = "1" ]; then
+          contract="finalized"
+          approved="$maxp"   # correction rounds (r4+, #130) supersede r3 as the final contract
+        else
+          contract="escalated"; resume="section-5"; outcome='"CONTRACT_ESCALATE"'
+          detail='"override.json (final_round=2, plan_coverage-only) found after the round-3-negotiation extension shipped — expected a round-3 negotiation instead of an immediate override; possible coordinator/generator inconsistency"'
+        fi
+      fi
     fi
   else
     # Negotiation still in flight — resume at the first missing/invalid artifact's producer.
     if [ "$maxp" -eq 0 ] && [ "$maxv" -eq 0 ]; then
       contract="fresh"; resume="section-1-proposal"; round=1
-    elif [ "$maxp" -ge 3 ]; then
-      # proposal-r3+ may only exist after an override (write order is override-first) or...
-      # never otherwise — an approved verdict was handled above. Out-of-contract state.
+    elif [ "$maxp" -ge 4 ]; then
+      # proposal-r4+ may only exist after a final_round=3 override (write order is
+      # override-first, same as the old r3 rule) or never otherwise. Out-of-contract state.
       contract="escalated"; resume="section-5"; outcome='"CONTRACT_ESCALATE"'
-      detail='"proposal-r3+ exists without override.json or an approved verdict (out-of-contract state)"'
+      detail='"proposal-r4+ exists without override.json or an approved verdict (out-of-contract state)"'
     elif [ "$maxp" -gt "$maxv" ]; then
       contract="negotiating"; resume="section-1-verdict"; round="$maxp"
     else
       # last valid verdict is rejected (approved handled above); maxv >= maxp covers the
       # pathological valid-verdict-over-invalid-proposal case with the same fail-closed result
       contract="negotiating"
-      if [ "$maxv" -ge 2 ]; then
-        # The override step produces override.json + proposal-r3, so round names its output.
+      if [ "$maxv" -eq 2 ] && ! jq -e '[.reasons[]?.target] | index("ac_fidelity")' "$dir/verdict-r2.json" >/dev/null 2>&1; then
+        # Round-cap conditional extension: round 2 rejected, plan_coverage-only (maxv==2 already
+        # implies verdict-r2.json parsed and status=rejected, per the scan loop above) -- one more
+        # negotiated round instead of an immediate override.
+        resume="section-1-proposal"; round=3
+      elif [ "$maxv" -eq 3 ]; then
+        # The extension round (3) also rejected -- now the true round limit for this branch.
+        if jq -e '[.reasons[]?.target] | index("ac_fidelity")' "$dir/verdict-r3.json" >/dev/null 2>&1; then
+          contract="escalated"; resume="section-5"; outcome='"CONTRACT_ESCALATE"'
+          detail='"ac_fidelity disagreement unresolved at the round-3 extension"'
+        else
+          resume="section-1-override"; round=4
+          detail='"round limit reached at the extension round, rejected, no override recorded — re-dispatch the generator override step"'
+        fi
+      elif [ "$maxv" -ge 2 ]; then
+        # maxv==2 with ac_fidelity present (the extension didn't fire): unchanged legacy path.
         resume="section-1-override"; round=3
         detail='"round limit reached, rejected, no override recorded — re-dispatch the generator override step"'
       else
