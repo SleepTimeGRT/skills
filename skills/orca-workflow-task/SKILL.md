@@ -96,7 +96,11 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
 아래 분기 대신 이 분기를 태운다 — 아직 라운드 한도(2)에 도달한 것으로 보지 않는다:
 
 ```bash
-if jq -e '[.reasons[].target] | index("ac_fidelity")' "<CONTRACT_DIR>/verdict-r2.json" >/dev/null; then
+if [ ! -f "<CONTRACT_DIR>/verdict-r2.json" ]; then
+  : # 라운드2 verdict가 아직 없다 — 이 시점(라운드2 검토 결과 수신 직후)엔 있어야 정상이다. 없으면
+    # 이 분기는 개입하지 않는다 — 아래 "라운드 한도 도달 시점" 분기의 기존 `elif [ ! -f
+    # "<CONTRACT_DIR>/verdict-r2.json" ]` 가드가 같은 부재를 fail-closed로 잡는다.
+elif jq -e '[.reasons[].target] | index("ac_fidelity")' "<CONTRACT_DIR>/verdict-r2.json" >/dev/null; then
   : # ac_fidelity 있음 — 이 연장은 발동하지 않는다, 아래 "라운드 한도 도달 시점" 분기를 그대로 태운다
 else
   # plan_coverage뿐 — override 대신 라운드3 제안서 작성 모드로 orca-task-runner를 재호출한다
