@@ -42,29 +42,40 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
 
 ```bash
 logs="$HOME/.local/state/orca-workflows/logs"
-# issue 집합(root ∪ 큐 목록)으로 필터한 assignments/waves 레코드
+# (repo, issue) 복합 키로 필터한 assignments/waves 레코드 — 로그 루트는 여러 저장소가 공유하고
+# issue 번호는 저장소 간에 충돌하므로, issue 단일 키 매칭은 무관한 저장소의 레코드를 섞는다
+# (issue #158 실측). $repo는 §0 입력의 "대상 repo" 문자열 그대로 — writer들도 같은 문자열을 spec
+# 체인으로 받아 기록하므로(logging.md §1 repo 필드) 문자열 동일성 비교로 충분하다.
 # assignments.jsonl(미날짜 레거시)은 항상 dated 파일보다 오래된 레코드만 담고 있는데,
 # 단순 `-name 'assignments*.jsonl' | sort`는 ASCII상 '.'(0x2e) > '-'(0x2d)라 레거시 파일을
 # 맨 뒤로 보낸다 — 그래서 명시적으로 먼저 읽는다(logging.md §1 "Reading across dates" 참고, issue #55).
 { [ -f "$logs/assignments.jsonl" ] && cat "$logs/assignments.jsonl"; \
   find "$logs" -name 'assignments-*.jsonl' 2>/dev/null | sort | xargs cat 2>/dev/null; \
 } 2>/dev/null \
-  | jq -c --argjson set '["<root-num>","<child-1>","<child-2>"]' 'select(.issue as $i | $set | index($i))'
+  | jq -c --arg repo '<대상-repo>' --argjson set '["<root-num>","<child-1>","<child-2>"]' \
+      'select(.repo == $repo and (.issue as $i | $set | index($i)))'
 find "$logs" -name 'waves*.jsonl' 2>/dev/null | sort | xargs cat 2>/dev/null \
-  | jq -c --argjson set '["<root-num>","<child-1>","<child-2>"]' 'select(.issue as $i | $set | index($i))'
+  | jq -c --arg repo '<대상-repo>' --argjson set '["<root-num>","<child-1>","<child-2>"]' \
+      'select(.repo == $repo and (.issue as $i | $set | index($i)))'
 cat "$logs/spawn-failures.jsonl" 2>/dev/null
-# term 전사: meta 라인(1행)의 issue가 집합에 드는 파일만 통째로 읽는다
+# term 전사: meta 라인(1행)의 (repo, issue)가 집합에 드는 파일만 통째로 읽는다
 for f in "$logs"/term-*.jsonl; do
   [ -f "$f" ] || continue
-  head -1 "$f" | jq -e --argjson set '["<root-num>","<child-1>","<child-2>"]' \
-    'select(.type=="meta" and (.issue as $i | $set | index($i)))' >/dev/null 2>&1 && cat "$f"
+  head -1 "$f" | jq -e --arg repo '<대상-repo>' --argjson set '["<root-num>","<child-1>","<child-2>"]' \
+    'select(.type=="meta" and .repo == $repo and (.issue as $i | $set | index($i)))' >/dev/null 2>&1 && cat "$f"
 done
 ```
 
-**날짜 범위**: issue 필터에 걸린 레코드의 최소 `ts`부터 현재까지. §2 렌즈 1은 이 범위의 dated 파일
+**`repo` 필드 없는 레코드**(#158 이전 버전이 남긴 기록)는 복합 키에 매칭되지 않아 그대로 제외된다 —
+`worktree` 경로 휴리스틱으로 저장소를 역추정하지 않는다(outcome 레코드 대부분이 `worktree:null`이라
+커버리지가 없고, 나머지도 추정 오염을 다른 오염으로 바꿀 뿐이다). 이 제외는 렌즈 2~4의 분석 집합과
+아래 날짜 범위 계산에 반영된다 — 렌즈 1도 그 날짜 범위를 쓰므로 스캔 범위가 함께 좁아지는데, 그것이
+바로 #158이 지적한 왜곡(오염된 최소 ts로 2주+ 과대 확장)의 수정이다. 렌즈 5(로그 비의존)만 무관하다.
+
+**날짜 범위**: (repo, issue) 필터에 걸린 레코드의 최소 `ts`부터 현재까지. §2 렌즈 1은 이 범위의 dated 파일
 전체 내용을 대상으로 한다(아래).
 
-**필터 공집합**: issue 필터에 걸린 레코드가 0개면 렌즈 1~4를 건너뛴다 — 로그 루트에 다른 실행의
+**필터 공집합**: (repo, issue) 필터에 걸린 레코드가 0개면 렌즈 1~4를 건너뛴다 — 로그 루트에 다른 실행의
 기록만 있는 경우가 이에 해당한다. 이때도 렌즈 5(로그 비의존)는 수행한 뒤 §5로 간다. `spawn-failures.jsonl`에는 `issue` 필드가
 없으므로 렌즈 4도 이 날짜 범위(`ts` 기준)로 한정한다 — 범위 밖 항목은 이번 실행의 후보가 아니다.
 
@@ -75,7 +86,7 @@ done
 아래).
 
 1. **문서화된 스키마 위반** — 각 스킬과 `~/.agents/orca-workflows/logging.md`가 명시한 스키마(enum
-   값, 이벤트명, 필드 타입)를 벗어난 로그 레코드. **이 렌즈만은 issue 필터를 거치지 않고** §1 날짜
+   값, 이벤트명, 필드 타입)를 벗어난 로그 레코드. **이 렌즈만은 (repo, issue) 필터를 거치지 않고** §1 날짜
    범위의 dated 파일 전체를 스캔한다 — `issue` 필드 자체가 드리프트된 레코드는 필터로 잡히지 않는다.
    `outcome`/`action_taken`이 `UNMAPPED_BRANCH`이고 `schema_gap_issue` 필드가 채워진 레코드는 위반이
    아니라 추적 중인 알려진 구멍으로 읽고 후보에서 제외한다 — `UNMAPPED_BRANCH`이면서 `schema_gap_issue`가
@@ -83,6 +94,8 @@ done
    그대로 위반 후보다. 예외: `outcome`이 리터럴 `CONTRACT_APPROVED_ROUND1` 또는
    `CONTRACT_APPROVED_ROUND2`인 레코드는 `schema_gap_issue` 유무와 무관하게 위반 후보에서 제외한다 —
    `CONTRACT_APPROVED`로의 일반화(#86) 이전에는 그 시점 스키마 기준으로 정상 기록된 legacy 값이다.
+   같은 이유로 `repo` 필드 부재도 위반 후보로 잡지 않는다 — #158 이전 버전 레코드는 정상적으로 이
+   필드가 없고, 레코드만으로는 기록 시점 버전을 판별할 수 없다.
 2. **스킬 문구 기인 반복 FAIL** — 같은 FAIL 사유가 task·재시도에 걸쳐 반복되고, term 전사에서
    worker가 스킬 지시를 오독·누락한 정황이 보이는 경우.
 3. **예방 가능했던 ESCALATE·인간 개입** — `ESCALATE`·`*_HUMAN_DECISION` 계열 outcome 중, 전사를 보면

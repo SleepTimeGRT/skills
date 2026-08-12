@@ -33,12 +33,22 @@ Append exactly the same jq/printf record shape used today, to `"$target"`, then 
 relay — and `orca-workflow-epic`'s task-coordinator site — write this event via `orca-workflows/scripts/log_dispatch.sh` rather than hand-copying the
 recipe below; issue #68. If you change this schema, update that script's jq call to match.)
 
+**`repo` 필드(issue #158, 모든 이벤트 공통 필수)**: 이 로그 디렉토리는 여러 저장소가 공유하고
+`issue` 번호는 저장소 간에 충돌한다(실측: selah-android retro가 issue="23"으로 sleeptimegrt-skills/
+toss-* 레코드를 섞어 읽음). 그래서 `assign`/`outcome`/`self_recovery`/`wave_start`/`wave_end`와 §2의
+`meta`는 전부 `repo` 필드를 필수로 싣고, `orca-retro` §1은 `(repo, issue)` 복합 키로 필터한다. 값은
+파이프라인 invocation이 입력으로 받은 **대상 repo 식별자 문자열 그대로**(GitHub: `owner/name`, 그 외
+트래커는 adapter 문서의 저장소 식별자)를 spec 체인으로 내려받아 쓴다 — writer가 `git remote` 파싱
+등으로 재계산하지 않는다(문자열 동일성이 복합 키 필터의 전제). `repo` 필드가 없는 레코드는 이 필드
+도입 이전 버전이 남긴 것이며, 복합 키에 매칭되지 않아 retro의 issue-필터 렌즈에서 자연 제외된다.
+기계-검증 정본은 `log_dispatch.sh` 세 헬퍼의 `--repo` 필수 검증이다.
+
 **`assign`** (who got dispatched what):
 
 ```bash
 install -d -m 700 ~/.local/state/orca-workflows/logs
 target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
-printf '{"ts":"%s","event":"assign","skill":"<skill>","role":"<role>","issue":"<issue-num>","task_id":"<task_id-or-omit>","provider":"<provider>","model":"<model>","effort":"<effort>","terminal":"<handle>","worktree":"<worktree 경로>"}\n' \
+printf '{"ts":"%s","event":"assign","skill":"<skill>","role":"<role>","issue":"<issue-num>","repo":"<대상 repo>","task_id":"<task_id-or-omit>","provider":"<provider>","model":"<model>","effort":"<effort>","terminal":"<handle>","worktree":"<worktree 경로>"}\n' \
   "$(date -u +%FT%TZ)" >> "$target"
 chmod 600 "$target"
 ```
@@ -80,7 +90,7 @@ stderr 경고만 남긴다(파이프라인은 실패시키지 않는다).
 
 ```bash
 source ~/.agents/orca-workflows/scripts/log_dispatch.sh
-log_outcome --skill <skill> --issue <issue-num> --outcome <위 두 축의 값 중 하나> --retry <n>
+log_outcome --skill <skill> --issue <issue-num> --repo <대상 repo> --outcome <위 두 축의 값 중 하나> --retry <n>
 # per-call-site 추가 필드(해당할 때만): --round <n> / --filed <n> --commented <n> --discarded <n> /
 #   --detail <text> / --blocked-by <issue-num>. 값이 빈 문자열이면 필드 자체가 생략된다 — 빈 문자열
 #   조건부 필드 금지(#127)를 헬퍼가 강제한다.
@@ -145,15 +155,16 @@ hitl 전체-중단 선택으로 남은 큐를 건너뛸 때) dependent issue별�
 판정된 정상 분기다(issue-drain/AC 초안 단계) — issue #105에서 즉석 발명으로 최초 관측된 뒤, 그 이슈의
 수정 방향대로 정식 등재.
 
-**`wave_start`/`wave_end`** (`orca-task-runner` only): same jq schema as today, written to
-`waves-$(date -u +%F).jsonl` instead of the fixed `waves.jsonl`.
+**`wave_start`/`wave_end`** (`orca-task-runner` only): same jq schema as today plus the required
+`repo` field (issue #158, 위 공통 규칙), written to `waves-$(date -u +%F).jsonl` instead of the
+fixed `waves.jsonl`.
 
 **`self_recovery`** (`orca-task-runner`/`orca-workflow-task`/`orca-workflow-epic`, per `orca-workflows/self-recovery.md`'s
 wait/recovery loop):
 
 ```bash
 source ~/.agents/orca-workflows/scripts/log_dispatch.sh
-log_self_recovery --skill <skill> --issue <issue-num> --task-id <task_id> --dispatch-id <dispatch_id> \
+log_self_recovery --skill <skill> --issue <issue-num> --repo <대상 repo> --task-id <task_id> --dispatch-id <dispatch_id> \
   --terminal <handle> --waited-ms <n> \
   --terminal-status <alive|dead|stuck_draft> \
   --action-taken <resumed_wait|retried_enter|worker_abandon_retry|task_recreate_retry|escalated_spawn_failure|none_decision_gate_self_timed_out_worker_proceeded|UNMAPPED_BRANCH>
@@ -252,11 +263,13 @@ if [ ! -s "$term_log" ] || ! head -1 "$term_log" | jq -e '.type == "meta"' >/dev
   oav_json="null"
   [ -n "$oav_raw" ] && oav_json="$(printf '%s' "$oav_raw" | jq -R .)"
 
-  jq -cn --arg issue "<issue-num>" --arg skill "<skill>" --arg role "<role>" --arg terminal "<handle>" \
+  jq -cn --arg issue "<issue-num>" --arg repo "<대상 repo>" --arg skill "<skill>" --arg role "<role>" \
+    --arg terminal "<handle>" \
     --arg created_at "$(date -u +%FT%TZ)" \
     --argjson skill_version "$sv_json" --argjson orca_workflows_commit "$owc_json" \
     --argjson orca_app_version "$oav_json" \
-    '{type:"meta", issue:$issue, skill:$skill, role:$role, terminal:$terminal, created_at:$created_at,
+    '{type:"meta", issue:$issue, repo:$repo, skill:$skill, role:$role, terminal:$terminal,
+      created_at:$created_at,
       skill_version:$skill_version, orca_workflows_commit:$orca_workflows_commit,
       orca_app_version:$orca_app_version}' \
     >> "$term_log"

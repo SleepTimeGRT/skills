@@ -68,10 +68,10 @@ DOCUMENTED_ACTION_ENUM = [
     "UNMAPPED_BRANCH",
 ]
 
-OUTCOME_CALL = "log_outcome --skill orca-workflow-task --issue 42 --outcome PASS --retry 0"
+OUTCOME_CALL = "log_outcome --skill orca-workflow-task --repo own/repo --issue 42 --outcome PASS --retry 0"
 
 SELF_RECOVERY_CALL = (
-    "log_self_recovery --skill orca-workflow-epic --issue 633 --task-id task_abc "
+    "log_self_recovery --skill orca-workflow-epic --repo own/repo --issue 633 --task-id task_abc "
     "--dispatch-id ctx_1 --terminal term_x --waited-ms 3600000 "
     "--terminal-status alive --action-taken resumed_wait"
 )
@@ -138,6 +138,7 @@ def test_valid_outcome_writes_correct_record(tmp_path, shell):
     assert rec["event"] == "outcome"
     assert rec["skill"] == "orca-workflow-task"
     assert rec["issue"] == "42"
+    assert rec["repo"] == "own/repo"
     assert rec["outcome"] == "PASS"
     assert rec["retry"] == 0  # a JSON number, not the string "0"
     assert "ts" in rec
@@ -150,9 +151,9 @@ def test_valid_outcome_writes_correct_record(tmp_path, shell):
 @pytest.mark.parametrize("shell", SHELLS)
 def test_per_call_site_extra_fields_are_written_as_numbers(tmp_path, shell):
     script = (
-        "log_outcome --skill orca-workflow-task --issue 42 --outcome CONTRACT_APPROVED "
+        "log_outcome --skill orca-workflow-task --repo own/repo --issue 42 --outcome CONTRACT_APPROVED "
         "--retry 0 --round 2\n"
-        "log_outcome --skill orca-workflow --issue 42 --outcome RETRO_DONE --retry 0 "
+        "log_outcome --skill orca-workflow --repo own/repo --issue 42 --outcome RETRO_DONE --retry 0 "
         "--filed 1 --commented 2 --discarded 0"
     )
     result, home = _run(tmp_path, script, shell=shell)
@@ -169,7 +170,7 @@ def test_per_call_site_extra_fields_are_written_as_numbers(tmp_path, shell):
 def test_skipped_carries_blocked_by(tmp_path, shell):
     """Issue #138: skipped is a legal enum member with blocked_by as its conditional field."""
     script = (
-        "log_outcome --skill orca-workflow-epic --issue 12 --outcome skipped --retry 0 "
+        "log_outcome --skill orca-workflow-epic --repo own/repo --issue 12 --outcome skipped --retry 0 "
         "--blocked-by 10"
     )
     result, home = _run(tmp_path, script, shell=shell)
@@ -183,7 +184,7 @@ def test_skipped_carries_blocked_by(tmp_path, shell):
 
 @pytest.mark.parametrize("shell", SHELLS)
 def test_skipped_without_blocked_by_warns_but_still_writes(tmp_path, shell):
-    script = "log_outcome --skill orca-workflow-epic --issue 12 --outcome skipped --retry 0"
+    script = "log_outcome --skill orca-workflow-epic --repo own/repo --issue 12 --outcome skipped --retry 0"
     result, home = _run(tmp_path, script, shell=shell)
     assert result.returncode == 0, result.stderr
     assert "blocked-by" in result.stderr
@@ -195,7 +196,7 @@ def test_skipped_without_blocked_by_warns_but_still_writes(tmp_path, shell):
 
 @pytest.mark.parametrize("shell", SHELLS)
 def test_blocked_by_dropped_for_non_skipped_outcome(tmp_path, shell):
-    script = "log_outcome --skill orca-workflow-task --issue 42 --outcome PASS --retry 0 --blocked-by 10"
+    script = "log_outcome --skill orca-workflow-task --repo own/repo --issue 42 --outcome PASS --retry 0 --blocked-by 10"
     result, home = _run(tmp_path, script, shell=shell)
     assert result.returncode == 0, result.stderr
     assert "blocked-by" in result.stderr
@@ -210,7 +211,7 @@ def test_blocked_by_dropped_for_non_skipped_outcome(tmp_path, shell):
 def test_invalid_outcome_substituted_with_unmapped_branch(tmp_path, shell):
     """The five-recurrence defect class (#62/#69/#86/#105/#138): an invented value must be forced
     through the documented safeguard at runtime, with exit 0 (never fail the pipeline)."""
-    script = "log_outcome --skill orca-workflow-epic --issue 626 --outcome EPIC_DONE --retry 0\necho rc=$?"
+    script = "log_outcome --skill orca-workflow-epic --repo own/repo --issue 626 --outcome EPIC_DONE --retry 0\necho rc=$?"
     result, home = _run(tmp_path, script, shell=shell)
     assert result.returncode == 0, result.stderr
     assert "rc=0" in result.stdout
@@ -227,7 +228,7 @@ def test_invalid_outcome_substituted_with_unmapped_branch(tmp_path, shell):
 @pytest.mark.parametrize("shell", SHELLS)
 def test_invalid_outcome_uses_caller_supplied_schema_gap_issue(tmp_path, shell):
     script = (
-        "log_outcome --skill orca-workflow-epic --issue 626 --outcome EPIC_DONE --retry 0 "
+        "log_outcome --skill orca-workflow-epic --repo own/repo --issue 626 --outcome EPIC_DONE --retry 0 "
         "--schema-gap-issue epic-done-enum-gap"
     )
     result, home = _run(tmp_path, script, shell=shell)
@@ -241,7 +242,7 @@ def test_invalid_outcome_uses_caller_supplied_schema_gap_issue(tmp_path, shell):
 def test_typo_variant_of_valid_outcome_is_also_substituted(tmp_path, shell):
     """#127 showed the class fires on hand-typed near-misses (resume_wait), not just new
     branches -- a one-character outcome typo must not pass the enum check either."""
-    script = "log_outcome --skill orca-workflow-task --issue 42 --outcome PASSS --retry 0"
+    script = "log_outcome --skill orca-workflow-task --repo own/repo --issue 42 --outcome PASSS --retry 0"
     result, home = _run(tmp_path, script, shell=shell)
     assert result.returncode == 0, result.stderr
     rec = _records(home)[0]
@@ -253,7 +254,7 @@ def test_typo_variant_of_valid_outcome_is_also_substituted(tmp_path, shell):
 def test_outcome_with_whitespace_cannot_false_match_the_list(tmp_path, shell):
     """Two adjacent enum members pasted as one value ("PASS FAIL") appear verbatim inside the
     space-separated enum string -- the validator must not be fooled by substring matching."""
-    script = 'log_outcome --skill orca-workflow-task --issue 42 --outcome "PASS FAIL" --retry 0'
+    script = 'log_outcome --skill orca-workflow-task --repo own/repo --issue 42 --outcome "PASS FAIL" --retry 0'
     result, home = _run(tmp_path, script, shell=shell)
     assert result.returncode == 0, result.stderr
     rec = _records(home)[0]
@@ -264,7 +265,7 @@ def test_outcome_with_whitespace_cannot_false_match_the_list(tmp_path, shell):
 @pytest.mark.parametrize("shell", SHELLS)
 def test_conditional_fields_dropped_on_valid_outcome(tmp_path, shell):
     script = (
-        "log_outcome --skill orca-workflow-task --issue 42 --outcome PASS --retry 0 "
+        "log_outcome --skill orca-workflow-task --repo own/repo --issue 42 --outcome PASS --retry 0 "
         "--raw-outcome leftover --schema-gap-issue leftover-slug"
     )
     result, home = _run(tmp_path, script, shell=shell)
@@ -284,7 +285,7 @@ def test_empty_optional_fields_are_omitted_not_empty_strings(tmp_path, shell):
     """Issue #127: conditional fields written as "" violate the omission rule -- the helper must
     make that mistake impossible even when a call site passes the flags unconditionally."""
     script = (
-        "log_outcome --skill orca-workflow-task --issue 42 --outcome PASS --retry 0 "
+        "log_outcome --skill orca-workflow-task --repo own/repo --issue 42 --outcome PASS --retry 0 "
         '--round "" --filed "" --commented "" --discarded "" --detail "" --blocked-by ""'
     )
     result, home = _run(tmp_path, script, shell=shell)
@@ -304,8 +305,8 @@ def test_empty_optional_fields_are_omitted_not_empty_strings(tmp_path, shell):
 def test_all_output_lines_are_valid_json(tmp_path, shell):
     script = (
         f"{OUTCOME_CALL}\n"
-        "log_outcome --skill orca-workflow-epic --issue 626 --outcome EPIC_DONE --retry 0\n"
-        'log_outcome --skill orca-workflow --issue 7 --outcome MANUAL_RECOVERY_COMPLETED '
+        "log_outcome --skill orca-workflow-epic --repo own/repo --issue 626 --outcome EPIC_DONE --retry 0\n"
+        'log_outcome --skill orca-workflow --repo own/repo --issue 7 --outcome MANUAL_RECOVERY_COMPLETED '
         '--retry 1 --detail "worker_done lost; verified commit a1b2c3 by hand"'
     )
     result, home = _run(tmp_path, script, shell=shell)
@@ -323,7 +324,7 @@ def test_all_output_lines_are_valid_json(tmp_path, shell):
 
 @pytest.mark.parametrize("shell", SHELLS)
 def test_missing_required_argument_returns_nonzero_and_writes_nothing(tmp_path, shell):
-    script = "log_outcome --skill orca-workflow-task --issue 42 --outcome PASS\necho rc=$?"
+    script = "log_outcome --skill orca-workflow-task --repo own/repo --issue 42 --outcome PASS\necho rc=$?"
     result, home = _run(tmp_path, script, shell=shell)
     assert "rc=64" in result.stdout
     assert "--retry" in result.stderr
@@ -331,8 +332,30 @@ def test_missing_required_argument_returns_nonzero_and_writes_nothing(tmp_path, 
 
 
 @pytest.mark.parametrize("shell", SHELLS)
+def test_outcome_missing_repo_returns_nonzero_and_writes_nothing(tmp_path, shell):
+    """Issue #158: repo is required on outcome events too -- most outcome records carry
+    worktree-free context (worktree:null), so without repo there is no way at all to attribute
+    them to a repository after the fact."""
+    script = OUTCOME_CALL.replace("--repo own/repo ", "") + "\necho rc=$?"
+    result, home = _run(tmp_path, script, shell=shell)
+    assert "rc=64" in result.stdout
+    assert "--repo" in result.stderr
+    assert not _records(home)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_self_recovery_missing_repo_returns_nonzero_and_writes_nothing(tmp_path, shell):
+    script = SELF_RECOVERY_CALL.replace("--repo own/repo ", "") + "\necho rc=$?"
+    result, home = _run(tmp_path, script, shell=shell)
+    assert "rc=64" in result.stdout
+    assert "--repo" in result.stderr
+    assert not _records(home)
+    assert not _records(home, "waves-*.jsonl")
+
+
+@pytest.mark.parametrize("shell", SHELLS)
 def test_non_numeric_retry_is_a_caller_error(tmp_path, shell):
-    script = "log_outcome --skill orca-workflow-task --issue 42 --outcome PASS --retry abc\necho rc=$?"
+    script = "log_outcome --skill orca-workflow-task --repo own/repo --issue 42 --outcome PASS --retry abc\necho rc=$?"
     result, home = _run(tmp_path, script, shell=shell)
     assert "rc=64" in result.stdout
     assert not _records(home)
@@ -376,6 +399,7 @@ def test_self_recovery_valid_action_writes_correct_record(tmp_path, shell):
     rec = recs[0]
     assert rec["event"] == "self_recovery"
     assert rec["skill"] == "orca-workflow-epic"
+    assert rec["repo"] == "own/repo"
     assert rec["action_taken"] == "resumed_wait"
     assert rec["waited_ms"] == 3600000  # a JSON number
     assert rec["terminal_status"] == "alive"
@@ -417,7 +441,7 @@ def test_self_recovery_typo_action_substituted_with_unmapped_branch(tmp_path, sh
 @pytest.mark.parametrize("shell", SHELLS)
 def test_self_recovery_new_dispatch_id_kept_for_retry_actions(tmp_path, shell):
     script = (
-        "log_self_recovery --skill orca-workflow-task --issue 633 --task-id task_abc "
+        "log_self_recovery --skill orca-workflow-task --repo own/repo --issue 633 --task-id task_abc "
         "--dispatch-id ctx_1 --terminal term_x --waited-ms 3600000 --terminal-status dead "
         "--action-taken worker_abandon_retry --new-dispatch-id ctx_2"
     )
@@ -441,7 +465,7 @@ def test_self_recovery_new_dispatch_id_dropped_for_non_retry_actions(tmp_path, s
 @pytest.mark.parametrize("shell", SHELLS)
 def test_self_recovery_task_runner_writes_to_waves_with_wave_index(tmp_path, shell):
     script = (
-        "log_self_recovery --skill orca-task-runner --issue 633 --task-id task_abc "
+        "log_self_recovery --skill orca-task-runner --repo own/repo --issue 633 --task-id task_abc "
         "--dispatch-id ctx_1 --terminal term_x --waited-ms 3600000 --terminal-status alive "
         "--action-taken resumed_wait --wave-index 2"
     )
@@ -507,7 +531,7 @@ def test_every_documented_outcome_value_is_accepted_at_runtime(tmp_path, shell):
     """Set equality on the variable is necessary but not sufficient -- this drives every
     documented value through the actual validation path and asserts none get substituted."""
     calls = "\n".join(
-        f"log_outcome --skill orca-workflow-task --issue 42 --outcome {v} --retry 0"
+        f"log_outcome --skill orca-workflow-task --repo own/repo --issue 42 --outcome {v} --retry 0"
         for v in DOCUMENTED_OUTCOME_ENUM
         if v != "UNMAPPED_BRANCH"  # legal too, but warns about missing --raw-outcome by design
     )

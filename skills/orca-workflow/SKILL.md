@@ -107,7 +107,7 @@ fi
 if [ "$boot_quiesced" != "1" ]; then
   # boot-quiesce 확인에 실패(터미널 read 불가 또는 60s 안에 MCP boot 출력이 멈추지 않음) — task-create/
   # dispatch --inject로 진행하지 않는다. RETRO_FAIL만 남기고 정상 종료(터미널 close 후 실행 종료).
-  log_outcome --skill orca-workflow --issue "<root-issue-num>" --outcome RETRO_FAIL --retry 0
+  log_outcome --skill orca-workflow --issue "<root-issue-num>" --repo "<대상 repo>" --outcome RETRO_FAIL --retry 0
 else
 spec_text="<orca-retro SKILL.md 지침 + root issue 번호 + 큐 issue 목록(orca-workflow-epic 경로면 §5 보고의 큐 목록, orca-workflow-task 경로면 root 1건 — 분석 issue 집합 = root ∪ 큐, 중복 제거) + 대상 repo + skills repo(sleeptimegrt-skills) slug>"
 orca_call_with_retry "orca-workflow" "retro" -- \
@@ -116,13 +116,13 @@ orca_call_with_retry "orca-workflow" "retro" -- \
   orca orchestration dispatch --task <task_id> --to <retro-handle> --retry-request "$(uuidgen)" --inject --json
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43).
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로, dispatch와 같은 블록에서 즉시:
-#  §1 assign 이벤트: role="retro", issue=<root-issue-num>, task_id=<task_id>, provider(claude-code|codex|agy 중 하나)/model/effort=resolved 값,
+#  §1 assign 이벤트: role="retro", issue=<root-issue-num>, repo=<대상 repo>, task_id=<task_id>, provider(claude-code|codex|agy 중 하나)/model/effort=resolved 값,
 #    terminal=<retro-handle>, worktree=<worktree 경로>
 #  §2 term 로그: skill="orca-workflow", role="retro", terminal=<retro-handle>, meta 기록 후
 #    sent.content=$spec_text. 이 사이트는 하위 스킬의 dispatch 사이트들과 달리 요약을 터미널에서
 #    직접 읽으므로, 요약 수신 시점에 logging.md §2의 최초-read 레시피(--cursor 없이)로 recv도 기록한다.
 # 요약(RETRO filed=[...] commented=[...] discarded=<n>) 수신 후 — 수신 실패·timeout이면 RETRO_FAIL:
-log_outcome --skill orca-workflow --issue "<root-issue-num>" --outcome "<RETRO_DONE|RETRO_FAIL>" --retry 0 \
+log_outcome --skill orca-workflow --issue "<root-issue-num>" --repo "<대상 repo>" --outcome "<RETRO_DONE|RETRO_FAIL>" --retry 0 \
   --filed <n> --commented <n> --discarded <n>
 # RETRO_FAIL이면 --filed/--commented/--discarded를 넘기지 않는다(logging.md §1 — 빈 값은 헬퍼가 필드를
 # 생략하지만, 애초에 셀 것이 없다는 뜻이므로 플래그 자체를 생략). 터미널 close 후 실행 종료.

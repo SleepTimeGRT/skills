@@ -81,7 +81,9 @@ per dispatch. `DISPATCH_CREATED_VIA` (`worker-start` or `dispatch-inject`) below
 Run this once per pending dispatch. `WORKER_HANDLE`/`TASK_ID`/`DISPATCH_ID`/`MY_HANDLE`/`RUN_ID`/
 `DISPATCH_CREATED_VIA`/`SPEC_TEXT` are caller-supplied for that dispatch (see the caller table above for
 `DISPATCH_CREATED_VIA`'s value per call site); `CALLING_SKILL` (`orca-task-runner`, `orca-workflow-task`,
-or `orca-workflow-epic`) and `ISSUE_NUM` are caller-supplied constants for the whole session. Set
+or `orca-workflow-epic`), `ISSUE_NUM`, and `REPO_SLUG` (the 대상 repo identifier the invocation received,
+passed down the spec chain — logging.md §1's required `repo` field, issue #158) are caller-supplied
+constants for the whole session. Set
 `prev_delivery_id=""` once, immediately before this loop's first iteration (loop-local, not
 caller-supplied) — the loop code below both reads and updates it every iteration. A wave has
 one pending-set entry per subtask, keyed by `task_id` (stable across retries for the `worker_abandon_retry`
@@ -377,7 +379,7 @@ if [ "$timed_out" = "true" ]; then
   # wave's wave_start/wave_end records); orca-workflow-task/orca-workflow-epic ->
   # assignments-<date>.jsonl (no wave concept, no --wave-index).
   source ~/.agents/orca-workflows/scripts/log_dispatch.sh
-  log_self_recovery --skill "$CALLING_SKILL" --issue "$ISSUE_NUM" --task-id "$TASK_ID" \
+  log_self_recovery --skill "$CALLING_SKILL" --issue "$ISSUE_NUM" --repo "$REPO_SLUG" --task-id "$TASK_ID" \
     --dispatch-id "$DISPATCH_ID" --terminal "$WORKER_HANDLE" --waited-ms 3600000 \
     --terminal-status "$terminal_status" --action-taken "$action_taken" \
     --new-dispatch-id "$new_dispatch_id" --raw-action "${raw_action:-}" \

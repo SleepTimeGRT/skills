@@ -9,7 +9,8 @@
 # call makes "assign written, term skipped" structurally impossible.
 #
 #   source ~/.agents/orca-workflows/scripts/log_dispatch.sh
-#   log_dispatch --skill <skill> --role <role> --issue <issue-num> --task-id <task_id> \
+#   log_dispatch --skill <skill> --role <role> --issue <issue-num> --repo <대상 repo> \
+#     --task-id <task_id> \
 #     --terminal <handle> --worktree <worktree 경로> --provider <provider> --model <model> \
 #     --effort <effort> --spec-text "$spec_text"
 #
@@ -82,8 +83,15 @@ LOG_OUTCOME_ENUM="PASS FAIL ESCALATE GATE_FAIL CONTRACT_ESCALATE CI_GATE_FAIL NO
 # catches: hand-typed near-misses, not just genuinely new branches.
 LOG_SELF_RECOVERY_ACTION_ENUM="resumed_wait retried_enter worker_abandon_retry task_recreate_retry escalated_spawn_failure none_decision_gate_self_timed_out_worker_proceeded UNMAPPED_BRANCH"
 
+# `repo` (issue #158) is REQUIRED on every event all three helpers write: the logs directory is
+# shared by every repository this pipeline runs against, and `issue` numbers collide across repos
+# (observed: unrelated sleeptimegrt-skills/toss-* records matched issue="23" during a
+# selah-android retro). The value is the issue tracker's repository identifier exactly as the
+# pipeline invocation received it as "대상 repo" (GitHub: owner/name) — passed down the spec
+# chain, never re-derived per writer (e.g. from `git remote`), so orca-retro's (repo, issue)
+# composite filter can rely on string equality.
 log_dispatch() {
-  local skill="" role="" issue="" task_id="" task_id_set=0 terminal="" worktree="" \
+  local skill="" role="" issue="" repo="" task_id="" task_id_set=0 terminal="" worktree="" \
         provider="" model="" effort="" spec_text=""
   while [ $# -gt 0 ]; do
     # Guard against a flag with no following value (e.g. a truncated call site) *before* the case's
@@ -101,6 +109,7 @@ log_dispatch() {
       --skill) skill="$2"; shift 2 ;;
       --role) role="$2"; shift 2 ;;
       --issue) issue="$2"; shift 2 ;;
+      --repo) repo="$2"; shift 2 ;;
       --task-id) task_id="$2"; task_id_set=1; shift 2 ;;
       --terminal) terminal="$2"; shift 2 ;;
       --worktree) worktree="$2"; shift 2 ;;
@@ -118,6 +127,7 @@ log_dispatch() {
   [ -n "$skill" ]     || missing="$missing --skill"
   [ -n "$role" ]      || missing="$missing --role"
   [ -n "$issue" ]     || missing="$missing --issue"
+  [ -n "$repo" ]      || missing="$missing --repo"
   [ -n "$terminal" ]  || missing="$missing --terminal"
   [ -n "$worktree" ]  || missing="$missing --worktree"
   [ -n "$provider" ]  || missing="$missing --provider"
@@ -164,18 +174,20 @@ log_dispatch() {
   local assign_target="$logs_dir/assignments-$(date -u +%F).jsonl"
   if [ "$task_id_set" = "1" ]; then
     jq -cn --arg ts "$(date -u +%FT%TZ)" --arg skill "$skill" --arg role "$role" --arg issue "$issue" \
+      --arg repo "$repo" \
       --arg task_id "$task_id" --arg provider "$provider" --arg model "$model" --arg effort "$effort" \
       --arg terminal "$terminal" --arg worktree "$worktree" \
-      '{ts:$ts, event:"assign", skill:$skill, role:$role, issue:$issue, task_id:$task_id,
+      '{ts:$ts, event:"assign", skill:$skill, role:$role, issue:$issue, repo:$repo, task_id:$task_id,
         provider:$provider, model:$model, effort:$effort, terminal:$terminal, worktree:$worktree}' \
       >> "$assign_target" || return $?
   else
     # logging.md §1's relay/omit rule: no real task_id → omit the field (never an empty string)
     # and flag relay:true.
     jq -cn --arg ts "$(date -u +%FT%TZ)" --arg skill "$skill" --arg role "$role" --arg issue "$issue" \
+      --arg repo "$repo" \
       --arg provider "$provider" --arg model "$model" --arg effort "$effort" \
       --arg terminal "$terminal" --arg worktree "$worktree" \
-      '{ts:$ts, event:"assign", skill:$skill, role:$role, issue:$issue,
+      '{ts:$ts, event:"assign", skill:$skill, role:$role, issue:$issue, repo:$repo,
         provider:$provider, model:$model, effort:$effort, terminal:$terminal, worktree:$worktree,
         relay:true}' \
       >> "$assign_target" || return $?
@@ -197,11 +209,13 @@ log_dispatch() {
     oav_raw="$(orca status --json 2>/dev/null | jq -r '.result.runtime.appVersion // empty' 2>/dev/null || true)"
     [ -n "$oav_raw" ] && oav_json="$(printf '%s' "$oav_raw" | jq -R .)"
 
-    jq -cn --arg issue "$issue" --arg skill "$skill" --arg role "$role" --arg terminal "$terminal" \
+    jq -cn --arg issue "$issue" --arg repo "$repo" --arg skill "$skill" --arg role "$role" \
+      --arg terminal "$terminal" \
       --arg created_at "$(date -u +%FT%TZ)" \
       --argjson skill_version "$sv_json" --argjson orca_workflows_commit "$owc_json" \
       --argjson orca_app_version "$oav_json" \
-      '{type:"meta", issue:$issue, skill:$skill, role:$role, terminal:$terminal, created_at:$created_at,
+      '{type:"meta", issue:$issue, repo:$repo, skill:$skill, role:$role, terminal:$terminal,
+        created_at:$created_at,
         skill_version:$skill_version, orca_workflows_commit:$orca_workflows_commit,
         orca_app_version:$orca_app_version}' \
       >> "$term_log"
@@ -243,7 +257,7 @@ _log_append() {
 # `event`/`retry` fields — the same defect log_dispatch already killed for `assign` in issue #68).
 #
 #   source ~/.agents/orca-workflows/scripts/log_dispatch.sh
-#   log_outcome --skill <skill> --issue <issue-num> --outcome <value> --retry <n> \
+#   log_outcome --skill <skill> --issue <issue-num> --repo <대상 repo> --outcome <value> --retry <n> \
 #     [--round <n>] [--filed <n>] [--commented <n>] [--discarded <n>] [--detail <text>] \
 #     [--blocked-by <issue-num>] [--raw-outcome <text>] [--schema-gap-issue <slug>]
 #
@@ -266,7 +280,7 @@ _log_append() {
 # - --raw-outcome/--schema-gap-issue with a valid (non-UNMAPPED_BRANCH) outcome are dropped with
 #   a warning — logging.md marks them "only when outcome=UNMAPPED_BRANCH".
 log_outcome() {
-  local skill="" issue="" outcome="" retry="" round="" filed="" commented="" discarded="" \
+  local skill="" issue="" repo="" outcome="" retry="" round="" filed="" commented="" discarded="" \
         detail="" blocked_by="" raw_outcome="" schema_gap_issue=""
   while [ $# -gt 0 ]; do
     # Same value-less-trailing-flag guard as log_dispatch (shift 2 on the last argument hangs the
@@ -278,6 +292,7 @@ log_outcome() {
     case "$1" in
       --skill) skill="$2"; shift 2 ;;
       --issue) issue="$2"; shift 2 ;;
+      --repo) repo="$2"; shift 2 ;;
       --outcome) outcome="$2"; shift 2 ;;
       --retry) retry="$2"; shift 2 ;;
       --round) round="$2"; shift 2 ;;
@@ -295,6 +310,7 @@ log_outcome() {
   local missing=""
   [ -n "$skill" ]   || missing="$missing --skill"
   [ -n "$issue" ]   || missing="$missing --issue"
+  [ -n "$repo" ]    || missing="$missing --repo"
   [ -n "$outcome" ] || missing="$missing --outcome"
   [ -n "$retry" ]   || missing="$missing --retry"
   if [ -n "$missing" ]; then
@@ -359,8 +375,8 @@ log_outcome() {
 
   local line
   line="$(jq -cn --arg ts "$(date -u +%FT%TZ)" --arg skill "$skill" --arg issue "$issue" \
-    --arg outcome "$outcome" --argjson retry "$retry" \
-    '{ts:$ts, event:"outcome", skill:$skill, issue:$issue, outcome:$outcome, retry:$retry}')" \
+    --arg repo "$repo" --arg outcome "$outcome" --argjson retry "$retry" \
+    '{ts:$ts, event:"outcome", skill:$skill, issue:$issue, repo:$repo, outcome:$outcome, retry:$retry}')" \
     || return $?
   # Optional fields: appended only when non-empty — an empty value can never reach the JSON
   # (issue #127's omission rule, enforced structurally).
@@ -384,7 +400,7 @@ log_outcome() {
 # #127's fix direction ("extend the helper's enum + conditional-field validation to
 # self_recovery").
 #
-#   log_self_recovery --skill <skill> --issue <issue-num> --task-id <task_id> \
+#   log_self_recovery --skill <skill> --issue <issue-num> --repo <대상 repo> --task-id <task_id> \
 #     --dispatch-id <dispatch_id> --terminal <handle> --terminal-status <alive|dead|stuck_draft> \
 #     --action-taken <value> [--waited-ms <n>] [--new-dispatch-id <id>] [--raw-action <text>] \
 #     [--schema-gap-issue <slug>] [--wave-index <n>]
@@ -403,7 +419,7 @@ log_outcome() {
 # - --new-dispatch-id is only legal when action_taken is worker_abandon_retry|task_recreate_retry
 #   (dropped with a warning otherwise; warned-if-missing when it is one of those two).
 log_self_recovery() {
-  local skill="" issue="" task_id="" dispatch_id="" terminal="" waited_ms="" terminal_status="" \
+  local skill="" issue="" repo="" task_id="" dispatch_id="" terminal="" waited_ms="" terminal_status="" \
         action_taken="" new_dispatch_id="" raw_action="" schema_gap_issue="" wave_index=""
   while [ $# -gt 0 ]; do
     if [ $# -lt 2 ]; then
@@ -413,6 +429,7 @@ log_self_recovery() {
     case "$1" in
       --skill) skill="$2"; shift 2 ;;
       --issue) issue="$2"; shift 2 ;;
+      --repo) repo="$2"; shift 2 ;;
       --task-id) task_id="$2"; shift 2 ;;
       --dispatch-id) dispatch_id="$2"; shift 2 ;;
       --terminal) terminal="$2"; shift 2 ;;
@@ -430,6 +447,7 @@ log_self_recovery() {
   local missing=""
   [ -n "$skill" ]           || missing="$missing --skill"
   [ -n "$issue" ]           || missing="$missing --issue"
+  [ -n "$repo" ]            || missing="$missing --repo"
   [ -n "$task_id" ]         || missing="$missing --task-id"
   [ -n "$dispatch_id" ]     || missing="$missing --dispatch-id"
   [ -n "$terminal" ]        || missing="$missing --terminal"
@@ -518,10 +536,11 @@ log_self_recovery() {
 
   local line
   line="$(jq -cn --arg ts "$(date -u +%FT%TZ)" --arg skill "$skill" --arg issue "$issue" \
+    --arg repo "$repo" \
     --arg task_id "$task_id" --arg dispatch_id "$dispatch_id" --arg terminal "$terminal" \
     --argjson waited_ms "$waited_json" --arg terminal_status "$terminal_status" \
     --arg action_taken "$action_taken" \
-    '{ts:$ts, event:"self_recovery", skill:$skill, issue:$issue, task_id:$task_id,
+    '{ts:$ts, event:"self_recovery", skill:$skill, issue:$issue, repo:$repo, task_id:$task_id,
       dispatch_id:$dispatch_id, terminal:$terminal, waited_ms:$waited_ms,
       terminal_status:$terminal_status, action_taken:$action_taken}')" || return $?
   [ -n "$wave_index" ] && { line="$(printf '%s' "$line" | jq -c --argjson v "$wave_index" '. + {wave_index:$v}')" || return $?; }

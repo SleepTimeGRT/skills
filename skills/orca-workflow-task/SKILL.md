@@ -156,7 +156,7 @@ while :; do
   fi
 done
 # End pre-dispatch boot-quiesce
-spec_text="<issue 번호 + CONTRACT_DIR 절대경로 + 제안서/구현 모드(제안서 모드면: contract-schema.md 스키마대로 AC 초안을 포함한 proposal-r<라운드>.json을 CONTRACT_DIR에 작성) + orphan-폴백 계약(§0) 전문>"
+spec_text="<issue 번호 + 대상 repo(logging.md §1 repo 필드용 — 받은 문자열 그대로, issue #158) + CONTRACT_DIR 절대경로 + 제안서/구현 모드(제안서 모드면: contract-schema.md 스키마대로 AC 초안을 포함한 proposal-r<라운드>.json을 CONTRACT_DIR에 작성) + orphan-폴백 계약(§0) 전문>"
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
@@ -170,7 +170,8 @@ DISPATCH_CREATED_VIA=dispatch-inject   # self-recovery.md wait 루프의 dead-ca
 #   결과는 이 스킬이 직접 읽지 않고 다른 채널로 도착한다). term-<run-handle>.jsonl은 orca-workflow-task
 #   자신이 소유하는 파일이다 — task-runner 자신의 왕복 내용은 그쪽이 스폰한 term-<impl_handle>.jsonl들에
 #   이미 남는다.
-log_dispatch --skill "orca-workflow-task" --role "task-runner" --issue "<issue-num>" --task-id "<task_id>" \
+log_dispatch --skill "orca-workflow-task" --role "task-runner" --issue "<issue-num>" --repo "<대상 repo>" \
+  --task-id "<task_id>" \
   --terminal "<run-handle>" --worktree "<worktree 경로>" --provider "<resolved provider (claude-code/codex/agy)>" \
   --model "<resolved model>" --effort "<resolved effort>" --spec-text "$spec_text"
 # SPEC_TEXT 사이드카 — self-recovery.md wait 루프가 이 dispatch의 dead-case 복구 시 참조하는 값을
@@ -220,7 +221,7 @@ while :; do
   fi
 done
 # End pre-dispatch boot-quiesce
-spec_text="<orca-evaluate SKILL.md 지침 + CONTRACT_DIR 절대경로와 대상 라운드 번호(검토 대상 proposal-r<n>.json·판정 산출 verdict-r<n>.json — 스키마·적대적 판정 지침·라운드 2 입력 격리 규칙은 contract-schema.md) + issue 원문 + issue 번호 + 요청 모드 + orphan-폴백 계약(§0) 전문>"
+spec_text="<orca-evaluate SKILL.md 지침 + CONTRACT_DIR 절대경로와 대상 라운드 번호(검토 대상 proposal-r<n>.json·판정 산출 verdict-r<n>.json — 스키마·적대적 판정 지침·라운드 2 입력 격리 규칙은 contract-schema.md) + issue 원문 + issue 번호 + 대상 repo(logging.md §1 repo 필드용, issue #158) + 요청 모드 + orphan-폴백 계약(§0) 전문>"
 orca_call_with_retry "orca-workflow-task" "evaluator" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-task" "evaluator" -- \
@@ -230,7 +231,8 @@ DISPATCH_CREATED_VIA=dispatch-inject   # self-recovery.md wait 루프의 dead-ca
 # 로그 — logging.md §1 assign + §2 meta/sent를 log_dispatch()가 한 호출로 원자적으로 기록한다(issue #68).
 #   이 터미널에 대한 유일한 read도 마찬가지로 dispatch-verify.md의 liveness probe뿐이라
 #   recv는 기록하지 않는다(위 task-runner 사이트와 같은 이유).
-log_dispatch --skill "orca-workflow-task" --role "evaluator" --issue "<issue-num>" --task-id "<task_id>" \
+log_dispatch --skill "orca-workflow-task" --role "evaluator" --issue "<issue-num>" --repo "<대상 repo>" \
+  --task-id "<task_id>" \
   --terminal "<evaluate-handle>" --worktree "<worktree 경로>" --provider "<resolved provider (claude-code/codex/agy)>" \
   --model "<resolved model>" --effort "<resolved effort>" --spec-text "$spec_text"
 # SPEC_TEXT 사이드카 — 위 task-runner 블록과 동일한 이유·동일한 파일명 컨벤션(`spec-<task_id>.txt`,
@@ -274,7 +276,7 @@ DISPATCH_CREATED_VIA=worker-start   # self-recovery.md wait 루프의 dead-case 
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(worker-start에도 동일하게 필요).
 # 로그 — logging.md §1 assign + §2 meta/sent를 log_dispatch()가 한 호출로 원자적으로 기록한다(issue #68).
 #   이 사이트도 recv는 기록하지 않는다(위 두 사이트와 같은 이유 — 결과는 check --wait으로 수신).
-log_dispatch --skill "orca-workflow-task" --role "contract-round" --issue "<issue-num>" \
+log_dispatch --skill "orca-workflow-task" --role "contract-round" --issue "<issue-num>" --repo "<대상 repo>" \
   --task-id "<방금 만든 task_id>" --terminal "<재-engage 대상 handle>" --worktree "<worktree 경로>" \
   --provider "<라운드 1에서 resolve한 provider (claude-code/codex/agy) — 재-resolve 없이 재사용>" \
   --model "<라운드 1에서 resolve한 model — 재사용>" --effort "<라운드 1에서 resolve한 effort — 재사용>" \
@@ -290,7 +292,7 @@ log_dispatch --skill "orca-workflow-task" --role "contract-round" --issue "<issu
 `orca-task-runner` 호출, 결과로 **task 전체 diff 경로** 또는 **`GATE_FAIL`**을 받는다(`orca-task-runner`가 자기 task-레벨 게이트를 재시도 한도(2회) 안에 못 넘긴 경우 — `skills/orca-task-runner/SKILL.md` §6). §4의 FAIL 재시도로 돌아온 호출이면 spec을 아래 템플릿대로 구성한다 — findings를 prose로 요약하지 않고 파일 경로만 넘긴다:
 
 ```
-spec_text="<issue 번호 + CONTRACT_DIR 절대경로 + 구현 모드 + 직전 attempt 번호 + \"CONTRACT_DIR의 eval-report-a<attempt>.json과 최종 라운드 proposal(가장 큰 proposal-r<n>.json — 네가 직접 확인)을 이 순서로 전부 읽어라 — findings를 요약해 넘기지 않는다\" + orphan-폴백 계약(§0) 전문>"
+spec_text="<issue 번호 + 대상 repo(logging.md §1 repo 필드용, issue #158) + CONTRACT_DIR 절대경로 + 구현 모드 + 직전 attempt 번호 + \"CONTRACT_DIR의 eval-report-a<attempt>.json과 최종 라운드 proposal(가장 큰 proposal-r<n>.json — 네가 직접 확인)을 이 순서로 전부 읽어라 — findings를 요약해 넘기지 않는다\" + orphan-폴백 계약(§0) 전문>"
 ```
 
 확정 계약 라운드 번호는 이 스킬이 치환하지 않는다 — 확정 AC의 정본은 "최종 라운드(가장 큰 n) proposal"이고(contract-schema.md — override 경로에서는 정정 라운드(r4+)가 나중에 추가될 수 있어 코디네이터가 아는 번호가 낡을 수 있다, issue #130), generator가 CONTRACT_DIR에서 직접 확인한다(이 스킬은 feedback 본문도 확정 AC 본문도 중계하지 않는다).
@@ -370,7 +372,7 @@ spec_text="<issue 번호 + CONTRACT_DIR 절대경로 + 구현 모드 + 직전 at
 - MERGE_CONFLICT → (같은 위치) base와의 텍스트 충돌(`mergeStateStatus=DIRTY`) 또는
   `gh pr update-branch` 실패 — 자동 rebase/충돌 해소를 시도하지 않고 즉시 §5.
 
-라우팅 판정마다 outcome 이벤트를 할당 로그와 같은 파일에 남긴다 — `issue`/`task_id`로 assign 이벤트와 join해야 "어떤 할당이 어떤 결과를 냈는지"를 사후 감사할 수 있다(할당 기록만으로는 품질 판정 불가). 로그 — `~/.agents/orca-workflows/logging.md` §1 `outcome` 레시피 그대로 실행(enum 값은 그쪽이 정본 — 여기 복제하지 않는다): `skill="orca-workflow-task"`, `issue=<issue-num>`, `outcome=<위 라우팅 분기에서 결정된 값>`, `retry=<재시도 횟수>`.
+라우팅 판정마다 outcome 이벤트를 할당 로그와 같은 파일에 남긴다 — `issue`/`task_id`로 assign 이벤트와 join해야 "어떤 할당이 어떤 결과를 냈는지"를 사후 감사할 수 있다(할당 기록만으로는 품질 판정 불가). 로그 — `~/.agents/orca-workflows/logging.md` §1 `outcome` 레시피 그대로 실행(enum 값은 그쪽이 정본 — 여기 복제하지 않는다): `skill="orca-workflow-task"`, `issue=<issue-num>`, `repo=<대상 repo>`, `outcome=<위 라우팅 분기에서 결정된 값>`, `retry=<재시도 횟수>`.
 
 ## 5. Escalation·보고
 

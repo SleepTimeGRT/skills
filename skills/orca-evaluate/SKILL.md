@@ -61,7 +61,7 @@ orca_call_with_retry "orca-evaluate" "contract-review" -- \
 # 동일하게 적용한다.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. §3 스폰도 동일한 형태(§2 agent-e2e는
 # assign만 — term 로그 대상 아님).
-#  logging.md §1 assign 이벤트: role="contract-review", issue=<issue-num>, task_id=<task_id>,
+#  logging.md §1 assign 이벤트: role="contract-review", issue=<issue-num>, repo=<대상 repo — spec으로 받은 값>, task_id=<task_id>,
 #    provider/model/effort=resolved 값, terminal=<contract-handle>, worktree=<worktree 경로>
 #  logging.md §2 term 로그: skill="orca-evaluate", role="contract-review", terminal=<contract-handle>,
 #    meta 기록 후 sent.content=$spec_text. 이 터미널에 대한 유일한 read는 위 dispatch-verify.md의
@@ -97,6 +97,7 @@ orca terminal wait --terminal <agent-e2e-handle> --for tui-idle --timeout-ms 900
 # `--for exit`은 쓰지 않는다(agy.md 실측 참고).
 orca terminal read --terminal <agent-e2e-handle> --json
 # 할당 로그 — ~/.agents/orca-workflows/logging.md §1 절차대로. role="agent-e2e", issue=<issue-num>,
+# repo=<대상 repo — spec으로 받은 값>,
 # provider="agy", model=<model>, effort="", terminal=<agent-e2e-handle>, worktree=<worktree 경로>,
 # task_id/dispatch_id 없음(orchestration 태스크가 아니므로).
 ```
@@ -185,7 +186,7 @@ orca_call_with_retry "orca-evaluate" "code-review" -- \
   orca orchestration dispatch --task <task_id> --to <review-handle> --retry-request "$(uuidgen)" --inject --json
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43·#58).
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로.
-#  logging.md §1 assign 이벤트: role="code-review", issue=<issue-num>, task_id=<task_id>, provider=$reviewer_provider,
+#  logging.md §1 assign 이벤트: role="code-review", issue=<issue-num>, repo=<대상 repo — spec으로 받은 값>, task_id=<task_id>, provider=$reviewer_provider,
 #    model=$reviewer_model, effort=$reviewer_effort, advisor=${reviewer_advisor:-}, terminal=<review-handle>,
 #    worktree=<worktree 경로>
 #  logging.md §2 term 로그: skill="orca-evaluate", role="code-review", terminal=<review-handle>, meta 기록 후

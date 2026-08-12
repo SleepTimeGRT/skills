@@ -212,7 +212,7 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
 # 통과한 뒤의 실패는 별도 재시도 없이 self-recovery.md의 `dead` 판정(worker-abandon → worker-start
 # --retry-of)에 맡긴다.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. dispatch와 같은 블록에서 즉시 실행(누락 방지).
-#  logging.md §1 assign 이벤트: role="subtask-impl", issue=<issue-num>, task_id=<task_id>, wave_index=<n>,
+#  logging.md §1 assign 이벤트: role="subtask-impl", issue=<issue-num>, repo=<대상 repo — spec으로 받은 값>, task_id=<task_id>, wave_index=<n>,
 #    subtask_type=<전사|통합|아키텍처>, provider/model/effort=resolved 값, terminal=<impl_handle>,
 #    worktree=<worktree 경로>. wave_index는 아래 wave_start 로그와 join한다.
 #  logging.md §2 term 로그: skill="orca-task-runner", role="subtask-impl", terminal=<impl_handle>,
@@ -226,7 +226,7 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
 
 ```bash
 # wave_start 로그 — ~/.agents/orca-workflows/logging.md §1 절차대로 waves-<오늘 UTC 날짜>.jsonl에 기록.
-# event="wave_start", issue=<issue-num>, wave_index=<n>, wave_size=<이 wave 터미널 수>,
+# event="wave_start", issue=<issue-num>, repo=<대상 repo — spec으로 받은 값>, wave_index=<n>, wave_size=<이 wave 터미널 수>,
 # nproc=$(sysctl -n hw.ncpu 2>/dev/null || nproc), ts_epoch=$(date -u +%s)
 ```
 
@@ -281,7 +281,7 @@ else
   elapsed_ms=null   # 매칭되는 wave_start가 없음 — §0 orphan 확인을 건너뛴 경우거나 데이터 유실
 fi
 # wave_end 로그 — ~/.agents/orca-workflows/logging.md §1 절차대로 waves-<오늘 UTC 날짜>.jsonl에 기록.
-# event="wave_end", issue=<issue-num>, wave_index=<n>, wave_size=<이 wave 터미널 수>,
+# event="wave_end", issue=<issue-num>, repo=<대상 repo — spec으로 받은 값>, wave_index=<n>, wave_size=<이 wave 터미널 수>,
 # retry_count=<이 wave에서 발생한 스폰 실패·timeout 재시도 총 횟수, 알 수 없으면 null>,
 # elapsed_ms=$elapsed_ms, outcome="completed"
 ```
