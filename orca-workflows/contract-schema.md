@@ -65,7 +65,12 @@ install -d -m 700 "$CONTRACT_DIR"
 - `draft_acceptance_criteria`의 각 항목은 (a) **binary**(판정 가능 — "좋다/나쁘다" 같은 주관적
   기준 금지) (b) **independent**(정확히 한 가지만 검증 — 여러 조건을 접속사로 묶지 않음) (c) 배열에
   쓰는 순서가 곧 **중요도 순서**(ordered by importance)여야 한다. 새 필드를 추가하지 않는다 — 배열
-  순서 자체가 우선순위다. evaluator는 이 3원칙 위반을 `ac_fidelity` 반려 사유로 삼을 수 있다(Spec-
+  순서 자체가 우선순위다. evaluator는 이 3원칙 위반을 `plan_coverage` 반려 사유로 삼을 수 있다 —
+  `ac_fidelity`는 원본 issue 요구와의 불일치(무엇을 만들지의 이견, human escalation 대상)로 좁게
+  유지하고, AC 초안 자체의 구조적 결함(3원칙 위반)은 generator가 사람 개입 없이 고칠 수 있는
+  문제이므로 `plan_coverage`로 분류한다(verification_plan 커버리지 누락·`fails_before_fix` 결함을
+  새 axis 대신 같은 target에 묶는 기존 관행과 동일한 이유, Task 1 리뷰에서 확인된 라운드-캡-확장과의
+  충돌 — `ac_fidelity`였다면 3원칙 위반이 라운드3 연장 없이 즉시 `CONTRACT_ESCALATE`됐을 것). (Spec-
   Driven Development 관행 — round1 반려율 88%의 근본 원인이 AC 자체 품질이라는 실측 근거,
   `docs/superpowers/specs/2026-08-12-contract-sprint-improvements-design.md`).
 
