@@ -5,8 +5,10 @@ description: >-
   invocation's logs under ~/.local/state/orca-workflows/logs/ (assignments/outcome events,
   spawn-failures, term transcripts) through six defect lenses (documented-schema violations,
   repeated FAILs attributable to skill prose, preventable escalations or human interventions, new
-  spawn-failure signatures, and false-PASS regressions: tracker issues with a regressed-by trailer
-  pointing back at merged PASS verdicts — the one lens crossing invocation boundaries) and files at
+  spawn-failure signatures, false-PASS regressions: tracker issues with a regressed-by trailer
+  pointing back at merged PASS verdicts — the one lens crossing invocation boundaries, and
+  contract-verdict mismatches: approved or plan_coverage-only contract verdicts contradicted by
+  downstream eval-report FAILs or human escalation) and files at
   most 3 evidence-backed skill-defect issues on the sleeptimegrt-skills repo, deduplicating against
   open issues via recurrence comments. Never edits skills directly — output is issues only; fixes
   flow through the normal /orca-workflow pipeline later. Best-effort by contract: no retro failure
