@@ -15,8 +15,8 @@
 #     "schema_version": 1,
 #     "contract": "fresh|negotiating|approved|finalized|escalated",
 #     "resume":  "section-1-proposal|section-1-verdict|section-1-override|section-2|section-4|section-5",
-#     "round": <n|null>,           // section-1-*: the round to (re-)run
-#     "approved_round": <n|null>,  // §2's <확정라운드> substitution when §1 is skipped
+#     "round": <n|null>,           // section-1-*: the round to (re-)run (for -override: the r3 it produces)
+#     "approved_round": <n|null>,  // final contract round: approved verdict round, or max r<n> post-override (#130)
 #     "attempt": <k|null>,         // section-2: attempt to run; section-4/5: last evaluated attempt
 #     "retry": <n|null>,           // §4 FAIL-retry counter to carry (attempt k runs with retry k-1)
 #     "outcome": <string|null>,    // section-4: PASS; section-5: CONTRACT_ESCALATE|FAIL|ESCALATE
@@ -29,6 +29,9 @@
 #   value is outside its schema enum, is treated as ABSENT — its producing step re-runs. Rewriting
 #   the same-numbered file on that re-run is legal: contract-schema.md's append-only rule is a
 #   cross-round rule (don't edit r1 during r2), not a crash-resume prohibition.
+# - proposal-r3+ never has a verdict by design (override follow-up rounds, contract-schema.md
+#   "override 후속 라운드", issue #130): with a valid override.json it is the final contract, not an
+#   ambiguous state; without one it is an out-of-contract state and escalates.
 # - The override gate below MIRRORS orca-workflow-task §1's inline routing block (verdict-r2.json
 #   is the routing input, never override.json's generator-filtered unresolved_reasons). Change them
 #   together; tests/test_contract_resume.py pins this side.
@@ -145,14 +148,27 @@ contract_resume_state() {
     elif jq -e '[.reasons[]?.target] | index("ac_fidelity")' "$dir/verdict-r2.json" >/dev/null 2>&1; then
       contract="escalated"; resume="section-5"; outcome='"CONTRACT_ESCALATE"'
       detail='"ac_fidelity disagreement unresolved at the round limit"'
+    elif [ "$maxp" -lt 3 ]; then
+      # The override step writes override.json THEN proposal-r3.json (the final contract —
+      # contract-schema.md "override 후속 라운드", issue #130). override without r3 on resume
+      # means the step died between the two writes — re-burn it. (The in-session §1 gate treats
+      # the same file state as a recording-contract violation and escalates instead: there the
+      # generator claimed completion via worker_done, so "died mid-write" is ruled out.)
+      contract="negotiating"; resume="section-1-override"; round=3
+      detail='"override recorded but proposal-r3 (final contract) missing — override step died mid-write; re-run it"'
     else
       contract="finalized"
-      approved=2
+      approved="$maxp"   # correction rounds (r4+, #130) supersede r3 as the final contract
     fi
   else
     # Negotiation still in flight — resume at the first missing/invalid artifact's producer.
     if [ "$maxp" -eq 0 ] && [ "$maxv" -eq 0 ]; then
       contract="fresh"; resume="section-1-proposal"; round=1
+    elif [ "$maxp" -ge 3 ]; then
+      # proposal-r3+ may only exist after an override (write order is override-first) or...
+      # never otherwise — an approved verdict was handled above. Out-of-contract state.
+      contract="escalated"; resume="section-5"; outcome='"CONTRACT_ESCALATE"'
+      detail='"proposal-r3+ exists without override.json or an approved verdict (out-of-contract state)"'
     elif [ "$maxp" -gt "$maxv" ]; then
       contract="negotiating"; resume="section-1-verdict"; round="$maxp"
     else
@@ -160,7 +176,8 @@ contract_resume_state() {
       # pathological valid-verdict-over-invalid-proposal case with the same fail-closed result
       contract="negotiating"
       if [ "$maxv" -ge 2 ]; then
-        resume="section-1-override"; round="$maxv"
+        # The override step produces override.json + proposal-r3, so round names its output.
+        resume="section-1-override"; round=3
         detail='"round limit reached, rejected, no override recorded — re-dispatch the generator override step"'
       else
         resume="section-1-proposal"; round=$((maxv+1))

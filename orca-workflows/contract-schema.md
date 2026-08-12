@@ -31,7 +31,7 @@ install -d -m 700 "$CONTRACT_DIR"
 
 | file | writer | when |
 |---|---|---|
-| `proposal-r<n>.json` | orca-task-runner (generator) | 라운드 n 제안 |
+| `proposal-r<n>.json` | orca-task-runner (generator) | 라운드 n 제안 (r3+는 override 후속 라운드 — 아래 절) |
 | `verdict-r<n>.json` | orca-evaluate (evaluator) | 라운드 n 판정 |
 | `override.json` | orca-task-runner | 2라운드에도 rejected일 때 결정권 행사 기록 |
 | `gate-flake-a<k>.json` | orca-task-runner (generator) | attempt k의 task 게이트가 재시도 후 통과(flake 재분류)했을 때만 |
@@ -115,6 +115,24 @@ install -d -m 700 "$CONTRACT_DIR"
   스키마의 "적대적 판정 지침"이 존재하는 이유와 같다). `unresolved_reasons`는 generator가 무엇을
   우려로 인정했는지의 **기록**으로만 남는다.
 
+## override 후속 라운드 (proposal-r3+, issue #130)
+
+override는 협상의 종착점이지 계약의 종착점이 아니다 — override 발동 시 generator는
+`override.json`을 쓴 **직후, 같은 스텝에서** `proposal-r3.json`을 새로 쓴다(쓰기 순서 고정:
+override.json 먼저 — 크래시 시 재구성이 "override 없이 r3만 있는" 비정상 상태를 만들지 않게).
+
+- `proposal-r3.json` = `verdict-r2.json`의 `reasons` 중 generator가 해소한 항목을 반영한 **최종
+  확정 계약**이다. `round: 3`, 나머지 필드는 proposal 스키마 그대로. `proposal-r2.json`/
+  `override.json`은 그대로 둔다(append-only).
+- **`verdict-r3.json`은 존재하지 않는 것이 정상이다** — 이 라운드는 evaluator 재검토를 구하지
+  않는다(협상 라운드 한도는 2). 검증은 `orca-evaluate` §3 diff 리뷰가 최종 AC 기준으로 한다.
+- **override 이후 계약 자체의 결함이 발견되면**(eval FAIL findings가 코드가 아니라 proposal 필드를
+  지적) 동결된 라운드 파일을 절대 제자리 수정하지 않는다 — 다음 라운드 번호(`proposal-r4.json`, …)로
+  새 파일을 쓴다. 제자리 수정은 이미 그 파일을 인용해 둔 `verdict-r*`/`override.json`의 인용
+  무결성을 깨고, 같은 diff를 서로 다른 두 계약으로 측정하게 만든다(#96에서 ESCALATE로 실측).
+- 이미 제자리 수정으로 손상된 경우의 교정: 손상 파일을 복구하려 들지 말고(그 시도 자체가 또 다른
+  제자리 수정이다) **현재 내용**을 그대로 `proposal-r<n+1>.json`으로 복제하고 `round` 필드만 올린다.
+
 ## gate-flake-a&lt;k&gt;.json
 
 ```json
@@ -183,7 +201,10 @@ install -d -m 700 "$CONTRACT_DIR"
 `tests/test_contract_resume.py`가 고정한다).
 
 - 모호 상태(파일은 있는데 JSON 무효, 또는 `status`/`verdict` 값이 스키마 밖 — 쓰다 죽은 것)는 없는
-  것으로 취급해 그 파일의 생산 스텝을 fail-closed로 다시 태운다. 이때 같은 번호 파일을 덮어쓰는
+  것으로 취급해 그 파일의 생산 스텝을 fail-closed로 다시 태운다. **예외**: 유효한 `override.json`이
+  있을 때 verdict 없는 `proposal-r3.json`(이상)은 모호가 아니라 정상이다 — override 후속 라운드는
+  verdict를 갖지 않는다(위 절). 반대로 override가 있는데 `proposal-r3.json`이 없으면 override 스텝이
+  쓰다 죽은 것이므로 그 스텝을 다시 태운다. 이때 같은 번호 파일을 덮어쓰는
   것은 append-only 위반이 아니다 — append-only는 라운드 간(r1을 r2에서 수정 금지) 규칙이다.
 - override 라우팅 게이트(위 override 절)는 재개 경로에서도 동일하게 적용된다 —
   `contract_resume.sh`가 `orca-workflow-task` §1의 인라인 분기를 미러링한다. 한쪽을 바꾸면 함께
@@ -200,7 +221,8 @@ attempt 2+의 리뷰 입력에 추가되는 것은 **자신의 직전 `eval-repo
 ## 확정 AC의 정본
 
 이후 모든 단계(`orca-task-runner` §2 subtask 분해, `orca-evaluate` §3 diff review)가 참조하는 확정
-acceptance criteria는 **최종 라운드 proposal의 `draft_acceptance_criteria`**다(승인이든 override든).
+acceptance criteria는 **최종 라운드(가장 큰 n) proposal의 `draft_acceptance_criteria`**다(승인이든
+override든 — override 경로에서는 `proposal-r3.json` 이상, 위 override 후속 라운드 절).
 issue 본문의 사전 AC 섹션은 전제가 아니다 — 있으면 issue 원문의 일부로서 초안의 입력이 될 뿐이다.
 
 ## 적대적 판정 지침

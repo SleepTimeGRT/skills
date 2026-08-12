@@ -107,7 +107,7 @@ spec으로 받은 `CONTRACT_DIR`에 `proposal-r<라운드>.json`으로,
   단언 중 이 변경으로 red가 될 것은 여기 별도로 열거한다(정확 일치 단언, 게이트 자체를 막는 회귀를
   특히 놓치기 쉽다).
 
-`orca-evaluate`가 이 제안(AC 초안 포함)을 **원본 issue 전문**에 대조해 검토하고 `verdict-r<라운드>.json`으로 판정을 남긴다. 반려되면 그 `reasons`를 읽고 **수정된 사실로** 다시 제안한다(`proposal-r2.json` — 서술형 반박이 아니라 필드 수준의 변경으로 응답한다). 각 라운드는 별도 dispatch로 도착한다: 제안서를 쓰고 나면 이번 턴을 끝낸다(주입된 preamble의 worker_done 지시대로), 같은 턴 안에서 반려 여부를 기다리거나 폴링하지 않는다. **최대 2 라운드.** 2라운드 안에 합의가 안 되면 이 스킬(generator)이 결정권을 가지고 그 제안대로 진행한다 — evaluator의 verdict 파일은 수정하지 않고, `override.json`(스키마 문서 참고)에 미해소 `reasons`를 복사해 남긴 뒤 진행한다. 이후 모든 단계(§2 subtask 분해 포함)가 참조하는 확정 AC는 최종 라운드 proposal의 `draft_acceptance_criteria`다.
+`orca-evaluate`가 이 제안(AC 초안 포함)을 **원본 issue 전문**에 대조해 검토하고 `verdict-r<라운드>.json`으로 판정을 남긴다. 반려되면 그 `reasons`를 읽고 **수정된 사실로** 다시 제안한다(`proposal-r2.json` — 서술형 반박이 아니라 필드 수준의 변경으로 응답한다). 각 라운드는 별도 dispatch로 도착한다: 제안서를 쓰고 나면 이번 턴을 끝낸다(주입된 preamble의 worker_done 지시대로), 같은 턴 안에서 반려 여부를 기다리거나 폴링하지 않는다. **최대 2 라운드.** 2라운드 안에 합의가 안 되면 이 스킬(generator)이 결정권을 가지고 진행한다 — evaluator의 verdict 파일은 수정하지 않고, `override.json`(스키마 문서 참고)에 미해소 `reasons`를 복사해 남긴 **직후 같은 스텝에서 `proposal-r3.json`을 새로 쓴다**(`verdict-r2.json`의 reasons 중 해소한 항목을 반영한 최종 확정 계약, `round: 3`, verdict 없음 — 쓰기 순서는 override.json 먼저, 스키마 문서의 "override 후속 라운드" 절이 정본, issue #130). 동결된 이전 라운드 파일(`proposal-r1/r2`)은 절대 제자리 수정하지 않는다. 이후 모든 단계(§2 subtask 분해 포함)가 참조하는 확정 AC는 최종 라운드(가장 큰 n) proposal의 `draft_acceptance_criteria`다.
 
 ## 2. Subtask DAG 구성
 
@@ -328,7 +328,7 @@ attempt 로그에서 추출하고, 레포에 알려진 flake 목록(예: `.claud
 
 Task 레벨 게이트(§6)를 통과하면 → task 전체 diff를 정리해 `orca-workflow-task`에 반환한다(diff 경로 + resolved providers/models + wave 구성 기록). flake 증거는 반환값에 싣지 않는다 — §6이 이미 `CONTRACT_DIR/gate-flake-a<attempt>.json`으로 남겼고, `orca-evaluate`가 그 경로를 직접 읽는다. **`orca-evaluate`는 이 스킬이 직접 호출하지 않는다** — `orca-workflow-task`가 호출한다. (§6에서 `GATE_FAIL`을 반환한 경우엔 diff를 넘기지 않는다 — 그 자체가 반환값이다.)
 
-**Evaluate-FAIL 재시도로 재호출된 경우**(spec에 attempt 번호가 있음): contract 협상(§1)을 다시 하지 않는다 — 확정 AC는 그대로다. `CONTRACT_DIR`의 `eval-report-a<attempt>.json`과 `proposal-r<확정라운드>.json`을 이 순서로 직접 읽고(`orca-workflow-task`는 findings 본문도 확정 AC 본문도 중계하지 않는다 — `~/.agents/orca-workflows/contract-schema.md`의 "확정 AC의 정본"), 그 수정에 필요한 만큼만 §2~§5를 다시 태운 뒤 §6 task-레벨 게이트를 전체 재통과시키고 위 §7 반환을 반복한다. 수정 결과에 대한 서술형 해명을 evaluator에게 보내지 않는다 — 재평가의 입력은 diff의 사실 변화뿐이다(같은 문서의 "재시도 입력 격리").
+**Evaluate-FAIL 재시도로 재호출된 경우**(spec에 attempt 번호가 있음): contract 협상(§1)을 다시 하지 않는다 — 확정 AC는 그대로다. `CONTRACT_DIR`의 `eval-report-a<attempt>.json`과 **최종 라운드 proposal**(가장 큰 `proposal-r<n>.json` — 네가 직접 확인)을 이 순서로 직접 읽고(`orca-workflow-task`는 findings 본문도 확정 AC 본문도 중계하지 않는다 — `~/.agents/orca-workflows/contract-schema.md`의 "확정 AC의 정본"), 그 수정에 필요한 만큼만 §2~§5를 다시 태운 뒤 §6 task-레벨 게이트를 전체 재통과시키고 위 §7 반환을 반복한다. findings가 코드가 아니라 **계약 파일 자체의 결함**을 지적하면(override 이후에만 가능 — approved 계약이면 ESCALATE 사안), 동결 파일을 제자리 수정하지 말고 `proposal-r<n+1>.json`을 새로 쓴다(스키마 문서의 "override 후속 라운드" 절, issue #130). 수정 결과에 대한 서술형 해명을 evaluator에게 보내지 않는다 — 재평가의 입력은 diff의 사실 변화뿐이다(같은 문서의 "재시도 입력 격리").
 
 ## 폴백
 

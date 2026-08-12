@@ -27,8 +27,8 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
   ```
 
   출력 JSON의 `resume` 필드가 가리키는 §로 점프한다 — `section-1-proposal`/`-verdict`/`-override`는
-  §1의 해당 스텝부터(`round` 필드의 라운드), `section-2`는 §2부터(`attempt`/`retry`/`approved_round`
-  필드를 §2 spec과 §4 재시도 카운터로 이어받는다), `section-4`는 §4의 PASS 라우팅부터(PR 확보와
+  §1의 해당 스텝부터(`round` 필드의 라운드), `section-2`는 §2부터(`attempt`/`retry` 필드를 §2 spec과
+  §4 재시도 카운터로 이어받는다), `section-4`는 §4의 PASS 라우팅부터(PR 확보와
   merge 루프는 재실행-안전 — #72), `section-5`는 `outcome` 필드 값으로 §5로. 규칙:
   - `recent_write`가 true면(기본 10분 내 아티팩트 수정) 이전 세션의 워커가 아직 쓰고 있을 수 있다 —
     점프하지 않는다. hitl이면 사람에게 확인하고, afk면 10분 대기 후 1회 재스캔, 그래도 true면 §5
@@ -96,6 +96,12 @@ if [ ! -f "<CONTRACT_DIR>/override.json" ]; then
 elif [ ! -f "<CONTRACT_DIR>/verdict-r2.json" ]; then
   # override는 있는데 최종 라운드 verdict가 없다 — evaluator 판정 없이 진행 기록만 있는 상태.
   # 마찬가지로 fail-closed: outcome=CONTRACT_ESCALATE로 남기고 §5로.
+elif [ ! -f "<CONTRACT_DIR>/proposal-r3.json" ]; then
+  # override 기록은 있는데 확정 계약(proposal-r3 — override 스텝이 override.json 직후에 쓴다,
+  # contract-schema.md "override 후속 라운드" 절, issue #130)이 없다 — worker_done까지 왔으므로
+  # 쓰다 죽은 게 아니라 기록 계약 위반이다. fail-closed: outcome=CONTRACT_ESCALATE로 남기고 §5로.
+  # (§0 재개 분기는 같은 상태를 "쓰다 죽음"으로 보고 override 스텝을 재-태운다 — worker_done 수신
+  # 여부가 두 해석을 가른다.)
 elif jq -e '[.reasons[].target] | index("ac_fidelity")' "<CONTRACT_DIR>/verdict-r2.json" >/dev/null; then
   # AC 자체("무엇을 만들지")에 이견이 남음 — 생성 비용을 쓰기 전에 사람에게 보낸다.
   # 라우팅 입력은 generator가 쓴 override.json이 아니라 evaluator 소유의 verdict-r2.json이다
@@ -284,10 +290,10 @@ log_dispatch --skill "orca-workflow-task" --role "contract-round" --issue "<issu
 `orca-task-runner` 호출, 결과로 **task 전체 diff 경로** 또는 **`GATE_FAIL`**을 받는다(`orca-task-runner`가 자기 task-레벨 게이트를 재시도 한도(2회) 안에 못 넘긴 경우 — `skills/orca-task-runner/SKILL.md` §6). §4의 FAIL 재시도로 돌아온 호출이면 spec을 아래 템플릿대로 구성한다 — findings를 prose로 요약하지 않고 파일 경로만 넘긴다:
 
 ```
-spec_text="<issue 번호 + CONTRACT_DIR 절대경로 + 구현 모드 + 직전 attempt 번호 + \"CONTRACT_DIR의 eval-report-a<attempt>.json과 proposal-r<확정라운드>.json을 이 순서로 전부 읽어라 — findings를 요약해 넘기지 않는다\" + orphan-폴백 계약(§0) 전문>"
+spec_text="<issue 번호 + CONTRACT_DIR 절대경로 + 구현 모드 + 직전 attempt 번호 + \"CONTRACT_DIR의 eval-report-a<attempt>.json과 최종 라운드 proposal(가장 큰 proposal-r<n>.json — 네가 직접 확인)을 이 순서로 전부 읽어라 — findings를 요약해 넘기지 않는다\" + orphan-폴백 계약(§0) 전문>"
 ```
 
-`<확정라운드>`는 이 세션이 §1에서 이미 로그로 남긴 `CONTRACT_APPROVED`/`CONTRACT_FINALIZED_BY_GENERATOR`의 `round` 값을 그대로 리터럴 치환한다(추가 조회 없음; §0 재개 분기로 §1을 건너뛴 세션은 그 출력의 `approved_round` 값을 쓴다) — generator가 두 파일을 직접 읽는다(이 스킬은 feedback 본문도 확정 AC 본문도 중계하지 않는다).
+확정 계약 라운드 번호는 이 스킬이 치환하지 않는다 — 확정 AC의 정본은 "최종 라운드(가장 큰 n) proposal"이고(contract-schema.md — override 경로에서는 정정 라운드(r4+)가 나중에 추가될 수 있어 코디네이터가 아는 번호가 낡을 수 있다, issue #130), generator가 CONTRACT_DIR에서 직접 확인한다(이 스킬은 feedback 본문도 확정 AC 본문도 중계하지 않는다).
 
 **GATE_FAIL 라우팅** — `orca-evaluate`를 호출하지 않고 바로 §5로 간다. `orca-task-runner`가 이미 자기 재시도 예산을 다 썼으므로 여기서 추가 재시도를 걸지 않는다(이중 카운팅 방지). §5 보고에 "evaluate 호출 안 됨(GATE_FAIL) — 기계적 게이트 실패"를 명시해 아래 FAIL/ESCALATE와 구분한다. 이때도 §4의 outcome 로그 라인을 `outcome:"GATE_FAIL"`로 남긴다(§4를 거치지 않으므로 여기서 직접).
 

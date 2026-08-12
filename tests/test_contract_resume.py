@@ -157,7 +157,7 @@ def test_rejected_r2_without_override_resumes_override_step(tmp_path: Path, shel
     _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
     state = _state(d, shell)
     assert state["resume"] == "section-1-override"
-    assert state["round"] == 2
+    assert state["round"] == 3  # the proposal round the override step produces (issue #130)
 
 
 # ── override gate (mirrors orca-workflow-task §1) ───────────────────────────────────────────
@@ -184,8 +184,31 @@ def test_override_without_verdict_r2_fails_closed(tmp_path: Path, shell: str) ->
     assert state["outcome"] == "CONTRACT_ESCALATE"
 
 
+def _finalized_contract(d: Path) -> None:
+    """Round limit hit, plan_coverage-only rejection, override step completed (override + r3)."""
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
+    _write(d, "override.json", _override())
+    _write(d, "proposal-r3.json", _proposal(3))
+
+
 @pytest.mark.parametrize("shell", SHELLS)
 def test_override_plan_coverage_only_finalizes_and_resumes_generate(tmp_path: Path, shell: str) -> None:
+    d = tmp_path / "issue-42"
+    _finalized_contract(d)
+    state = _state(d, shell)
+    assert state["contract"] == "finalized"
+    assert state["resume"] == "section-2"
+    assert state["approved_round"] == 3  # the override follow-up round IS the final contract (#130)
+    assert state["attempt"] == 1
+    assert state["retry"] == 0
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_override_without_r3_reruns_override_step(tmp_path: Path, shell: str) -> None:
+    """override.json written but the step died before proposal-r3 (fixed write order) — re-burn it."""
     d = tmp_path / "issue-42"
     _write(d, "proposal-r1.json", _proposal(1))
     _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
@@ -193,11 +216,35 @@ def test_override_plan_coverage_only_finalizes_and_resumes_generate(tmp_path: Pa
     _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
     _write(d, "override.json", _override())
     state = _state(d, shell)
-    assert state["contract"] == "finalized"
+    assert state["resume"] == "section-1-override"
+    assert state["round"] == 3
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_r3_without_override_or_approval_escalates(tmp_path: Path, shell: str) -> None:
+    """proposal-r3+ may only exist after override — anything else is an out-of-contract state."""
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r3.json", _proposal(3))
+    state = _state(d, shell)
+    assert state["resume"] == "section-5"
+    assert state["outcome"] == "CONTRACT_ESCALATE"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_correction_round_after_override_updates_final_round(tmp_path: Path, shell: str) -> None:
+    """A post-override contract correction (proposal-r4, #130) becomes the final contract round."""
+    d = tmp_path / "issue-42"
+    _finalized_contract(d)
+    _write(d, "proposal-r4.json", _proposal(4))
+    _write(d, "eval-report-a1.json", _eval_report(1, "FAIL"))
+    state = _state(d, shell)
+    assert state["approved_round"] == 4
     assert state["resume"] == "section-2"
-    assert state["approved_round"] == 2
-    assert state["attempt"] == 1
-    assert state["retry"] == 0
+    assert state["attempt"] == 2
 
 
 # ── implementation phase ─────────────────────────────────────────────────────────────────────
