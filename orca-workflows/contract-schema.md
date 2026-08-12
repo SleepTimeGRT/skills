@@ -116,7 +116,12 @@ install -d -m 700 "$CONTRACT_DIR"
 규칙이 그대로 적용된다(이 연장은 라운드1→2 게이트를 변경하지 않는다).
 
 **`ROUND3_NEGOTIATION_SINCE`**(이 절 도입 시각 — 아래 "override" 절의 `R3_REQUIRED_SINCE`와 동일
-패턴, `orca-workflows/scripts/contract_resume.sh`와 `orca-workflow-task` SKILL.md §1이 정의): 이
+패턴, `orca-workflows/scripts/contract_resume.sh`가 정의하고 크래시-재개(§0) 경로에서만 사용한다.
+`orca-workflow-task` SKILL.md §1은 이 상수를 쓰지 않는다 — 라이브 코디네이터는 이 확장이 배포된
+이후로는 `plan_coverage`-only 라운드2 반려를 override 대신 라운드3 협상으로 돌리므로, 이 상수가
+구분하는 모호 상태(legacy `final_round: 2` override) 자체를 스스로 만들지 않는다; 그 상태는
+디스크에 남은 과거(이 확장 도입 이전) 세션의 산출물로만 존재할 수 있고, 그건 오직 크래시-재개가
+다루는 영역이다): 이
 연장 도입 이전에는 `verdict-r2.json`이 `plan_coverage`-only로 반려되면 항상 즉시 override했다
 (`final_round: 2`). 도입 이후에는 이 절의 규칙대로 라운드3을 먼저 시도한다. `override.json`의
 `final_round: 2` + `plan_coverage`-only 조합을 만났을 때, 그 `override.json`의 mtime이 이 상수
