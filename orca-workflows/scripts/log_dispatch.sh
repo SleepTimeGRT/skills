@@ -73,10 +73,15 @@
 # - NO_ACCEPTANCE_CRITERIA: added per issue #105 — its fix-direction section concludes this is
 #   probably a legitimate branch ("issue body not concrete enough to draft acceptance criteria"
 #   at the issue-drain/AC-draft stage), observed live from orca-workflow.
+# - CONTRACT_SCHEMA_STALE: added per issue #160 — override.json completed before the proposal-r3
+#   requirement itself existed (commit 79b7c3b/#130) is not a recording-contract violation, so it
+#   gets its own progress-branch value instead of overloading CONTRACT_ESCALATE's "AC disagreement"
+#   meaning. Emitted by orca-workflow-task §1's inline gate and contract_resume.sh's crash-resume
+#   mirror (tests/test_contract_resume.py).
 # - EPIC_DONE / PR_OPEN_PREMERGE_PASS (observed in #105's recurrence comments) are deliberately
 #   NOT added: neither has a decided semantics yet — they hit the UNMAPPED_BRANCH safeguard, which
 #   is the designed path for values awaiting a schema decision.
-LOG_OUTCOME_ENUM="PASS FAIL ESCALATE GATE_FAIL CONTRACT_ESCALATE CI_GATE_FAIL NO_DONE_TRANSITION CONTRACT_FINALIZED_BY_GENERATOR CONTRACT_APPROVED MANUAL_RECOVERY_COMPLETED CI_GATE_TIMEOUT MERGE_CONFLICT RETRO_DONE RETRO_FAIL escalation_parked skipped NO_ACCEPTANCE_CRITERIA UNMAPPED_BRANCH"
+LOG_OUTCOME_ENUM="PASS FAIL ESCALATE GATE_FAIL CONTRACT_ESCALATE CI_GATE_FAIL NO_DONE_TRANSITION CONTRACT_FINALIZED_BY_GENERATOR CONTRACT_APPROVED CONTRACT_SCHEMA_STALE MANUAL_RECOVERY_COMPLETED CI_GATE_TIMEOUT MERGE_CONFLICT RETRO_DONE RETRO_FAIL escalation_parked skipped NO_ACCEPTANCE_CRITERIA UNMAPPED_BRANCH"
 
 # self_recovery.action_taken — mirrors logging.md §1's self_recovery recipe. resume_wait (a typo'd
 # variant of resumed_wait, seen 5x in issue #127) is exactly the class the substitution below

@@ -101,9 +101,41 @@ elif [ ! -f "<CONTRACT_DIR>/verdict-r2.json" ]; then
 elif [ ! -f "<CONTRACT_DIR>/proposal-r3.json" ]; then
   # override 기록은 있는데 확정 계약(proposal-r3 — override 스텝이 override.json 직후에 쓴다,
   # contract-schema.md "override 후속 라운드" 절, issue #130)이 없다 — worker_done까지 왔으므로
-  # 쓰다 죽은 게 아니라 기록 계약 위반이다. fail-closed: outcome=CONTRACT_ESCALATE로 남기고 §5로.
-  # (§0 재개 분기는 같은 상태를 "쓰다 죽음"으로 보고 override 스텝을 재-태운다 — worker_done 수신
-  # 여부가 두 해석을 가른다.)
+  # 쓰다 죽은 게 아니다. 그렇다고 곧장 "기록 계약 위반"도 아니다 — override.json이 이 r3 요구사항
+  # 자체의 도입(commit 79b7c3b, 2026-08-12T09:44:57+09:00) 이전에 완료됐을 수 있다(issue #160).
+  # R3_REQUIRED_SINCE 상수(contract_resume.sh와 동일 — 바꾸면 함께 바꾼다)로 override.json의 mtime을
+  # 그 시각과 비교한다(recent_write 가드와 같은 touch -t + find -newer 패턴을 기반으로 하되, touch -t
+  # 실패를 별도로 체크한다 — 아래 참고. stat -f/-c epoch 파싱은 GNU stat -f의 의미 충돌 위험이 있어
+  # 쓰지 않는다). touch -t는 TZ를 명시하지 않으면 호스트 로컬 설정으로 해석하므로(KST가 아닌 머신에서
+  # 최대 수 시간 오차 — issue #160 리뷰에서 실측), TZ=Asia/Seoul을 고정한다:
+  R3_REQUIRED_SINCE='202608120944.57'
+  ref="$(mktemp "${TMPDIR:-/tmp}/contract-r3gate.XXXXXX")"
+  # 두 가지 실패 양상을 각각 다른 가드로 막는다 — 하나의 find 극성 반전으로 뭉치면 안 된다는 걸
+  # issue #160 최종 리뷰에서 실측으로 확인했다: touch -t 자체가 실패하면 $ref는 의도한 cutoff가
+  # 아니라 방금 만든 "지금" mtime에 머문다. 이미 쓰인 override.json은 "지금"보다 newer일 리 거의
+  # 없으므로, -newer든 ! -newer든(분기와 printf 값을 맞바꿔도) "cutoff보다 newer 아님"이라는 결과가
+  # 똑같이 나온다 — find 극성만 뒤집는 건 이 실패 양상에서 순수 무의미한 재작성이었다(원본과
+  # "반전"판 모두 CONTRACT_SCHEMA_STALE을 오보하는 것을 스텁 touch로 직접 재현해 확인). 그래서
+  # touch -t의 종료 코드를 직접 확인해 실패 시 비교 자체를 건너뛴다:
+  if ! TZ='Asia/Seoul' touch -t "$R3_REQUIRED_SINCE" "$ref" 2>/dev/null; then
+    rm -f "$ref"
+    # 백데이팅 자체가 실패 — $ref의 mtime은 무의미하므로 비교하지 않는다. 기존 판단 그대로: 기록
+    # 계약 위반. fail-closed: outcome=CONTRACT_ESCALATE, round=2로 남기고 §5로.
+  elif [ -n "$(find "<CONTRACT_DIR>" -maxdepth 1 -name override.json ! -newer "$ref" 2>/dev/null)" ]; then
+    rm -f "$ref"
+    # touch -t는 성공했고, override.json이 그 cutoff보다 newer가 아님 = 게이트 도입 이전(또는
+    # 정확히 동시)이라는 양성 증거 — 위반이 아니라 구버전 세션. outcome=CONTRACT_SCHEMA_STALE,
+    # round=2, detail에 override.json mtime과 $R3_REQUIRED_SINCE를 사람이 읽을 수 있는 형태로
+    # 남기고 §5로(§5 문구 참고 — "자동 재개"를 암시하지 않는다).
+  else
+    rm -f "$ref"
+    # touch -t는 성공했고, override.json이 cutoff보다 newer(게이트 도입 이후) — 또는 find 자체가
+    # mtime과 무관한 이유로(경로 없음 등) 아무것도 못 찾음 — 둘 다 기존 판단 그대로: 기록 계약
+    # 위반. fail-closed: outcome=CONTRACT_ESCALATE, round=2로 남기고 §5로.
+  fi
+  # (§0 재개 분기는 override.json mtime이 게이트 도입 이후인 상태만 "쓰다 죽음"으로 보고 override
+  # 스텝을 재-태운다 — worker_done 수신 여부가 그 두 해석을 가른다. 게이트 도입 이전인 상태는 §0도
+  # 동일하게 CONTRACT_SCHEMA_STALE로 escalate한다 — contract_resume.sh 미러.)
 elif jq -e '[.reasons[].target] | index("ac_fidelity")' "<CONTRACT_DIR>/verdict-r2.json" >/dev/null; then
   # AC 자체("무엇을 만들지")에 이견이 남음 — 생성 비용을 쓰기 전에 사람에게 보낸다.
   # 라우팅 입력은 generator가 쓴 override.json이 아니라 evaluator 소유의 verdict-r2.json이다
@@ -426,10 +458,10 @@ find "$HOME/.local/state/orca-workflows/logs" -name 'assignments-*.jsonl' 2>/dev
 §4가 PASS로 끝나면(merge + issue close): 보고 채널로 완료를 알린다 — spawn된 세션이면
 `worker_done`(outcome=PASS), entry 세션이면 사람에게 보고하고 종료.
 
-그 외 outcome(FAIL 한도 도달·ESCALATE·GATE_FAIL·CONTRACT_ESCALATE·CI_GATE_FAIL·CI_GATE_TIMEOUT·
-MERGE_CONFLICT·NO_DONE_TRANSITION)이면 아래 보고 내용을 조립한 뒤 mode로 분기한다:
+그 외 outcome(FAIL 한도 도달·ESCALATE·GATE_FAIL·CONTRACT_ESCALATE·CONTRACT_SCHEMA_STALE·CI_GATE_FAIL·
+CI_GATE_TIMEOUT·MERGE_CONFLICT·NO_DONE_TRANSITION)이면 아래 보고 내용을 조립한 뒤 mode로 분기한다:
 
-보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/CONTRACT_ESCALATE/CI_GATE_FAIL/CI_GATE_TIMEOUT/MERGE_CONFLICT/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **CONTRACT_ESCALATE**는 contract 협상이 라운드 한도에도 `ac_fidelity` 이견으로 끝났다는 뜻이다 — 코드 생성 전이므로 diff가 없다. `override.json`의 `unresolved_reasons`를 그대로 표시한다(무엇을 만들지에 대한 generator/evaluator의 이견 — 사람이 issue를 명확히 하거나 방향을 정한다). §1의 fail-closed 분기(override.json 자체가 없음)로 온 경우면 이견 내용 대신 그 사실 — generator가 기록 없이 라운드 한도에 도달함 — 을 표시한다. **CI_GATE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 repo의 CI required check가 merge를 막았다는 뜻이므로, 실패한 check 이름과 로그 링크(`gh pr checks <pr_num>`)를 그대로 표시한다 — 사람이 다시 조회하지 않게. **CI_GATE_TIMEOUT**은 budget 안에 check가 완주하지 못했거나 merge 거부 원인이 판별되지 않았다는 뜻이므로(코드 실패로 확정 아님), 마지막 `mergeStateStatus`와 check 상태 스냅샷을 표시한다. **MERGE_CONFLICT**는 base와의 충돌로 자동 merge가 불가능하다는 뜻이다 — 충돌 지점 정보를 표시하고, rebase/충돌 해소 여부는 사람이 결정한다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음) — 발생 지점은 §4의 merge 성공 후 close 단계이고, outcome 로깅은 그 시점에 §4가 직접 한다.
+보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/CONTRACT_ESCALATE/CONTRACT_SCHEMA_STALE/CI_GATE_FAIL/CI_GATE_TIMEOUT/MERGE_CONFLICT/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **CONTRACT_ESCALATE**는 contract 협상이 라운드 한도에도 `ac_fidelity` 이견으로 끝났다는 뜻이다 — 코드 생성 전이므로 diff가 없다. `override.json`의 `unresolved_reasons`를 그대로 표시한다(무엇을 만들지에 대한 generator/evaluator의 이견 — 사람이 issue를 명확히 하거나 방향을 정한다). §1의 fail-closed 분기(override.json 자체가 없음)로 온 경우면 이견 내용 대신 그 사실 — generator가 기록 없이 라운드 한도에 도달함 — 을 표시한다. **CONTRACT_SCHEMA_STALE**는 override 완료(override.json mtime)가 proposal-r3 요구사항 도입 시각(commit 79b7c3b, 2026-08-12T09:44:57+09:00)보다 이전이라는 뜻이다 — 위반이 아니라 구버전 세션이므로 이 두 시각을 그대로 표시한다. 사람의 선택지: (a) `verdict-r2.json`의 미해소 `reasons`를 반영해 `proposal-r3.json`을 수동으로 작성한다 — 이때 worktree에 구현이 이미 있어도 **§2를 기계적으로 재실행해 이미 끝난 구현을 덮어쓰지 않도록 주의한다**: §2 "Dispatch 실행부"는 "`orca-task-runner`를 dispatch하지 않고 코디네이터가 직접 코드를 작성·수정해 §3로 가는 경로는 존재하지 않는다"(issue #128)고 명시하므로, 기존 diff를 그대로 §3 evaluate로 넘기는 정식 경로가 이 스킬에 현재 없다 — 이 공백은 별도 issue #161로 추적하며, 사람이 상황을 보고 직접 진행 방식을 정한다. 구현이 없으면 정상적으로 §2부터 재개한다. (b) 완료된 작업을 폐기하고 재협상을 지시한다. **CI_GATE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 repo의 CI required check가 merge를 막았다는 뜻이므로, 실패한 check 이름과 로그 링크(`gh pr checks <pr_num>`)를 그대로 표시한다 — 사람이 다시 조회하지 않게. **CI_GATE_TIMEOUT**은 budget 안에 check가 완주하지 못했거나 merge 거부 원인이 판별되지 않았다는 뜻이므로(코드 실패로 확정 아님), 마지막 `mergeStateStatus`와 check 상태 스냅샷을 표시한다. **MERGE_CONFLICT**는 base와의 충돌로 자동 merge가 불가능하다는 뜻이다 — 충돌 지점 정보를 표시하고, rebase/충돌 해소 여부는 사람이 결정한다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음) — 발생 지점은 §4의 merge 성공 후 close 단계이고, outcome 로깅은 그 시점에 §4가 직접 한다.
 
 - **hitl** — 질문을 올리고 응답까지 block한다: entry 세션이면 사람에게 직접, spawn된 세션이면
   ask(decision gate)로 호출자에게(§0 보고 채널). 선택지: 계속(응답의 피드백을 반영해 §2부터 재시도 —
