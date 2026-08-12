@@ -3,7 +3,7 @@ name: orca-retro
 description: >-
   Use right after an orca-workflow invocation ends, regardless of how it ended — analyzes that
   invocation's logs under ~/.local/state/orca-workflows/logs/ (assignments/outcome events,
-  spawn-failures, term transcripts) through five defect lenses (documented-schema violations,
+  spawn-failures, term transcripts) through six defect lenses (documented-schema violations,
   repeated FAILs attributable to skill prose, preventable escalations or human interventions, new
   spawn-failure signatures, and false-PASS regressions: tracker issues with a regressed-by trailer
   pointing back at merged PASS verdicts — the one lens crossing invocation boundaries) and files at
@@ -79,7 +79,7 @@ done
 기록만 있는 경우가 이에 해당한다. 이때도 렌즈 5(로그 비의존)는 수행한 뒤 §5로 간다. `spawn-failures.jsonl`에는 `issue` 필드가
 없으므로 렌즈 4도 이 날짜 범위(`ts` 기준)로 한정한다 — 범위 밖 항목은 이번 실행의 후보가 아니다.
 
-## 2. 결함 후보 — 렌즈 5개
+## 2. 결함 후보 — 렌즈 6개
 
 각 렌즈의 표적은 "스킬 문서를 고치면 사라질 결함"이다. 에이전트의 일회성 실수는 표적이 아니다 —
 같은 지점에서 재발했거나, 스킬 문구가 그 실수를 유도·방치했다는 근거가 있어야 한다(예외: 렌즈 5 —
@@ -127,6 +127,12 @@ done
       (재발 요건의 예외) — evaluator 오판은 파이프라인에서 가장 비싼 결함 종류이고, 이 렌즈가
       유일한 관측 경로다. 수집된 사례를 evaluator 판정 지침으로 되먹이는 것은 별도 단계다(#157의
       2번) — 이 렌즈는 관측·이슈화까지만 한다.
+6. **contract-verdict 오판 대조**: 이 invocation이 다룬 issue들 중 `verdict-r*.json`이
+   `approved` 또는 `plan_coverage`-only `override`로 종결된 것을 골라, 같은 issue의 최종
+   `eval-report-a*.json`의 FAIL findings 또는 human escalation 기록과 대조한다. 다운스트림에서
+   같은 결함(같은 `ac_id` 또는 같은 지적 내용)이 실제로 재현되면, evidence-backed defect issue로
+   파일링한다(기존 "invocation당 최대 3건" 한도, 기존 중복 방지 — open issue에 recurrence 코멘트
+   — 규칙 그대로 적용).
 
 ## 3. 증거 기준·상한
 
