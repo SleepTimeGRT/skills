@@ -26,13 +26,15 @@ CONTRACT_DIR 산출물이 담는다.
 - **MCP 서버 인증 전제**(세션 시작 시 1회): §3에서 스폰하는 coordinator 터미널의 MCP 서버는 스폰 전에
   인증 완료 또는 비활성이어야 한다(issue #60). 막히면 spawn-failures.md의 해당 row로.
 - **Run 생성**(실행 시작 시 1회): `-task` coordinator들의 `worker_done`/질문 수신용. `-task` 각각이
-  만드는 자기 Run과는 별개다(coordinator 세션마다 자기 Run 1개).
+  만드는 자기 Run과는 별개다(coordinator 세션마다 자기 Run 1개). 파일명의 `<project-slug>`는
+  `contract-schema.md`의 규칙(대상 repo의 디렉토리명)을 이 스킬이 직접 적용해 계산한다(logging.md §3,
+  issue #159).
 
   ```bash
   install -d -m 700 ~/.local/state/orca-workflows/logs
   run_json="$(orca orchestration run-create --objective "<root-num> task-coordinator relay" --from <자기 handle> --json)"
-  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<root-num>-orca-workflow-epic.txt"
-  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<root-num>-orca-workflow-epic.txt"
+  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<root-num>-orca-workflow-epic.txt"
+  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<root-num>-orca-workflow-epic.txt"
   ```
 
 ## 1. issue-drain
@@ -66,7 +68,7 @@ ready task마다 아래를 실행하고, worker_done 수신 후 다음 task로 �
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 source ~/.agents/orca-workflows/scripts/log_dispatch.sh
-RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<root-num>-orca-workflow-epic.txt")"
+RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<root-num>-orca-workflow-epic.txt")"
 # provider: model-selection.md 기준 — 판단·orchestration 작업. REPL 필수(one-shot은 dispatch --inject
 # 수신 불가), agy 제외(models/agy.md).
 orca_call_with_retry "orca-workflow-epic" "task-coordinator" -- \

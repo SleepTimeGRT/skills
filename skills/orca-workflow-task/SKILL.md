@@ -61,17 +61,19 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
   못하는 것이 실측됐다(4회 스폰 중 2회 여전히 블록). 막히면 재진단 없이
   `~/.agents/orca-workflows/spawn-failures.md`의 해당 row로(issue #60).
 - **Run 생성**(실행 시작 시 1회): Run을 만들고 바인딩한 뒤 `run_id`를 사이드카 파일에 남긴다(§1의
-  라운드 2+ relay 코드 블록은 별도 fenced block이라 셸 변수가 그대로 넘어가지 않는다):
+  라운드 2+ relay 코드 블록은 별도 fenced block이라 셸 변수가 그대로 넘어가지 않는다). 파일명의
+  `<project-slug>`는 위 Contract 디렉토리 단계에서 계산한 값을 재사용한다(logging.md §3, issue #159 —
+  issue 번호만으로는 저장소 간 사이드카가 충돌한다):
 
   ```bash
   install -d -m 700 ~/.local/state/orca-workflows/logs
   run_json="$(orca orchestration run-create --objective "<issue 번호> contract round relay" --from <자기 handle> --json)"
-  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-workflow-task.txt"
-  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-workflow-task.txt"
+  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<issue 번호>-orca-workflow-task.txt"
+  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<issue 번호>-orca-workflow-task.txt"
   ```
 
   이후 §1 라운드 2+ relay의 모든 `worker-start`/`check --wait`/`--ack` 호출 앞에서
-  `RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-workflow-task.txt")"`로 다시 읽는다 —
+  `RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<issue 번호>-orca-workflow-task.txt")"`로 다시 읽는다 —
   `orca-task-runner`/`orca-evaluate`가 각자 내부 fan-out에 쓰는 Run과는 별개다(섞이면 서로 다른
   세션의 `worker_done`이 잘못된 mailbox로 전달된다 — `~/.agents/orca-workflows/self-recovery.md`
   참고). 라운드 1의 `task-create`/`dispatch`(§1 상단)는 `--run`을 명시하지 않지만, `task-create`가
@@ -265,7 +267,7 @@ spec만 재전송된다. 대신 매 라운드 새 task를 만들어 같은 터�
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 source ~/.agents/orca-workflows/scripts/log_dispatch.sh
-RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-workflow-task.txt")"   # §0에서 남긴 사이드카
+RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<issue 번호>-orca-workflow-task.txt")"   # §0에서 남긴 사이드카
 spec_text="<round 번호 + CONTRACT_DIR 절대경로(파일명은 contract-schema.md 컨벤션으로 결정론적 — task-runner행이면 직전 verdict-r<n-1>.json을 읽고 proposal-r<n>.json 작성, evaluator행이면 라운드 2 입력 격리 규칙대로 원본 issue·proposal-r<n>.json·자신의 직전 verdict만 입력) + orphan-폴백 계약(§0) 전문>"
 orca_call_with_retry "orca-workflow-task" "contract-round" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json

@@ -347,14 +347,18 @@ captured response in this environment — not assumed.
 - `dropped:true` is recorded and logging continues normally — no retry or reconstruction of the missing
   span.
 
-## §3. Run-id sidecars (`run-<issue>-<skill>.txt`)
+## §3. Run-id sidecars (`run-<project-slug>-<issue>-<skill>.txt`)
 
 Like the logs in §1 and the transcripts in §2, these sidecar files live under
 `~/.local/state/orca-workflows/logs/` and are git-untracked.
 
-Naming: `run-<issue-num-or-root-num>-<skill-dir-name>.txt`, where `<skill-dir-name>` is the directory name
+Naming: `run-<project-slug>-<issue-num-or-root-num>-<skill-dir-name>.txt`, where `<project-slug>` is
+contract-schema.md's `<project-slug>` (대상 repo의 디렉토리명 — issue #159: issue 번호는 저장소 간에
+충돌하므로, slug 없이는 다른 저장소의 같은 번호 issue를 병렬로 돌릴 때 한쪽이 다른 쪽의 RUN_ID를
+덮어써 이후 relay가 남의 Run으로 `worker-start`를 낸다), and `<skill-dir-name>` is the directory name
 of the skill writing the sidecar, exactly as it appears under `skills/` — one of `orca-workflow-task`,
-`orca-task-runner`, or `orca-workflow-epic`.
+`orca-task-runner`, or `orca-workflow-epic`. 과거 컨벤션(`run-<issue>-<skill>.txt`)의 잔존 파일은
+마이그레이션하지 않는다 — 사이드카는 실행-스코프 임시값이라 새 실행이 새 이름으로 새로 쓴다.
 
 Each skill writes and reads only its own sidecar; it does not read a sidecar written by another skill.
 
