@@ -80,7 +80,7 @@ orca-task-runner에 dispatch됐는가"를 로그만으로 판정할 수 있게 �
 
 - **verdict 축** — task 라우팅 판정: `PASS`|`FAIL`|`ESCALATE`|`GATE_FAIL`|`CONTRACT_ESCALATE`|`CI_GATE_FAIL`
 - **진행-분기 축** — 판정이 아니라 정상적인 워크플로 상태 전이:
-  `NO_DONE_TRANSITION`|`CONTRACT_FINALIZED_BY_GENERATOR`|`CONTRACT_APPROVED`|
+  `NO_DONE_TRANSITION`|`CONTRACT_FINALIZED_BY_GENERATOR`|`CONTRACT_APPROVED`|`CONTRACT_SCHEMA_STALE`|
   `MANUAL_RECOVERY_COMPLETED`|`CI_GATE_TIMEOUT`|`MERGE_CONFLICT`|`RETRO_DONE`|`RETRO_FAIL`|
   `escalation_parked`|`skipped`|`NO_ACCEPTANCE_CRITERIA`|`UNMAPPED_BRANCH`
 
@@ -139,6 +139,15 @@ per-call-site 추가 필드 규칙에 따라 `round`(도달한 라운드 수)를
 (라운드 한도 도달) 지시와 대칭. 이 라인은 per-call-site 추가 필드 규칙에 따라 `round`(승인된 라운드 수,
 가변)를 더해 남긴다 — `CONTRACT_FINALIZED_BY_GENERATOR`/`CONTRACT_ESCALATE`와 같은 필드 구성이며, 값
 이름(`CONTRACT_APPROVED`) 자체로 구분된다.
+
+`CONTRACT_SCHEMA_STALE`는 `override.json`은 있는데 `proposal-r3.json`이 없고, `override.json`의
+mtime이 그 요구사항 도입 시점(commit 79b7c3b, 2026-08-12T09:44:57+09:00)보다 이전인 경우다(issue
+#160) — `orca-workflow-task` §1의 기계적 분기든 `contract_resume.sh`의 크래시-재개 미러든 같은
+값이다. `CONTRACT_ESCALATE`(기록 계약 위반)와 상호 배타다: 위반이 아니라 그 요구사항 자체가 그
+세션이 끝난 뒤에 생겼다는 뜻이므로, 사람에게 "generator가 규칙을 어겼다"고 잘못 전달하지 않기 위해
+별도 값으로 분리한다. 이 라인은 per-call-site 추가 필드 규칙에 따라 `round`(도달한 라운드 수, 이
+게이트 한정 항상 2)와 `detail`(override.json mtime과 게이트 도입 시각을 사람이 읽을 수 있는
+형태로)을 더해 남긴다.
 
 `MANUAL_RECOVERY_COMPLETED`는 `worker_done`이 Orca 런타임 문제(재시작·연결 끊김 등)로 유실돼
 `self-recovery.md`의 자동 대기/재시도 루프로도 완료 확인이 안 될 때, 코디네이터가 산출물(커밋·아티팩트)을
