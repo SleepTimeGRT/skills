@@ -1,6 +1,7 @@
 ---
 name: orca-evaluate
-description: Use when evaluating a completed task's diff before merge. This session runs on a REPL-capable provider other than agy (agy REPL is unsupported — see `~/.agents/orca-workflows/models/agy.md`); it spawns agy headless for the agent-e2e test gate (speed/cost/computer-use strength — e2e/pgTAP already passed in orca-task-runner, so this skill never re-touches them), spawns a separate strong-coding-agent terminal for the two judgment calls it can't make itself (contract approval — judging the generator's drafted acceptance criteria against the original issue — and diff code review informed by the agent-e2e result — skipped fail-fast when agent-e2e failure is confirmed), and synthesizes the results into one report against the negotiated Acceptance Criteria. Returns PASS, FAIL-with-feedback, or ESCALATE. Self-relative.
+description: Use when evaluating a completed task's diff before merge. This session runs on a REPL-capable provider other than agy (agy REPL is unsupported — see `~/.agents/orca-workflows/models/agy.md`); it spawns agy headless for the agent-e2e test gate (speed/cost/computer-use strength — e2e/pgTAP already passed in orca-task-runner, so this skill never re-touches them), spawns a separate strong-coding-agent terminal for the two judgment calls it can't make itself (contract approval — judging the generator's drafted acceptance criteria against the original issue — and diff code review informed by the agent-e2e result — skipped fail-fast when agent-e2e failure is confirmed), and synthesizes the results into one report against the negotiated Acceptance Criteria. Returns PASS, FAIL-with-feedback, or ESCALATE. Self-relative. Do NOT use for ad-hoc code review, multi-agent coordination, or terminal control (use the `orchestration` or `orca-cli` skills) — this skill runs only inside the orca-workflow pipeline.
+compatibility: Requires the `orca` CLI (skill set last verified against Orca app 1.4.180), the `~/.agents/orca-workflows/` symlink to this repo's orca-workflows/, and the `gh` CLI. The session must run on a REPL-capable provider other than agy.
 ---
 
 # Orca Evaluate
@@ -51,7 +52,7 @@ orca_call_with_retry "orca-evaluate" "contract-review" -- \
   orca terminal create --worktree active --title eval-contract \
   --command "<강한 reasoning provider의 launch 문법 — provider 문서에서 resolve하되, 인라인 permission-bypass 플래그 필수: claude → --dangerously-skip-permissions, codex → --dangerously-bypass-approvals-and-sandbox>" --json
 orca terminal wait --terminal <contract-handle> --for tui-idle --timeout-ms 60000 --json
-spec_text="<proposal-r<n>.json 경로 + 원본 issue 전문 + contract-schema.md의 '적대적 판정 지침' 그대로 + verdict-r<n>.json을 스키마·불변식대로 CONTRACT_DIR에 쓰라는 지시(반려 시 reasons에 target·대상 ac_id 명시) + (라운드 2면) 같은 문서의 '라운드 2 입력 격리' 규칙 그대로 + verification_plan[]의 각 항목이 fails_before_fix를 비우지 않았고 fix 전후를 실제로 구분함을 확인하라는 지시 + 판정 결과를 보낼 orchestration 호출은 orca_call_with_retry로 감싸고 연결 실패를 즉시 사람에게 알리지 말라는 지시>"
+spec_text="<proposal-r<n>.json 경로 + 원본 issue 전문 + contract-schema.md의 '적대적 판정 지침' 그대로 + verdict-r<n>.json을 스키마·불변식대로 CONTRACT_DIR에 쓰라는 지시(반려 시 reasons에 target·대상 ac_id 명시) + (라운드 2 이상이면) 같은 문서의 '라운드 2+ 입력 격리' 규칙 그대로 + verification_plan[]의 각 항목이 fails_before_fix를 비우지 않았고 fix 전후를 실제로 구분함을 확인하라는 지시 + verification_plan[]의 각 항목이 stub/no-op 구현에서도 통과하지 않는지, draft_acceptance_criteria가 binary/independent/ordered-by-importance 3원칙을 지키는지 확인하라는 지시 + 판정 결과를 보낼 orchestration 호출은 orca_call_with_retry로 감싸고 연결 실패를 즉시 사람에게 알리지 말라는 지시>"
 orca_call_with_retry "orca-evaluate" "contract-review" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-evaluate" "contract-review" -- \
@@ -60,7 +61,7 @@ orca_call_with_retry "orca-evaluate" "contract-review" -- \
 # 동일하게 적용한다.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. §3 스폰도 동일한 형태(§2 agent-e2e는
 # assign만 — term 로그 대상 아님).
-#  logging.md §1 assign 이벤트: role="contract-review", issue=<issue-num>, task_id=<task_id>,
+#  logging.md §1 assign 이벤트: role="contract-review", issue=<issue-num>, repo=<대상 repo — spec으로 받은 값>, task_id=<task_id>,
 #    provider/model/effort=resolved 값, terminal=<contract-handle>, worktree=<worktree 경로>
 #  logging.md §2 term 로그: skill="orca-evaluate", role="contract-review", terminal=<contract-handle>,
 #    meta 기록 후 sent.content=$spec_text. 이 터미널에 대한 유일한 read는 위 dispatch-verify.md의
@@ -68,7 +69,7 @@ orca_call_with_retry "orca-evaluate" "contract-review" -- \
 #    relay로 받는다 — 위 §1 본문 참고).
 ```
 
-이 evaluator 세션은 그 판정 결과(승인/반려+사유)를 받아 `orca-task-runner`로 relay한다(파일 내용을 새로 읽거나 재해석하지 않고 판정 결과만 전달) — 각 라운드는 별도 dispatch로 도착한다: 판정 결과를 relay하고 나면 이번 턴을 끝낸다(주입된 preamble의 worker_done 지시대로), 같은 턴 안에서 다음 제안을 기다리거나 폴링하지 않는다. 최대 2라운드까지 왕복하고, 그 안에 합의 안 되면 generator가 결정권을 가진다 — 이견은 기록만 하고 진행을 막지 않는다.
+이 evaluator 세션은 그 판정 결과(승인/반려+사유)를 받아 `orca-task-runner`로 relay한다(파일 내용을 새로 읽거나 재해석하지 않고 판정 결과만 전달) — 각 라운드는 별도 dispatch로 도착한다: 판정 결과를 relay하고 나면 이번 턴을 끝낸다(주입된 preamble의 worker_done 지시대로), 같은 턴 안에서 다음 제안을 기다리거나 폴링하지 않는다. 최대 2라운드까지 왕복하되, 라운드2 반려 사유가 `plan_coverage`뿐이면 `contract-schema.md`의 "라운드 2→3 조건부 연장"에 따라 라운드3까지 한 번 더 왕복한다. 그 한도(2 또는 3) 안에 합의 안 되면 generator가 결정권을 가진다 — 이견은 기록만 하고 진행을 막지 않는다.
 
 두 번의 coding agent 스폰(여기 §1과 아래 §3)은 시간상 멀리 떨어져 있다(§1은 구현 시작 전, §3은 전체 subtask wave가 끝난 뒤) — 하나의 터미널을 그 사이 계속 띄워두지 않고, 그때그때 fresh-context로 새로 스폰한다.
 
@@ -96,11 +97,12 @@ orca terminal wait --terminal <agent-e2e-handle> --for tui-idle --timeout-ms 900
 # `--for exit`은 쓰지 않는다(agy.md 실측 참고).
 orca terminal read --terminal <agent-e2e-handle> --json
 # 할당 로그 — ~/.agents/orca-workflows/logging.md §1 절차대로. role="agent-e2e", issue=<issue-num>,
+# repo=<대상 repo — spec으로 받은 값>,
 # provider="agy", model=<model>, effort="", terminal=<agent-e2e-handle>, worktree=<worktree 경로>,
 # task_id/dispatch_id 없음(orchestration 태스크가 아니므로).
 ```
 
-이 세션(evaluator)은 agy의 자기 요약을 **그대로 믿지 않는다** — 이미 이 세션 자체가 롱컨텍스트 REPL 세션이므로, `$report_path`와 원본 트레이스를 직접(별도 터미널 스폰 없이) 읽어서 "성공했다"는 보고가 실제로 맞는지, 조용히 막히거나 우회한 흔적은 없는지 확인한다. **구체 기준**: 트레이스에서 `e2e-tooling.md`의 `Tool` 필드가 실제로 쓰였는지 확인한다. 다른 방식(예: 선언은 Maestro인데 raw adb로 우회)으로 조용히 대체된 흔적이 있으면 agy의 성공 자기요약을 그대로 신뢰하지 않는다(실측: studio-hevv/selah-android — 선언된 Playwright MCP 대신 즉석 raw `adb shell` 명령으로 조용히 대체된 사례).
+이 세션(evaluator)은 agy의 자기 요약을 **그대로 믿지 않는다** — 이미 이 세션 자체가 롱컨텍스트 REPL 세션이므로, `$report_path`와 원본 트레이스를 직접(별도 터미널 스폰 없이) 읽어서 "성공했다"는 보고가 실제로 맞는지, 조용히 막히거나 우회한 흔적은 없는지 확인한다. **트레이스는 전문을 읽지 않는다** — 아래 확인 목적에 맞는 targeted 조회(선언된 `Tool` 문자열 `rg`, 실패/에러 키워드 `rg`, 마지막 구간 `tail`)로 한정한다. 전문 읽기는 이 세션의 컨텍스트를 무한정 소비해 §3~§4의 판정 품질을 깎는다(같은 이유의 bounded-log 원칙: AGENTS.md gate-output 절). targeted 조회로 판단이 안 서는 경우에만 범위를 넓히되, 그때도 구간 단위로. **구체 기준**: 트레이스에서 `e2e-tooling.md`의 `Tool` 필드가 실제로 쓰였는지 확인한다. 다른 방식(예: 선언은 Maestro인데 raw adb로 우회)으로 조용히 대체된 흔적이 있으면 agy의 성공 자기요약을 그대로 신뢰하지 않는다(실측: studio-hevv/selah-android — 선언된 Playwright MCP 대신 즉석 raw `adb shell` 명령으로 조용히 대체된 사례).
 
 **실패 확정 시 fail-fast — §3 생략**: 위 재확인 결과 실패가 실제이고(자기 요약·report·트레이스가 일치) 인프라 원인이 아니라 AC-관련 동작 실패로 확인되면, §3 code-reviewer를 스폰하지 않고 곧장 §4로 간다 — §4의 PASS 조건이 어차피 agent e2e 통과를 요구하므로 리뷰를 돌려도 verdict는 FAIL로 같고, 강한 reasoning 모델 스폰 비용만 든다(이미 실패가 확정된 코드를 비싼 단계에 태우지 않는다는 `GATE_FAIL`과 같은 원칙). 이때 FAIL findings는 e2e 관찰(어떤 시나리오가 어떤 AC에서 실패했는지)로 작성하고, eval-report의 `code_review_ran`을 `false`로 남긴다 — 생략은 이번 attempt에 한하며, 다음 attempt는 §3을 다시 태운다. 인프라 원인(계정·secret·환경)이면 §4의 ESCALATE 규칙 그대로다. 부분 통과 등 판단이 애매하면 생략하지 않는다 — §3을 그대로 진행한다.
 
@@ -144,7 +146,7 @@ gate_safety_files_present=false
 # End gate-safety path check
 ```
 
-fresh-context code-reviewer terminal을 하나 스폰한다(이 evaluator 세션과는 별개 세션 — `orca-task-runner`(generator)와 달라야 한다는 뜻은 아니다). 모델·effort는 diff 통계(변경 파일 수·라인 수)를 `<skill-dir>/scripts/select_reviewer.py`에 넘겨 동적으로 고른다 — 후보 풀·제외 사유·high-risk-signal 오버라이드·Codex 가용성 판단·스폰 실패 시 재시도 로직은 `references/reviewer-selection.md` 참고(구체 모델명을 SKILL.md 본문에 복제하지 않는다 — `orca-task-runner` §0과 같은 원칙). 리뷰어는 반드시 이 항목들을 갖는다: ①skeptical 지침("동의 표명 불필요, 결함·spec-divergence만 보고, 근거 있는 우려를 안이하게 넘기지 말 것") ②확정 acceptance criteria(최종 라운드 proposal의 `draft_acceptance_criteria` — `contract-schema.md`의 "확정 AC의 정본") + issue 번호 ③**§2 agent e2e 결과 요약** — diff만으로는 안 보이는 런타임 동작(무엇이 실제로 실패했는지)을 code review가 근거로 쓸 수 있게 한다 ④**(schema/migration 변경이 있으면) `.migration-lint.json` 결과 + 최종 proposal의 `destructive_operations` 선언** — 린터가 flag한 항목 중 선언에 커버되지 않는 게 있으면 report에 명시하라는 지시와 함께 ⑤**게이트-안전성 판단 지시** — 이 diff가 orca 파이프라인 자신의 머지/게이트 안전성에 영향을 주는지(예시일 뿐 비망라적: 워크플로 스킬 문서, 게이트·훅 스크립트, CI·hook 설정, 이 파이프라인이 의존하는 셸 배선 자체를 수정하는 diff인지 등) 리뷰의 첫 단계로 판단하라고 지시한다. 영향이 있다고 판단되면 그 부분을 diff의 다른 코드보다 더 엄격하게(더 회의적으로, 더 많은 재현·실패 시나리오로) 검토하라고 요구한다. 이 판단은 정적 파일 경로 목록과 절대 대조하지 않는다 — 리뷰어 자신의 판단이다. 게이트-안전성 영향이 있다고 판단했는데 주어진 정보로 완전히 clear하지 못하면 Critical/Important finding 또는 명시적 escalation 사유로 report에 반드시 남기라고 지시한다(diff 규모가 작아 이 리뷰가 낮은 tier로 동적 선택됐더라도, 그 사실만으로 게이트-안전성 우려를 낮잡아 보지 말 것) ⑥**(contract가 override로 종결된 경우) `override.json`의 `unresolved_reasons`** — evaluator가 반려했지만 generator가 결정권으로 진행한 우려 지점이다. 각 항목이 diff·agent e2e 결과에서 실제 결함으로 실체화됐는지 명시적으로 판정해 report에 남기라는 지시와 함께 넘긴다(`ac_fidelity` 미해소는 여기 오지 않는다 — `orca-workflow-task` §1이 `CONTRACT_ESCALATE`로 먼저 자르므로, 여기 도달한 override는 `plan_coverage`-only다) ⑦**(attempt 2+면) 자신의 직전 `eval-report-a<k-1>.json`의 findings** — 각 finding이 실제 수정됐는지 확인하라는 지시와 함께. generator의 수정 요약·서술형 해명은 입력에 넣지 않는다 — 판정을 바꾸는 근거는 diff의 사실 변화뿐이다(`contract-schema.md`의 "재시도 입력 격리").
+fresh-context code-reviewer terminal을 하나 스폰한다(이 evaluator 세션과는 별개 세션 — `orca-task-runner`(generator)와 달라야 한다는 뜻은 아니다). 모델·effort는 diff 통계(변경 파일 수·라인 수)를 `<skill-dir>/scripts/select_reviewer.py`에 넘겨 동적으로 고른다 — 후보 풀·제외 사유·high-risk-signal 오버라이드·Codex 가용성 판단·스폰 실패 시 재시도 로직은 `references/reviewer-selection.md` 참고(구체 모델명을 SKILL.md 본문에 복제하지 않는다 — `orca-task-runner` §0과 같은 원칙). 리뷰어는 반드시 이 항목들을 갖는다: ①skeptical 지침("동의 표명 불필요, 결함·spec-divergence만 보고, 근거 있는 우려를 안이하게 넘기지 말 것") ②확정 acceptance criteria(최종 라운드 proposal의 `draft_acceptance_criteria` — `contract-schema.md`의 "확정 AC의 정본") + issue 번호 ③**§2 agent e2e 결과 요약** — diff만으로는 안 보이는 런타임 동작(무엇이 실제로 실패했는지)을 code review가 근거로 쓸 수 있게 한다 ④**(schema/migration 변경이 있으면) `.migration-lint.json` 결과 + 최종 proposal의 `destructive_operations` 선언** — 린터가 flag한 항목 중 선언에 커버되지 않는 게 있으면 report에 명시하라는 지시와 함께 ⑤**게이트-안전성 판단 지시** — 이 diff가 orca 파이프라인 자신의 머지/게이트 안전성에 영향을 주는지(예시일 뿐 비망라적: 워크플로 스킬 문서, 게이트·훅 스크립트, CI·hook 설정, 이 파이프라인이 의존하는 셸 배선 자체를 수정하는 diff인지 등) 리뷰의 첫 단계로 판단하라고 지시한다. 영향이 있다고 판단되면 그 부분을 diff의 다른 코드보다 더 엄격하게(더 회의적으로, 더 많은 재현·실패 시나리오로) 검토하라고 요구한다. 이 판단은 정적 파일 경로 목록과 절대 대조하지 않는다 — 리뷰어 자신의 판단이다. 게이트-안전성 영향이 있다고 판단했는데 주어진 정보로 완전히 clear하지 못하면 Critical/Important finding 또는 명시적 escalation 사유로 report에 반드시 남기라고 지시한다(diff 규모가 작아 이 리뷰가 낮은 tier로 동적 선택됐더라도, 그 사실만으로 게이트-안전성 우려를 낮잡아 보지 말 것) ⑥**(contract가 override로 종결된 경우) `verdict-r2.json`의 `reasons`** — evaluator가 최종 라운드에 반려했지만 generator가 결정권으로 진행한 우려 지점이다. `override.json`의 `unresolved_reasons`(generator가 "해소 못 했다"고 자인한 부분집합)가 아니라 evaluator 소유의 verdict 전체 `reasons`를 넘긴다 — generator가 "해소했다"고 자평한 항목이야말로 검증 안 된 자기평가이므로 리뷰 대상에서 빠지면 안 된다(`contract-schema.md` override 절의 라우팅 근거와 동일). 각 항목이 diff·agent e2e 결과에서 실제 결함으로 실체화됐는지 명시적으로 판정해 report에 남기라는 지시와 함께 넘긴다(`ac_fidelity` 반려는 여기 오지 않는다 — `orca-workflow-task` §1이 `verdict-r2.json` 기준으로 `CONTRACT_ESCALATE`로 먼저 자르므로, 여기 도달한 override는 `plan_coverage`-only다) ⑦**(attempt 2+면) 자신의 직전 `eval-report-a<k-1>.json`의 findings** — 각 finding이 실제 수정됐는지 확인하라는 지시와 함께. generator의 수정 요약·서술형 해명은 입력에 넣지 않는다 — 판정을 바꾸는 근거는 diff의 사실 변화뿐이다(`contract-schema.md`의 "재시도 입력 격리") ⑧**(존재하면) `CONTRACT_DIR/gate-flake-a<attempt>.json`** — §6 task 게이트가 실패 후 재시도로 통과하면서 generator가 "flake"로 재분류한 기록(`contract-schema.md`의 해당 절). 그 재분류가 정말 이 diff와 무관한지 — 실패 spec·에러 첫 줄이 diff가 건드린 경로/동작과 겹치지 않는지, known-flake 목록 대조가 성립하는지 — 를 리뷰어가 판정해 report에 남기라는 지시와 함께 넘긴다. generator 자신의 재분류를 그대로 믿지 않는다. 파일 부재 = 재분류 없음(첫 시도 전부 통과)이므로 이 항목 자체를 생략한다 ⑨**동결된 `verification_plan`의 기계적 검사 실행 지시**(issue #130) — 최종 라운드 proposal의 `verification_plan` 항목이 스스로 선언한 기계적 검사(예: `grep -nF`, exit 0 단언, 특정 테스트 실행)는 리뷰어가 **실제로 실행**해 그 결정론적 pass/fail을 정본으로 삼으라고 지시한다. 동결된 계약을 리뷰어의 취지 판단으로 완화하지 않는다 — "이 정도면 취지는 충족" 류의 재해석이 계약 동결의 의미를 무효화한다(#96에서 계약 in-place edit과 결합해 ESCALATE로 실측). 기계적으로 실행 불가능한 항목(검사 커맨드가 아닌 서술)만 판단 대상으로 남긴다.
 
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
@@ -177,14 +179,14 @@ orca_call_with_retry "orca-evaluate" "code-review" -- \
 orca terminal wait --terminal <review-handle> --for tui-idle --timeout-ms 60000 --json
 # 스폰이 실패했고 reviewer_provider가 codex였다면(spawn-failures.md 절차로 확인) 여기서 재진단하지
 # 않고 --no-codex-available로 select_reviewer.py를 다시 불러 Claude 분기로 재시도한다.
-spec_text="<diff 절대경로 + 확정 acceptance criteria(위 ②의 정본) + §2 agent e2e 결과 요약 + (해당 시) migration-lint 결과와 최종 proposal의 destructive_operations 선언 + (override 종결 시) override.json의 unresolved_reasons(위 ⑥) + (attempt 2+) 직전 eval-report findings(위 ⑦) + skeptical 리뷰 지침 + report 경로 + 코드 수정 금지 + 판정 결과를 보낼 orchestration 호출은 orca_call_with_retry로 감싸고 연결 실패를 즉시 사람에게 알리지 말라는 지시>"
+spec_text="<diff 절대경로 + 확정 acceptance criteria(위 ②의 정본) + §2 agent e2e 결과 요약 + (해당 시) migration-lint 결과와 최종 proposal의 destructive_operations 선언 + (override 종결 시) verdict-r2.json의 reasons(위 ⑥) + (attempt 2+) 직전 eval-report findings(위 ⑦) + verification_plan 기계적 검사 실행 지시(위 ⑨) + skeptical 리뷰 지침 + report 경로 + 코드 수정 금지 + 판정 결과를 보낼 orchestration 호출은 orca_call_with_retry로 감싸고 연결 실패를 즉시 사람에게 알리지 말라는 지시>"
 orca_call_with_retry "orca-evaluate" "code-review" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-evaluate" "code-review" -- \
   orca orchestration dispatch --task <task_id> --to <review-handle> --retry-request "$(uuidgen)" --inject --json
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43·#58).
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로.
-#  logging.md §1 assign 이벤트: role="code-review", issue=<issue-num>, task_id=<task_id>, provider=$reviewer_provider,
+#  logging.md §1 assign 이벤트: role="code-review", issue=<issue-num>, repo=<대상 repo — spec으로 받은 값>, task_id=<task_id>, provider=$reviewer_provider,
 #    model=$reviewer_model, effort=$reviewer_effort, advisor=${reviewer_advisor:-}, terminal=<review-handle>,
 #    worktree=<worktree 경로>
 #  logging.md §2 term 로그: skill="orca-evaluate", role="code-review", terminal=<review-handle>, meta 기록 후

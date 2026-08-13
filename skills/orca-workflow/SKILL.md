@@ -1,6 +1,18 @@
 ---
 name: orca-workflow
-description: Invoke explicitly via `/orca-workflow` — do not rely on phrase-matching, which collides with Orca's built-in `orchestration` skill (multi-agent coordination, task dispatch, coordinator loops). Entry point that drives an issue (GitHub Issues or Jira, resolved per repo — see `~/.agents/orca-workflows/issue-trackers/selection.md`) through its full lifecycle: gates on agent-e2e tooling being declared before routing, resolves the tracker (with first-run onboarding), routes the issue in-session — children present → `orca-workflow-epic`, none → `orca-workflow-task` — forwarding mode [afk|hitl] (default hitl), and after the routed run finishes, however it ended, always launches a best-effort `orca-retro` over that invocation's logs (issue set = root ∪ queue). Never generates or evaluates code directly — pure orchestration. Self-relative.
+description: >-
+  Invoke explicitly via `/orca-workflow` — do not rely on phrase-matching, which collides with Orca's
+  built-in `orchestration` skill (multi-agent coordination, task dispatch, coordinator loops). Entry
+  point that drives an issue (GitHub Issues or Jira, resolved per repo — see
+  `~/.agents/orca-workflows/issue-trackers/selection.md`) through its full lifecycle: gates on
+  agent-e2e tooling being declared before routing, resolves the tracker (with first-run onboarding),
+  routes the issue in-session — children present → `orca-workflow-epic`, none → `orca-workflow-task` —
+  forwarding mode [afk|hitl] (default hitl), and after the routed run finishes, however it ended,
+  always launches a best-effort `orca-retro` over that invocation's logs (issue set = root ∪ queue).
+  Never generates or evaluates code directly — pure orchestration. Self-relative. Do NOT use it for
+  ad-hoc multi-agent coordination, task dispatch, DAGs, or coordinator loops (use the `orchestration`
+  skill), nor for raw terminal/worktree control (use `orca-cli`).
+compatibility: Requires the `orca` CLI (skill set last verified against Orca app 1.4.180), the `~/.agents/orca-workflows/` symlink to this repo's orca-workflows/, and the `gh` CLI.
 ---
 
 # Orca Workflow
@@ -53,6 +65,7 @@ entry point 라우터다. 이슈 하나를 받아 타입을 판별해 `orca-work
 
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
+source ~/.agents/orca-workflows/scripts/log_dispatch.sh   # log_outcome — outcome enum의 기계-검증 정본(raw printf 금지, logging.md §1)
 # provider는 model-selection.md 기준 resolve — 판단(judgment) 작업. REPL 필수, agy 제외
 # (`orca-workflow-task` §1의 evaluate 스폰과 같은 제약 — 사유는 `~/.agents/orca-workflows/models/agy.md`).
 orca_call_with_retry "orca-workflow" "retro" -- \
@@ -94,8 +107,7 @@ fi
 if [ "$boot_quiesced" != "1" ]; then
   # boot-quiesce 확인에 실패(터미널 read 불가 또는 60s 안에 MCP boot 출력이 멈추지 않음) — task-create/
   # dispatch --inject로 진행하지 않는다. RETRO_FAIL만 남기고 정상 종료(터미널 close 후 실행 종료).
-  printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<root-issue-num>","outcome":"RETRO_FAIL","retry":0}\n' \
-    "$(date -u +%FT%TZ)" >> "$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
+  log_outcome --skill orca-workflow --issue "<root-issue-num>" --repo "<대상 repo>" --outcome RETRO_FAIL --retry 0
 else
 spec_text="<orca-retro SKILL.md 지침 + root issue 번호 + 큐 issue 목록(orca-workflow-epic 경로면 §5 보고의 큐 목록, orca-workflow-task 경로면 root 1건 — 분석 issue 집합 = root ∪ 큐, 중복 제거) + 대상 repo + skills repo(sleeptimegrt-skills) slug>"
 orca_call_with_retry "orca-workflow" "retro" -- \
@@ -104,15 +116,16 @@ orca_call_with_retry "orca-workflow" "retro" -- \
   orca orchestration dispatch --task <task_id> --to <retro-handle> --retry-request "$(uuidgen)" --inject --json
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(issue #43).
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로, dispatch와 같은 블록에서 즉시:
-#  §1 assign 이벤트: role="retro", issue=<root-issue-num>, task_id=<task_id>, provider(claude-code|codex|agy 중 하나)/model/effort=resolved 값,
+#  §1 assign 이벤트: role="retro", issue=<root-issue-num>, repo=<대상 repo>, task_id=<task_id>, provider(claude-code|codex|agy 중 하나)/model/effort=resolved 값,
 #    terminal=<retro-handle>, worktree=<worktree 경로>
 #  §2 term 로그: skill="orca-workflow", role="retro", terminal=<retro-handle>, meta 기록 후
 #    sent.content=$spec_text. 이 사이트는 하위 스킬의 dispatch 사이트들과 달리 요약을 터미널에서
 #    직접 읽으므로, 요약 수신 시점에 logging.md §2의 최초-read 레시피(--cursor 없이)로 recv도 기록한다.
 # 요약(RETRO filed=[...] commented=[...] discarded=<n>) 수신 후 — 수신 실패·timeout이면 RETRO_FAIL:
-printf '{"ts":"%s","event":"outcome","skill":"orca-workflow","issue":"<root-issue-num>","outcome":"<RETRO_DONE|RETRO_FAIL>","retry":0,"filed":<n>,"commented":<n>,"discarded":<n>}\n' \
-  "$(date -u +%FT%TZ)" >> "$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"
-# RETRO_FAIL이면 filed/commented/discarded 필드는 생략한다(logging.md §1). 터미널 close 후 실행 종료.
+log_outcome --skill orca-workflow --issue "<root-issue-num>" --repo "<대상 repo>" --outcome "<RETRO_DONE|RETRO_FAIL>" --retry 0 \
+  --filed <n> --commented <n> --discarded <n>
+# RETRO_FAIL이면 --filed/--commented/--discarded를 넘기지 않는다(logging.md §1 — 빈 값은 헬퍼가 필드를
+# 생략하지만, 애초에 셀 것이 없다는 뜻이므로 플래그 자체를 생략). 터미널 close 후 실행 종료.
 fi
 ```
 

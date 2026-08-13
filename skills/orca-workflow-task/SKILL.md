@@ -1,6 +1,7 @@
 ---
 name: orca-workflow-task
-description: Single-issue coordinator for one task issue — invoked in-session by `orca-workflow` (entry) or spawned as a separate coordinator terminal by `orca-workflow-epic`; invoke explicitly, do not phrase-match. Owns exactly one relay Run keyed by the issue, drives the orca-task-runner/orca-evaluate contract negotiation relay, generation, evaluation, PR/merge (merge-time verification delegated to repo CI required checks), and issue close. Mode [afk|hitl] (default hitl) governs escalation — hitl raises a blocking question to the caller/human (decision gate), afk preserves the work (worktree, CONTRACT_DIR artifacts, logs) and returns the outcome so the caller can move on. Never generates or evaluates code directly — pure orchestration, kept context-light. Self-relative.
+description: Single-issue coordinator for one task issue — invoked in-session by `orca-workflow` (entry) or spawned as a separate coordinator terminal by `orca-workflow-epic`; invoke explicitly, do not phrase-match. Owns exactly one relay Run keyed by the issue, drives the orca-task-runner/orca-evaluate contract negotiation relay, generation, evaluation, PR/merge (merge-time verification delegated to repo CI required checks), and issue close. Mode [afk|hitl] (default hitl) governs escalation — hitl raises a blocking question to the caller/human (decision gate), afk preserves the work (worktree, CONTRACT_DIR artifacts, logs) and returns the outcome so the caller can move on. Never generates or evaluates code directly — pure orchestration, kept context-light. Self-relative. Do NOT use for ad-hoc coordination or terminal control (use the `orchestration` or `orca-cli` skills) — this skill runs only as part of the orca-workflow pipeline.
+compatibility: Requires the `orca` CLI (skill set last verified against Orca app 1.4.180), the `~/.agents/orca-workflows/` symlink to this repo's orca-workflows/, and the `gh` CLI.
 ---
 
 # Orca Workflow Task
@@ -16,6 +17,28 @@ description: Single-issue coordinator for one task issue — invoked in-session 
   §1의 두 spec_text에 절대경로로 넣는다. acceptance criteria는 issue 본문의 사전 섹션이 아니라 §1
   협상에서 초안·승인된다 — 산출물 파일(proposal/verdict/override)과 확정 AC의 정본 위치는 같은
   문서가 정의한다.
+- **재개(crash-resume) 분기**(CONTRACT_DIR 계산 직후 1회, issue #156) — round/attempt/retry 카운터의
+  정본은 이 세션의 대화 컨텍스트가 아니라 CONTRACT_DIR 아티팩트의 파일명 번호다. 산출물이 하나라도
+  있으면 이 실행은 새 시작이 아니라 재개다:
+
+  ```bash
+  source ~/.agents/orca-workflows/scripts/contract_resume.sh
+  contract_resume_state "<CONTRACT_DIR>"
+  ```
+
+  출력 JSON의 `resume` 필드가 가리키는 §로 점프한다 — `section-1-proposal`/`-verdict`/`-override`는
+  §1의 해당 스텝부터(`round` 필드의 라운드), `section-2`는 §2부터(`attempt`/`retry` 필드를 §2 spec과
+  §4 재시도 카운터로 이어받는다), `section-4`는 §4의 PASS 라우팅부터(PR 확보와
+  merge 루프는 재실행-안전 — #72), `section-5`는 `outcome` 필드 값으로 §5로. 규칙:
+  - `recent_write`가 true면(기본 10분 내 아티팩트 수정) 이전 세션의 워커가 아직 쓰고 있을 수 있다 —
+    점프하지 않는다. hitl이면 사람에게 확인하고, afk면 10분 대기 후 1회 재스캔, 그래도 true면 §5
+    afk 보존 절차로 가서 outcome=ESCALATE로 보고한다(근거: "재개 모호 — 이전 세션 워커 생존 의심").
+  - 이전 세션의 Run·터미널·task는 재사용하지 않는다 — 아래 "Run 생성"을 새로 수행해 사이드카를
+    덮어쓰고, 점프한 §가 요구하는 터미널은 새로 스폰한다.
+  - 재개가 §1을 건너뛰는 경우 `CONTRACT_APPROVED`/`CONTRACT_FINALIZED_BY_GENERATOR` outcome 로그를
+    다시 남기지 않는다 — 아티팩트가 상태 정본이고, 중복 기록하면 issue당 계약 확정이 2회로 집계된다.
+  - `section-1-*` 재개(같은 라운드 재-태움)는 같은 번호 파일을 덮어쓸 수 있다 — append-only는 라운드
+    간 규칙이다(`contract-schema.md` 크래시-재개 절).
 - CLI 기반 coordinator(Codex/agy)는 launch 시 approval·sandbox를 명시한다. codex posture는 `--dangerously-bypass-approvals-and-sandbox` — 근거·예외(headless read-only 등)는 `~/.agents/orca-workflows/models/codex.md`가 정본이다. 안전 전제는 워크트리 격리다.
 - 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 —
   `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다. §1의 두 `terminal create` 호출
@@ -38,17 +61,19 @@ description: Single-issue coordinator for one task issue — invoked in-session 
   못하는 것이 실측됐다(4회 스폰 중 2회 여전히 블록). 막히면 재진단 없이
   `~/.agents/orca-workflows/spawn-failures.md`의 해당 row로(issue #60).
 - **Run 생성**(실행 시작 시 1회): Run을 만들고 바인딩한 뒤 `run_id`를 사이드카 파일에 남긴다(§1의
-  라운드 2+ relay 코드 블록은 별도 fenced block이라 셸 변수가 그대로 넘어가지 않는다):
+  라운드 2+ relay 코드 블록은 별도 fenced block이라 셸 변수가 그대로 넘어가지 않는다). 파일명의
+  `<project-slug>`는 위 Contract 디렉토리 단계에서 계산한 값을 재사용한다(logging.md §3, issue #159 —
+  issue 번호만으로는 저장소 간 사이드카가 충돌한다):
 
   ```bash
   install -d -m 700 ~/.local/state/orca-workflows/logs
   run_json="$(orca orchestration run-create --objective "<issue 번호> contract round relay" --from <자기 handle> --json)"
-  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-workflow-task.txt"
-  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-workflow-task.txt"
+  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<issue 번호>-orca-workflow-task.txt"
+  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<issue 번호>-orca-workflow-task.txt"
   ```
 
   이후 §1의 모든 `worker-start`/`check --wait`/`--ack` 호출 앞에서
-  `RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-workflow-task.txt")"`로 다시 읽는다
+  `RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<issue 번호>-orca-workflow-task.txt")"`로 다시 읽는다
   (라운드 1 fenced block도 상단에서 한 번 읽는다 — 그 블록의 두 `worker-start`가 쓴다) —
   `orca-task-runner`/`orca-evaluate`가 각자 내부 fan-out에 쓰는 Run과는 별개다(섞이면 서로 다른
   세션의 `worker_done`이 잘못된 mailbox로 전달된다 — `~/.agents/orca-workflows/self-recovery.md`
@@ -65,22 +90,114 @@ description: Single-issue coordinator for one task issue — invoked in-session 
 
 ## 1. Contract 협상 relay
 
-`orca-task-runner`를 "제안서 작성" 모드로 호출(제안서 = `contract-schema.md` 스키마의 `proposal-r<n>.json`, **AC 초안 포함**) → `orca-evaluate`에 "검토" 모드로 전달(판정 = `verdict-r<n>.json`) → 반려면 다시 `orca-task-runner`에 전달. 산출물 경로는 §0의 `CONTRACT_DIR`와 라운드 번호로 결정론적이므로 **이 스킬은 파일을 읽지도, 경로를 추출하지도 않고 CONTRACT_DIR·라운드 번호만 중계**한다. 최대 2라운드, 그 이후는 `orca-task-runner`가 결정권을 가질 수 있다(`override.json` 존재가 그 기록이다) — 단 무조건 §2로 가는 것이 아니다. **라운드 한도 도달 시점에** — §2로 넘어가기 전에 — 다음 기계적 분기를 먼저 태운다(구조 필드 1개 추출이라 "diff/report 본문을 읽지 않는다" 원칙과 충돌하지 않는다 — dispatch-verify의 불투명 비교와 같은 결):
+`orca-task-runner`를 "제안서 작성" 모드로 호출(제안서 = `contract-schema.md` 스키마의 `proposal-r<n>.json`, **AC 초안 포함**) → `orca-evaluate`에 "검토" 모드로 전달(판정 = `verdict-r<n>.json`) → 반려면 다시 `orca-task-runner`에 전달. 산출물 경로는 §0의 `CONTRACT_DIR`와 라운드 번호로 결정론적이므로 **이 스킬은 파일을 읽지도, 경로를 추출하지도 않고 CONTRACT_DIR·라운드 번호만 중계**한다. 최대 2라운드(조건부로 3 — 아래 "라운드 2→3 조건부 연장" 참고), 그 이후는 `orca-task-runner`가 결정권을 가질 수 있다(`override.json` 존재가 그 기록이다) — 단 무조건 §2로 가는 것이 아니다. **라운드 한도 도달 시점에** — §2로 넘어가기 전에 — 다음 기계적 분기를 먼저 태운다(구조 필드 1개 추출이라 "diff/report 본문을 읽지 않는다" 원칙과 충돌하지 않는다 — dispatch-verify의 불투명 비교와 같은 결). 이 분기는 §0 재개 분기의 `contract_resume.sh`가 미러링한다 — 여기를 바꾸면 그쪽도 함께 바꾼다(`tests/test_contract_resume.py`가 스크립트 쪽을 고정한다):
+
+**라운드 2→3 조건부 연장** — 아래 "라운드 한도 도달 시점" 분기를 태우기 전에, `verdict-r2.json`이
+`rejected`이고 `reasons[].target`이 전부 `"plan_coverage"`면(즉 `ac_fidelity`가 하나도 없으면)
+아래 분기 대신 이 분기를 태운다 — 아직 라운드 한도(2)에 도달한 것으로 보지 않는다:
+
+```bash
+if [ ! -f "<CONTRACT_DIR>/verdict-r2.json" ]; then
+  : # 라운드2 verdict가 아직 없다 — 이 시점(라운드2 검토 결과 수신 직후)엔 있어야 정상이다. 없으면
+    # 이 분기는 개입하지 않는다 — 아래 "라운드 한도 도달 시점" 분기의 기존 `elif [ ! -f
+    # "<CONTRACT_DIR>/verdict-r2.json" ]` 가드가 같은 부재를 fail-closed로 잡는다.
+elif jq -e '[.reasons[].target] | index("ac_fidelity")' "<CONTRACT_DIR>/verdict-r2.json" >/dev/null; then
+  : # ac_fidelity 있음 — 이 연장은 발동하지 않는다, 아래 "라운드 한도 도달 시점" 분기를 그대로 태운다
+else
+  # plan_coverage뿐 — override 대신 라운드3 제안서 작성 모드로 orca-task-runner를 재호출한다
+  # (spec_text에 round=3 + CONTRACT_DIR + "verdict-r2.json을 읽고 proposal-r3.json 작성" 포함).
+  # verdict-r3.json이 approved면 §2로(확정 AC=proposal-r3). rejected면 아래 "라운드 한도 도달
+  # 시점" 분기와 동일한 구조를 verdict-r2.json→verdict-r3.json, round=2→3, proposal-r3→proposal-r4로
+  # 치환해 그대로 적용한다(아래 두 번째 코드 블록):
+  :
+fi
+```
+
+라운드3이 반려돼 `orca-task-runner`를 override 모드로 재호출한 뒤(`worker_done` 수신 시점) 태우는
+분기 — 아래와 동일한 구조를 한 라운드 밀어서:
+
+```bash
+if [ ! -f "<CONTRACT_DIR>/override.json" ]; then
+  # 라운드3 한도에 도달했는데 override.json이 없다 — fail-closed: outcome=CONTRACT_ESCALATE로 남기고 §5로.
+elif [ ! -f "<CONTRACT_DIR>/verdict-r3.json" ]; then
+  # override는 있는데 라운드3 verdict가 없다 — fail-closed: outcome=CONTRACT_ESCALATE로 남기고 §5로.
+elif [ ! -f "<CONTRACT_DIR>/proposal-r4.json" ]; then
+  # override 기록(final_round=3)과 verdict-r3.json은 있는데 확정 계약(proposal-r4)이 없다.
+  # worker_done까지 왔으므로 쓰다 죽은 게 아니다 — 기록 계약 위반이다. final_round=3은 이 확장
+  # 자체가 도입한 개념이라 legacy 세션이 있을 수 없으므로(R3_REQUIRED_SINCE류의 staleness 구분
+  # 자체가 불필요) 곧장 fail-closed: outcome=CONTRACT_ESCALATE, round=3으로 남기고 §5로.
+elif jq -e '[.reasons[].target] | index("ac_fidelity")' "<CONTRACT_DIR>/verdict-r3.json" >/dev/null; then
+  # AC 자체에 이견이 남음 — outcome=CONTRACT_ESCALATE, round=3으로 남기고 §5로.
+else
+  # 최종 verdict(r3)의 반려가 plan_coverage뿐 — outcome=CONTRACT_FINALIZED_BY_GENERATOR, round=3을
+  # 남기고 §2로(확정 AC=proposal-r4).
+fi
+```
 
 ```bash
 if [ ! -f "<CONTRACT_DIR>/override.json" ]; then
   # 라운드 한도에 도달했는데 override.json이 없다 — generator가 §1의 기록 계약을 어긴 것.
   # 기록 없는 진행을 허용하지 않는다(fail-closed): outcome=CONTRACT_ESCALATE로 남기고 §5로.
-elif jq -e '[.unresolved_reasons[].target] | index("ac_fidelity")' "<CONTRACT_DIR>/override.json" >/dev/null; then
+elif [ ! -f "<CONTRACT_DIR>/verdict-r2.json" ]; then
+  # override는 있는데 최종 라운드 verdict가 없다 — evaluator 판정 없이 진행 기록만 있는 상태.
+  # 마찬가지로 fail-closed: outcome=CONTRACT_ESCALATE로 남기고 §5로.
+elif [ ! -f "<CONTRACT_DIR>/proposal-r3.json" ]; then
+  # override 기록은 있는데 확정 계약(proposal-r3 — override 스텝이 override.json 직후에 쓴다,
+  # contract-schema.md "override 후속 라운드" 절, issue #130)이 없다 — worker_done까지 왔으므로
+  # 쓰다 죽은 게 아니다. 그렇다고 곧장 "기록 계약 위반"도 아니다 — override.json이 이 r3 요구사항
+  # 자체의 도입(commit 79b7c3b, 2026-08-12T09:44:57+09:00) 이전에 완료됐을 수 있다(issue #160).
+  # R3_REQUIRED_SINCE 상수(contract_resume.sh와 동일 — 바꾸면 함께 바꾼다)로 override.json의 mtime을
+  # 그 시각과 비교한다(recent_write 가드와 같은 touch -t + find -newer 패턴을 기반으로 하되, touch -t
+  # 실패를 별도로 체크한다 — 아래 참고. stat -f/-c epoch 파싱은 GNU stat -f의 의미 충돌 위험이 있어
+  # 쓰지 않는다). touch -t는 TZ를 명시하지 않으면 호스트 로컬 설정으로 해석하므로(KST가 아닌 머신에서
+  # 최대 수 시간 오차 — issue #160 리뷰에서 실측), TZ=Asia/Seoul을 고정한다:
+  R3_REQUIRED_SINCE='202608120944.57'
+  ref="$(mktemp "${TMPDIR:-/tmp}/contract-r3gate.XXXXXX")"
+  # 두 가지 실패 양상을 각각 다른 가드로 막는다 — 하나의 find 극성 반전으로 뭉치면 안 된다는 걸
+  # issue #160 최종 리뷰에서 실측으로 확인했다: touch -t 자체가 실패하면 $ref는 의도한 cutoff가
+  # 아니라 방금 만든 "지금" mtime에 머문다. 이미 쓰인 override.json은 "지금"보다 newer일 리 거의
+  # 없으므로, -newer든 ! -newer든(분기와 printf 값을 맞바꿔도) "cutoff보다 newer 아님"이라는 결과가
+  # 똑같이 나온다 — find 극성만 뒤집는 건 이 실패 양상에서 순수 무의미한 재작성이었다(원본과
+  # "반전"판 모두 CONTRACT_SCHEMA_STALE을 오보하는 것을 스텁 touch로 직접 재현해 확인). 그래서
+  # touch -t의 종료 코드를 직접 확인해 실패 시 비교 자체를 건너뛴다:
+  if ! TZ='Asia/Seoul' touch -t "$R3_REQUIRED_SINCE" "$ref" 2>/dev/null; then
+    rm -f "$ref"
+    # 백데이팅 자체가 실패 — $ref의 mtime은 무의미하므로 비교하지 않는다. 기존 판단 그대로: 기록
+    # 계약 위반. fail-closed: outcome=CONTRACT_ESCALATE, round=2로 남기고 §5로.
+  elif [ -n "$(find "<CONTRACT_DIR>" -maxdepth 1 -name override.json ! -newer "$ref" 2>/dev/null)" ]; then
+    rm -f "$ref"
+    # touch -t는 성공했고, override.json이 그 cutoff보다 newer가 아님 = 게이트 도입 이전(또는
+    # 정확히 동시)이라는 양성 증거 — 위반이 아니라 구버전 세션. outcome=CONTRACT_SCHEMA_STALE,
+    # round=2, detail에 override.json mtime과 $R3_REQUIRED_SINCE를 사람이 읽을 수 있는 형태로
+    # 남기고 §5로(§5 문구 참고 — "자동 재개"를 암시하지 않는다).
+  else
+    rm -f "$ref"
+    # touch -t는 성공했고, override.json이 cutoff보다 newer(게이트 도입 이후) — 또는 find 자체가
+    # mtime과 무관한 이유로(경로 없음 등) 아무것도 못 찾음 — 둘 다 기존 판단 그대로: 기록 계약
+    # 위반. fail-closed: outcome=CONTRACT_ESCALATE, round=2로 남기고 §5로.
+  fi
+  # (§0 재개 분기는 override.json mtime이 게이트 도입 이후인 상태만 "쓰다 죽음"으로 보고 override
+  # 스텝을 재-태운다 — worker_done 수신 여부가 그 두 해석을 가른다. 게이트 도입 이전인 상태는 §0도
+  # 동일하게 CONTRACT_SCHEMA_STALE로 escalate한다 — contract_resume.sh 미러.)
+elif jq -e '[.reasons[].target] | index("ac_fidelity")' "<CONTRACT_DIR>/verdict-r2.json" >/dev/null; then
   # AC 자체("무엇을 만들지")에 이견이 남음 — 생성 비용을 쓰기 전에 사람에게 보낸다.
+  # 라우팅 입력은 generator가 쓴 override.json이 아니라 evaluator 소유의 verdict-r2.json이다
+  # (라운드 한도 = 2, §1 상단): override의 unresolved_reasons는 generator가 "해소 못 한" 항목만
+  # 골라 담은 자기 필터라, 그걸 기준으로 삼으면 generator가 ac_fidelity 반려를 "해소했다"고
+  # 자평하는 순간 이 게이트가 뚫린다 — 2라운드 뒤에는 그 자평을 검증할 evaluator 라운드가 없다
+  # (contract-schema.md override 절, docs/references/anthropic-harness-design-long-running-apps.md의
+  # self-evaluation 편향).
   # logging.md §1 outcome 레시피대로 outcome=CONTRACT_ESCALATE, round=<도달한 라운드 수>를 남기고
   # §2 없이 곧장 §5로.
 else
-  # plan_coverage 이견만 남음 — 검증 방법 이견은 §3 리뷰·e2e가 최종 AC 기준으로 재검증하므로 진행.
-  # logging.md §1 outcome 레시피대로 outcome=CONTRACT_FINALIZED_BY_GENERATOR,
+  # 최종 verdict의 반려가 plan_coverage뿐 — 검증 방법 이견은 §3 리뷰·e2e가 최종 AC 기준으로
+  # 재검증하므로 진행. logging.md §1 outcome 레시피대로 outcome=CONTRACT_FINALIZED_BY_GENERATOR,
   # round=<도달한 라운드 수>를 남기고 §2로 (issue #63).
 fi
 ```
+
+(이 분기는 위 "라운드 2→3 조건부 연장"이 발동하지 않은 경우 — 즉 `verdict-r2.json`에
+`ac_fidelity`가 있는 경우에만 실행된다. 발동한 경우는 위 두 번째 코드 블록을 대신 따른다.)
 
 **계약이 승인된 시점에도(몇 라운드에서 승인되든)** — 마찬가지로 §2로 넘어가기 전에 — 같은 레시피대로 `outcome=CONTRACT_APPROVED, round=<승인된 라운드 수>`를 남긴다(issue #69, #86).
 
@@ -89,7 +206,7 @@ fi
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 source ~/.agents/orca-workflows/scripts/log_dispatch.sh
-RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-workflow-task.txt")"   # §0에서 남긴 사이드카 — 아래 두 worker-start가 쓴다
+RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<issue 번호>-orca-workflow-task.txt")"   # §0에서 남긴 사이드카 — 아래 두 worker-start가 쓴다
 # task-runner 호출 (provider는 model-selection.md 기준 선택 — 코드 생성이라 Routine/High-Risk tier)
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
   orca terminal create --worktree active --title task-run-<n> \
@@ -120,7 +237,7 @@ while :; do
   fi
 done
 # End pre-dispatch boot-quiesce
-spec_text="<issue 번호 + CONTRACT_DIR 절대경로 + 제안서/구현 모드(제안서 모드면: contract-schema.md 스키마대로 AC 초안을 포함한 proposal-r<라운드>.json을 CONTRACT_DIR에 작성) + orphan-폴백 계약(§0) 전문>"
+spec_text="<issue 번호 + 대상 repo(logging.md §1 repo 필드용 — 받은 문자열 그대로, issue #158) + CONTRACT_DIR 절대경로 + 제안서/구현 모드(제안서 모드면: contract-schema.md 스키마대로 AC 초안을 포함한 proposal-r<라운드>.json을 CONTRACT_DIR에 작성) + orphan-폴백 계약(§0) 전문>"
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
@@ -134,7 +251,8 @@ DISPATCH_CREATED_VIA=worker-start   # self-recovery.md wait 루프의 dead-case 
 #   결과는 이 스킬이 직접 읽지 않고 다른 채널로 도착한다). term-<run-handle>.jsonl은 orca-workflow-task
 #   자신이 소유하는 파일이다 — task-runner 자신의 왕복 내용은 그쪽이 스폰한 term-<impl_handle>.jsonl들에
 #   이미 남는다.
-log_dispatch --skill "orca-workflow-task" --role "task-runner" --issue "<issue-num>" --task-id "<task_id>" \
+log_dispatch --skill "orca-workflow-task" --role "task-runner" --issue "<issue-num>" --repo "<대상 repo>" \
+  --task-id "<task_id>" \
   --terminal "<run-handle>" --worktree "<worktree 경로>" --provider "<resolved provider (claude-code/codex/agy)>" \
   --model "<resolved model>" --effort "<resolved effort>" --spec-text "$spec_text"
 # SPEC_TEXT 사이드카는 배선하지 않는다 — worker-start 복구 분기(worker-abandon → worker-start --retry-of)는
@@ -177,7 +295,7 @@ while :; do
   fi
 done
 # End pre-dispatch boot-quiesce
-spec_text="<orca-evaluate SKILL.md 지침 + CONTRACT_DIR 절대경로와 대상 라운드 번호(검토 대상 proposal-r<n>.json·판정 산출 verdict-r<n>.json — 스키마·적대적 판정 지침·라운드 2 입력 격리 규칙은 contract-schema.md) + issue 원문 + issue 번호 + 요청 모드 + orphan-폴백 계약(§0) 전문>"
+spec_text="<orca-evaluate SKILL.md 지침 + CONTRACT_DIR 절대경로와 대상 라운드 번호(검토 대상 proposal-r<n>.json·판정 산출 verdict-r<n>.json — 스키마·적대적 판정 지침·라운드 2+ 입력 격리 규칙은 contract-schema.md) + issue 원문 + issue 번호 + 대상 repo(logging.md §1 repo 필드용, issue #158) + 요청 모드 + orphan-폴백 계약(§0) 전문>"
 orca_call_with_retry "orca-workflow-task" "evaluator" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-task" "evaluator" -- \
@@ -187,7 +305,8 @@ DISPATCH_CREATED_VIA=worker-start   # self-recovery.md wait 루프의 dead-case 
 # 로그 — logging.md §1 assign + §2 meta/sent를 log_dispatch()가 한 호출로 원자적으로 기록한다(issue #68).
 #   이 터미널에 대한 유일한 read도 마찬가지로 dispatch-verify.md의 liveness probe뿐이라
 #   recv는 기록하지 않는다(위 task-runner 사이트와 같은 이유).
-log_dispatch --skill "orca-workflow-task" --role "evaluator" --issue "<issue-num>" --task-id "<task_id>" \
+log_dispatch --skill "orca-workflow-task" --role "evaluator" --issue "<issue-num>" --repo "<대상 repo>" \
+  --task-id "<task_id>" \
   --terminal "<evaluate-handle>" --worktree "<worktree 경로>" --provider "<resolved provider (claude-code/codex/agy)>" \
   --model "<resolved model>" --effort "<resolved effort>" --spec-text "$spec_text"
 # SPEC_TEXT 사이드카는 위 task-runner 블록과 같은 이유로 배선하지 않는다(issue #94 1단계).
@@ -210,8 +329,8 @@ spec만 재전송된다. 대신 매 라운드 새 task를 만들어 같은 터�
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 source ~/.agents/orca-workflows/scripts/log_dispatch.sh
-RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-workflow-task.txt")"   # §0에서 남긴 사이드카
-spec_text="<round 번호 + CONTRACT_DIR 절대경로(파일명은 contract-schema.md 컨벤션으로 결정론적 — task-runner행이면 직전 verdict-r<n-1>.json을 읽고 proposal-r<n>.json 작성, evaluator행이면 라운드 2 입력 격리 규칙대로 원본 issue·proposal-r<n>.json·자신의 직전 verdict만 입력) + orphan-폴백 계약(§0) 전문>"
+RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<issue 번호>-orca-workflow-task.txt")"   # §0에서 남긴 사이드카
+spec_text="<round 번호 + CONTRACT_DIR 절대경로(파일명은 contract-schema.md 컨벤션으로 결정론적 — task-runner행이면 직전 verdict-r<n-1>.json을 읽고 proposal-r<n>.json 작성, evaluator행이면 라운드 2+ 입력 격리 규칙대로 원본 issue·proposal-r<n>.json·자신의 직전 verdict만 입력) + orphan-폴백 계약(§0) 전문>"
 orca_call_with_retry "orca-workflow-task" "contract-round" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-task" "contract-round" -- \
@@ -221,7 +340,7 @@ DISPATCH_CREATED_VIA=worker-start   # self-recovery.md wait 루프의 dead-case 
 # 미전송 확인 — ~/.agents/orca-workflows/dispatch-verify.md 절차대로(worker-start에도 동일하게 필요).
 # 로그 — logging.md §1 assign + §2 meta/sent를 log_dispatch()가 한 호출로 원자적으로 기록한다(issue #68).
 #   이 사이트도 recv는 기록하지 않는다(위 두 사이트와 같은 이유 — 결과는 check --wait으로 수신).
-log_dispatch --skill "orca-workflow-task" --role "contract-round" --issue "<issue-num>" \
+log_dispatch --skill "orca-workflow-task" --role "contract-round" --issue "<issue-num>" --repo "<대상 repo>" \
   --task-id "<방금 만든 task_id>" --terminal "<재-engage 대상 handle>" --worktree "<worktree 경로>" \
   --provider "<라운드 1에서 resolve한 provider (claude-code/codex/agy) — 재-resolve 없이 재사용>" \
   --model "<라운드 1에서 resolve한 model — 재사용>" --effort "<라운드 1에서 resolve한 effort — 재사용>" \
@@ -237,14 +356,46 @@ log_dispatch --skill "orca-workflow-task" --role "contract-round" --issue "<issu
 `orca-task-runner` 호출, 결과로 **task 전체 diff 경로** 또는 **`GATE_FAIL`**을 받는다(`orca-task-runner`가 자기 task-레벨 게이트를 재시도 한도(2회) 안에 못 넘긴 경우 — `skills/orca-task-runner/SKILL.md` §6). §4의 FAIL 재시도로 돌아온 호출이면 spec을 아래 템플릿대로 구성한다 — findings를 prose로 요약하지 않고 파일 경로만 넘긴다:
 
 ```
-spec_text="<issue 번호 + CONTRACT_DIR 절대경로 + 구현 모드 + 직전 attempt 번호 + \"CONTRACT_DIR의 eval-report-a<attempt>.json과 proposal-r<확정라운드>.json을 이 순서로 전부 읽어라 — findings를 요약해 넘기지 않는다\" + orphan-폴백 계약(§0) 전문>"
+spec_text="<issue 번호 + 대상 repo(logging.md §1 repo 필드용, issue #158) + CONTRACT_DIR 절대경로 + 구현 모드 + 직전 attempt 번호 + \"CONTRACT_DIR의 eval-report-a<attempt>.json과 최종 라운드 proposal(가장 큰 proposal-r<n>.json — 네가 직접 확인)을 이 순서로 전부 읽어라 — findings를 요약해 넘기지 않는다\" + orphan-폴백 계약(§0) 전문>"
 ```
 
-`<확정라운드>`는 이 세션이 §1에서 이미 로그로 남긴 `CONTRACT_APPROVED`/`CONTRACT_FINALIZED_BY_GENERATOR`의 `round` 값을 그대로 리터럴 치환한다(추가 조회 없음) — generator가 두 파일을 직접 읽는다(이 스킬은 feedback 본문도 확정 AC 본문도 중계하지 않는다).
+확정 계약 라운드 번호는 이 스킬이 치환하지 않는다 — 확정 AC의 정본은 "최종 라운드(가장 큰 n) proposal"이고(contract-schema.md — override 경로에서는 정정 라운드(r4+)가 나중에 추가될 수 있어 코디네이터가 아는 번호가 낡을 수 있다, issue #130), generator가 CONTRACT_DIR에서 직접 확인한다(이 스킬은 feedback 본문도 확정 AC 본문도 중계하지 않는다).
+
+**Dispatch 실행부**(issue #128 — 이 사이트는 §1의 task-runner 사이트와 동일한 강제를 받는다): 구현
+모드 호출은 즉석 경로가 아니라 §1 round-1 task-runner 블록의 레시피 그대로다 — §1 협상에서 쓴
+`<run-handle>` 터미널이 살아 있으면 `terminal create`/boot-quiesce만 건너뛰고 `task-create` →
+`dispatch --inject` → 미전송 확인(dispatch-verify.md) → `log_dispatch` → SPEC_TEXT 사이드카 →
+self-recovery 대기를 같은 순서로 태우고, 죽었거나 없으면 §1 블록 전체(스폰부터)를 태운다.
+`orca-task-runner`를 dispatch하지 않고 코디네이터가 직접 코드를 작성·수정해 §3로 가는 경로는
+존재하지 않는다(이 스킬 서두의 "코드를 생성하지도, 평가하지도 않는다" — issue #128에서 관측된
+이탈이 정확히 이것이거나, 최소한 로그로 반증 불가능했다). 로그는 dispatch와 같은 블록에서 즉시,
+`--attempt`를 실어 남긴다(§1 제안서 모드 dispatch와 유일하게 다른 인자 — eval-report-a<attempt>.json과
+join되는 키):
+
+```bash
+log_dispatch --skill "orca-workflow-task" --role "task-runner" --issue "<issue-num>" --repo "<대상 repo>" \
+  --task-id "<task_id>" --terminal "<run-handle>" --worktree "<worktree 경로>" \
+  --provider "<resolved provider>" --model "<resolved model>" --effort "<resolved effort>" \
+  --spec-text "$spec_text" --attempt <attempt 번호 — 1부터, §4 FAIL 재시도마다 +1>
+```
 
 **GATE_FAIL 라우팅** — `orca-evaluate`를 호출하지 않고 바로 §5로 간다. `orca-task-runner`가 이미 자기 재시도 예산을 다 썼으므로 여기서 추가 재시도를 걸지 않는다(이중 카운팅 방지). §5 보고에 "evaluate 호출 안 됨(GATE_FAIL) — 기계적 게이트 실패"를 명시해 아래 FAIL/ESCALATE와 구분한다. 이때도 §4의 outcome 로그 라인을 `outcome:"GATE_FAIL"`로 남긴다(§4를 거치지 않으므로 여기서 직접).
 
 ## 3. Evaluate
+
+**Generate 감사 게이트**(issue #128, evaluator dispatch 전에 기계적으로 1회): 이번 attempt의
+`role="task-runner"` assign 레코드가 실제로 남아 있는지 확인한다 — 없으면 §2가 정식 dispatch 없이
+통과된 것이므로(코디네이터 직접 편집 포함, 어느 쪽이든 §2 위반) evaluate로 넘어가지 않고 §2로
+돌아가 레시피대로 실행한다. 직접 만든 변경이 이미 worktree에 있어도 그것을 평가에 넘기는 경로는
+없다:
+
+```bash
+find "$HOME/.local/state/orca-workflows/logs" -name 'assignments-*.jsonl' 2>/dev/null | sort | xargs cat 2>/dev/null \
+  | jq -e -s --arg issue "<issue-num>" --arg repo "<대상 repo>" --argjson k <attempt 번호> \
+      '[.[] | select(.event=="assign" and .skill=="orca-workflow-task" and .role=="task-runner"
+                     and .issue==$issue and .repo==$repo and .attempt==$k)] | length > 0' >/dev/null \
+  || echo "GENERATE-AUDIT-FAIL: attempt <attempt 번호>의 task-runner assign 없음 — §2로 돌아간다" >&2
+```
 
 (§2가 diff 경로를 반환했을 때만) `orca-evaluate` 호출(diff 경로 + attempt 번호 전달 — attempt는 1부터, FAIL 재시도마다 +1), PASS / FAIL / ESCALATE 중 하나를 결과로 받는다. evaluator는 판정을 `CONTRACT_DIR`의 `eval-report-a<attempt>.json`으로도 남긴다(스키마는 `contract-schema.md` — 이 스킬은 그 파일을 읽지 않는다).
 
@@ -280,7 +431,14 @@ spec_text="<issue 번호 + CONTRACT_DIR 절대경로 + 구현 모드 + 직전 at
   merge_budget=1800   # CI e2e 완주까지 기다릴 수 있는 예산
   merged=false; merge_outcome=""
   while :; do
-    if gh pr merge "$pr_num" --squash --delete-branch; then merged=true; break; fi
+    # 머지 판정 근거는 gh pr merge의 종료 코드가 아니라 PR의 실제 상태다(issue #135):
+    # --squash --delete-branch는 원격 머지에 성공한 뒤 로컬 브랜치 정리에서 비-0 종료할 수 있고
+    # (main이 다른 worktree에 체크아웃 — 이 스킬의 기본 배치에서 구조적), 이미 머지된 PR은
+    # mergeStateStatus=UNKNOWN이라 아래 어느 분기에도 안 걸려 예산 소진까지 폴링하게 된다.
+    # 매 회차 진입 시(재실행 재개 케이스, #72) + merge 시도 직후 두 곳에서 상태로 판정한다.
+    if [ "$(gh pr view "$pr_num" --json state -q .state)" = "MERGED" ]; then merged=true; break; fi
+    gh pr merge "$pr_num" --squash --delete-branch || true   # 종료 코드는 판정에 쓰지 않는다
+    if [ "$(gh pr view "$pr_num" --json state -q .state)" = "MERGED" ]; then merged=true; break; fi
     state="$(gh pr view "$pr_num" --json mergeStateStatus -q .mergeStateStatus)"
     if [ "$state" = "DIRTY" ]; then
       merge_outcome=MERGE_CONFLICT; break        # base와 텍스트 충돌 — 자동 해소하지 않는다
@@ -299,6 +457,12 @@ spec_text="<issue 번호 + CONTRACT_DIR 절대경로 + 구현 모드 + 직전 at
     sleep 30
   done
   rm -f "$merge_started_file"   # 어느 분기로 끝나든 회수
+  if [ "$merged" = "true" ]; then
+    # 원격 브랜치 정리 — 머지 판정과 분리된 best-effort 후처리(issue #135). --delete-branch가
+    # 로컬 정리 단계에서 죽으면 원격 브랜치가 남을 수 있다. 실패해도(이미 삭제됨 포함) outcome에
+    # 영향을 주지 않는다.
+    git push origin --delete "<task-branch>" 2>/dev/null || true
+  fi
   # merge_outcome이 비어있지 않으면 merge되지 않은 것이다 — logging.md §1 outcome 레시피대로 그 값을
   # 남기고(GATE_FAIL과 같은 원칙: 추가 재시도 없이) 바로 §5로 분기한다. printf가 남긴
   # 마지막 state와 실패 check 이름·링크(gh pr checks "$pr_num")를 §5 보고에 첨부한다.
@@ -317,17 +481,17 @@ spec_text="<issue 번호 + CONTRACT_DIR 절대경로 + 구현 모드 + 직전 at
 - MERGE_CONFLICT → (같은 위치) base와의 텍스트 충돌(`mergeStateStatus=DIRTY`) 또는
   `gh pr update-branch` 실패 — 자동 rebase/충돌 해소를 시도하지 않고 즉시 §5.
 
-라우팅 판정마다 outcome 이벤트를 할당 로그와 같은 파일에 남긴다 — `issue`/`task_id`로 assign 이벤트와 join해야 "어떤 할당이 어떤 결과를 냈는지"를 사후 감사할 수 있다(할당 기록만으로는 품질 판정 불가). 로그 — `~/.agents/orca-workflows/logging.md` §1 `outcome` 레시피 그대로 실행(enum 값은 그쪽이 정본 — 여기 복제하지 않는다): `skill="orca-workflow-task"`, `issue=<issue-num>`, `outcome=<위 라우팅 분기에서 결정된 값>`, `retry=<재시도 횟수>`.
+라우팅 판정마다 outcome 이벤트를 할당 로그와 같은 파일에 남긴다 — `issue`/`task_id`로 assign 이벤트와 join해야 "어떤 할당이 어떤 결과를 냈는지"를 사후 감사할 수 있다(할당 기록만으로는 품질 판정 불가). 로그 — `~/.agents/orca-workflows/logging.md` §1 `outcome` 레시피 그대로 실행(enum 값은 그쪽이 정본 — 여기 복제하지 않는다): `skill="orca-workflow-task"`, `issue=<issue-num>`, `repo=<대상 repo>`, `outcome=<위 라우팅 분기에서 결정된 값>`, `retry=<재시도 횟수>`.
 
 ## 5. Escalation·보고
 
 §4가 PASS로 끝나면(merge + issue close): 보고 채널로 완료를 알린다 — spawn된 세션이면
 `worker_done`(outcome=PASS), entry 세션이면 사람에게 보고하고 종료.
 
-그 외 outcome(FAIL 한도 도달·ESCALATE·GATE_FAIL·CONTRACT_ESCALATE·CI_GATE_FAIL·CI_GATE_TIMEOUT·
-MERGE_CONFLICT·NO_DONE_TRANSITION)이면 아래 보고 내용을 조립한 뒤 mode로 분기한다:
+그 외 outcome(FAIL 한도 도달·ESCALATE·GATE_FAIL·CONTRACT_ESCALATE·CONTRACT_SCHEMA_STALE·CI_GATE_FAIL·
+CI_GATE_TIMEOUT·MERGE_CONFLICT·NO_DONE_TRANSITION)이면 아래 보고 내용을 조립한 뒤 mode로 분기한다:
 
-보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/CONTRACT_ESCALATE/CI_GATE_FAIL/CI_GATE_TIMEOUT/MERGE_CONFLICT/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **CONTRACT_ESCALATE**는 contract 협상이 라운드 한도에도 `ac_fidelity` 이견으로 끝났다는 뜻이다 — 코드 생성 전이므로 diff가 없다. `override.json`의 `unresolved_reasons`를 그대로 표시한다(무엇을 만들지에 대한 generator/evaluator의 이견 — 사람이 issue를 명확히 하거나 방향을 정한다). §1의 fail-closed 분기(override.json 자체가 없음)로 온 경우면 이견 내용 대신 그 사실 — generator가 기록 없이 라운드 한도에 도달함 — 을 표시한다. **CI_GATE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 repo의 CI required check가 merge를 막았다는 뜻이므로, 실패한 check 이름과 로그 링크(`gh pr checks <pr_num>`)를 그대로 표시한다 — 사람이 다시 조회하지 않게. **CI_GATE_TIMEOUT**은 budget 안에 check가 완주하지 못했거나 merge 거부 원인이 판별되지 않았다는 뜻이므로(코드 실패로 확정 아님), 마지막 `mergeStateStatus`와 check 상태 스냅샷을 표시한다. **MERGE_CONFLICT**는 base와의 충돌로 자동 merge가 불가능하다는 뜻이다 — 충돌 지점 정보를 표시하고, rebase/충돌 해소 여부는 사람이 결정한다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음) — 발생 지점은 §4의 merge 성공 후 close 단계이고, outcome 로깅은 그 시점에 §4가 직접 한다.
+보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/CONTRACT_ESCALATE/CONTRACT_SCHEMA_STALE/CI_GATE_FAIL/CI_GATE_TIMEOUT/MERGE_CONFLICT/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **CONTRACT_ESCALATE**는 contract 협상이 라운드 한도에도 `ac_fidelity` 이견으로 끝났다는 뜻이다 — 코드 생성 전이므로 diff가 없다. `override.json`의 `unresolved_reasons`를 그대로 표시한다(무엇을 만들지에 대한 generator/evaluator의 이견 — 사람이 issue를 명확히 하거나 방향을 정한다). §1의 fail-closed 분기(override.json 자체가 없음)로 온 경우면 이견 내용 대신 그 사실 — generator가 기록 없이 라운드 한도에 도달함 — 을 표시한다. **CONTRACT_SCHEMA_STALE**는 override 완료(override.json mtime)가 proposal-r3 요구사항 도입 시각(commit 79b7c3b, 2026-08-12T09:44:57+09:00)보다 이전이라는 뜻이다 — 위반이 아니라 구버전 세션이므로 이 두 시각을 그대로 표시한다. 사람의 선택지: (a) `verdict-r2.json`의 미해소 `reasons`를 반영해 `proposal-r3.json`을 수동으로 작성한다 — 이때 worktree에 구현이 이미 있어도 **§2를 기계적으로 재실행해 이미 끝난 구현을 덮어쓰지 않도록 주의한다**: §2 "Dispatch 실행부"는 "`orca-task-runner`를 dispatch하지 않고 코디네이터가 직접 코드를 작성·수정해 §3로 가는 경로는 존재하지 않는다"(issue #128)고 명시하므로, 기존 diff를 그대로 §3 evaluate로 넘기는 정식 경로가 이 스킬에 현재 없다 — 이 공백은 별도 issue #161로 추적하며, 사람이 상황을 보고 직접 진행 방식을 정한다. 구현이 없으면 정상적으로 §2부터 재개한다. (b) 완료된 작업을 폐기하고 재협상을 지시한다. **CI_GATE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 repo의 CI required check가 merge를 막았다는 뜻이므로, 실패한 check 이름과 로그 링크(`gh pr checks <pr_num>`)를 그대로 표시한다 — 사람이 다시 조회하지 않게. **CI_GATE_TIMEOUT**은 budget 안에 check가 완주하지 못했거나 merge 거부 원인이 판별되지 않았다는 뜻이므로(코드 실패로 확정 아님), 마지막 `mergeStateStatus`와 check 상태 스냅샷을 표시한다. **MERGE_CONFLICT**는 base와의 충돌로 자동 merge가 불가능하다는 뜻이다 — 충돌 지점 정보를 표시하고, rebase/충돌 해소 여부는 사람이 결정한다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음) — 발생 지점은 §4의 merge 성공 후 close 단계이고, outcome 로깅은 그 시점에 §4가 직접 한다.
 
 - **hitl** — 질문을 올리고 응답까지 block한다: entry 세션이면 사람에게 직접, spawn된 세션이면
   ask(decision gate)로 호출자에게(§0 보고 채널). 선택지: 계속(응답의 피드백을 반영해 §2부터 재시도 —
@@ -336,7 +500,8 @@ MERGE_CONFLICT·NO_DONE_TRANSITION)이면 아래 보고 내용을 조립한 뒤 
 - **afk** — 질문 없이 작업을 보존하고 outcome을 확정한다. 보존 = worktree·branch를 삭제하지 않고,
   CONTRACT_DIR 산출물·eval-report·로그를 그대로 두고(전부 워크스페이스 밖 영속이라 추가 복사 없음),
   §4에서 남긴 outcome 이벤트가 기록의 정본이다. spawn된 세션이면 `worker_done`으로 outcome을 전달하고
-  종료. 재개 경로는 같은 issue로의 재호출이다.
+  종료. 재개 경로는 같은 issue로의 재호출이다 — 재호출된 세션은 §0의 재개 분기가 CONTRACT_DIR
+  아티팩트 스캔으로 진행 상태를 복원해 해당 §부터 이어간다(§1부터 다시 시작하지 않는다).
 
 ## 폴백
 

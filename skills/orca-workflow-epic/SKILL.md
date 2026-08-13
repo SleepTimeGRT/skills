@@ -1,6 +1,7 @@
 ---
 name: orca-workflow-epic
-description: Queue coordinator for an epic issue — invoked in-session by `orca-workflow`; invoke explicitly, do not phrase-match. Builds the drain queue from the epic's children (issue-drain validation + issue-graph ordering), then serially spawns one `orca-workflow-task` coordinator terminal per queued task (each task coordinator owns its own Run; this skill knows nothing about contract/generation/evaluation internals — it consumes only {PASS, escalation outcome, question} signals), forwards mode [afk|hitl] unchanged, parks afk-escalated tasks and skips their dependents while continuing with independent ready tasks, relays hitl questions to the human, closes the epic only after every child is verified closed, and reports completed/parked/skipped. Self-relative.
+description: Queue coordinator for an epic issue — invoked in-session by `orca-workflow`; invoke explicitly, do not phrase-match. Builds the drain queue from the epic's children (issue-drain validation + issue-graph ordering), then serially spawns one `orca-workflow-task` coordinator terminal per queued task (each task coordinator owns its own Run; this skill knows nothing about contract/generation/evaluation internals — it consumes only {PASS, escalation outcome, question} signals), forwards mode [afk|hitl] unchanged, parks afk-escalated tasks and skips their dependents while continuing with independent ready tasks, relays hitl questions to the human, closes the epic only after every child is verified closed, and reports completed/parked/skipped. Self-relative. Do NOT use for ad-hoc multi-agent coordination or DAGs (use the `orchestration` skill) or raw terminal control (use `orca-cli`) — this skill runs only inside the orca-workflow pipeline.
+compatibility: Requires the `orca` CLI (skill set last verified against Orca app 1.4.180), the `~/.agents/orca-workflows/` symlink to this repo's orca-workflows/, and the `gh` CLI.
 ---
 
 # Orca Workflow Epic
@@ -25,13 +26,15 @@ CONTRACT_DIR 산출물이 담는다.
 - **MCP 서버 인증 전제**(세션 시작 시 1회): §3에서 스폰하는 coordinator 터미널의 MCP 서버는 스폰 전에
   인증 완료 또는 비활성이어야 한다(issue #60). 막히면 spawn-failures.md의 해당 row로.
 - **Run 생성**(실행 시작 시 1회): `-task` coordinator들의 `worker_done`/질문 수신용. `-task` 각각이
-  만드는 자기 Run과는 별개다(coordinator 세션마다 자기 Run 1개).
+  만드는 자기 Run과는 별개다(coordinator 세션마다 자기 Run 1개). 파일명의 `<project-slug>`는
+  `contract-schema.md`의 규칙(대상 repo의 디렉토리명)을 이 스킬이 직접 적용해 계산한다(logging.md §3,
+  issue #159).
 
   ```bash
   install -d -m 700 ~/.local/state/orca-workflows/logs
   run_json="$(orca orchestration run-create --objective "<root-num> task-coordinator relay" --from <자기 handle> --json)"
-  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<root-num>-orca-workflow-epic.txt"
-  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<root-num>-orca-workflow-epic.txt"
+  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<root-num>-orca-workflow-epic.txt"
+  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<root-num>-orca-workflow-epic.txt"
   ```
 
 ## 1. issue-drain
@@ -65,7 +68,7 @@ ready task마다 아래를 실행하고, worker_done 수신 후 다음 task로 �
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 source ~/.agents/orca-workflows/scripts/log_dispatch.sh
-RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<root-num>-orca-workflow-epic.txt")"
+RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<root-num>-orca-workflow-epic.txt")"
 # provider: model-selection.md 기준 — 판단·orchestration 작업. REPL 필수(one-shot은 종료된 프로세스라
 # worker-start가 넣는 task 입력을 못 받는다), agy 제외(models/agy.md).
 orca_call_with_retry "orca-workflow-epic" "task-coordinator" -- \
@@ -105,7 +108,7 @@ orca_call_with_retry "orca-workflow-epic" "task-coordinator" -- \
 DISPATCH_CREATED_VIA=worker-start   # self-recovery.md wait 루프의 dead-case 분기 입력 — SPEC_TEXT는 worker-start 복구 분기가 참조하지 않으므로 배선하지 않는다
 # 미전송 확인 — dispatch-verify.md 절차. 로그 — log_dispatch가 §1 assign + §2 meta/sent를 원자 기록:
 log_dispatch --skill "orca-workflow-epic" --role "task-coordinator" --issue "<task-issue-num>" \
-  --task-id "<task_id>" --terminal "<coord-handle>" --worktree "<worktree 경로>" \
+  --repo "<대상 repo>" --task-id "<task_id>" --terminal "<coord-handle>" --worktree "<worktree 경로>" \
   --provider "<resolved provider (claude-code/codex/agy)>" --model "<resolved model>" --effort "<resolved effort>" \
   --spec-text "$spec_text"
 # 이 터미널의 유일한 read는 dispatch-verify probe뿐 — recv는 기록하지 않는다(결과는 check --wait로).
@@ -118,8 +121,12 @@ log_dispatch --skill "orca-workflow-epic" --role "task-coordinator" --issue "<ta
 - `PASS` → dequeue, 의존이 풀린 다음 ready task로.
 - 그 외(escalation류 outcome) →
   - mode=afk: 그 task를 **parked** 목록에 기록하고, `~/.agents/orca-workflows/logging.md` §1 outcome
-    레시피대로 `skill=orca-workflow-epic`, `outcome=escalation_parked`를 남긴 뒤, 그 task에 의존하는
-    후속 task 전부를 **skipped** 목록으로 옮기고, 남은 독립 ready task로 계속한다.
+    레시피(`log_outcome`)대로 `skill=orca-workflow-epic`, `outcome=escalation_parked`를 남긴 뒤, 그
+    task에 의존하는 후속 task 전부를 **skipped** 목록으로 옮기고, 남은 독립 ready task로 계속한다.
+    skipped로 옮긴 각 task도 issue별로 로그를 남긴다 — 반드시 같은 레시피의
+    `log_outcome --outcome skipped --blocked-by <막은 선행 issue>`로만 쓴다(**"skipped 목록"은 §5
+    보고용 인메모리 목록과 이 로그 레코드 둘 다를 뜻한다** — 이 문장이 모호해 raw printf로 즉석
+    스키마를 발명한 것이 #138의 2차 원인이었다).
   - mode=hitl: 이 outcome은 `-task`의 질문에 사람이 "중단"을 답한 결과다 — 그 자리에서 사람에게
     "다음 task 계속 / 전체 중단"을 묻고 따른다. 전체 중단을 고르면 아직 시도하지 않은 나머지 큐
     항목 전부를 **skipped** 목록에 담되, 막은 선행 task 자리에는 이 중단 사실을 적는다.

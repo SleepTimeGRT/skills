@@ -1,6 +1,7 @@
 ---
 name: orca-task-runner
-description: Use when generating the implementation for one task (issue) — proposes an implementation-and-verification contract to orca-evaluate, then fans out subtasks across Claude Code/Codex/agy terminals in dependency-ordered waves. Subtask gates are mechanical only (typecheck/unit test/lint/format) — never an agent reviewer; task-level review belongs to orca-evaluate. Self-relative — works identically whichever provider runs this session.
+description: Use when generating the implementation for one task (issue) — proposes an implementation-and-verification contract to orca-evaluate, then fans out subtasks across Claude Code/Codex/agy terminals in dependency-ordered waves. Subtask gates are mechanical only (typecheck/unit test/lint/format) — never an agent reviewer; task-level review belongs to orca-evaluate. Self-relative — works identically whichever provider runs this session. Do NOT use for ad-hoc multi-agent fan-out or terminal control (use the `orchestration` or `orca-cli` skills) — this skill is invoked only by orca-workflow coordinators, never by phrase-matching.
+compatibility: Requires the `orca` CLI (skill set last verified against Orca app 1.4.180), the `~/.agents/orca-workflows/` symlink to this repo's orca-workflows/, and the `gh` CLI.
 ---
 
 # Orca Task Runner
@@ -71,17 +72,18 @@ description: Use when generating the implementation for one task (issue) — pro
   결과가 비어있지 않으면(orphan `wave_index` 존재) 이전 세션이 그 wave 도중 죽었다는 뜻이다. `orca orchestration task-list --json`/`orca terminal list --json`으로 그 wave의 subtask가 실제로 끝났는지 확인한 뒤, §5의 `wave_end` 포맷대로 `outcome:"crash_recovered"`로 채워 넣는다(retry_count는 알 수 없으면 `null`). 이 값 — "wave 크기 N에서 세션이 죽었다" — 이 바로 best-effort 로그가 놓칠 뻔한 가장 중요한 데이터 포인트이므로, 확인 없이 새 wave로 넘어가지 않는다.
 
 - **Run 생성**(세션 시작 시 1회): Run을 만들고 바인딩한 뒤 `run_id`를 사이드카 파일에 남긴다(§5는
-  별도 fenced block이라 셸 변수가 그대로 넘어가지 않는다 — 아래 `spec_sidecar`와 같은 이유):
+  별도 fenced block이라 셸 변수가 그대로 넘어가지 않는다 — 아래 `spec_sidecar`와 같은 이유). 파일명의
+  `<project-slug>`는 spec으로 받은 CONTRACT_DIR 경로의 상위 디렉토리명이다(logging.md §3, issue #159):
 
   ```bash
   install -d -m 700 ~/.local/state/orca-workflows/logs
   run_json="$(orca orchestration run-create --objective "<issue 번호> task implementation" --from <자기 handle> --json)"
-  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-task-runner.txt"
-  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-task-runner.txt"
+  printf '%s' "$(printf '%s' "$run_json" | jq -r '.result.run.id')" > "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<issue 번호>-orca-task-runner.txt"
+  chmod 600 "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<issue 번호>-orca-task-runner.txt"
   ```
 
   이후 §5의 모든 `worker-start`/`check --wait`/`--ack` 호출 앞에서
-  `RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-task-runner.txt")"`로 다시 읽는다.
+  `RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<issue 번호>-orca-task-runner.txt")"`로 다시 읽는다.
   `orca-workflow-task`가 이 세션을 스폰할 때 자기 Run을 갖고 있더라도 그건 재사용하지 않는다(Run이 섞이면
   서로 다른 세션의 `worker_done`이 잘못된 mailbox로 전달된다 — `~/.agents/orca-workflows/self-recovery.md`
   참고).
@@ -96,7 +98,7 @@ spec으로 받은 `CONTRACT_DIR`에 `proposal-r<라운드>.json`으로,
   완료 기준. 항목마다 id를 부여한다. issue 본문에 AC류 섹션이 이미 있으면 초안의 입력으로 쓰되,
   정본은 이 초안이다.
 - 구현 범위(`scope`) — 무엇을 만들 것인가, 어떤 파일을 건드릴 것인가. **사실 서술만** — "왜
-  충분한가"류 정당화는 어떤 필드에도 넣지 않는다(스키마 문서의 "라운드 2 입력 격리" 참고).
+  충분한가"류 정당화는 어떤 필드에도 넣지 않는다(스키마 문서의 "라운드 2+ 입력 격리" 참고).
 - 검증 방법(`verification_plan`) — 구체적인 파일/함수/테스트로, 항목마다 커버하는 ac id를
   `covers`로 참조하고 이 항목이 fix 이전에 어떻게 실패하는지(또는 왜 실패할 수 없는지)를 `fails_before_fix`에 적는다. 어떤 항목도 커버하지 않는 ac id가 남거나 `fails_before_fix`가 비어 있거나 없으면 반려 대상이다.
 - 의도된 destructive 오퍼레이션(`destructive_operations`) — 빈 배열이 "명시적 없음"이다. 이 선언은
@@ -106,7 +108,14 @@ spec으로 받은 `CONTRACT_DIR`에 `proposal-r<라운드>.json`으로,
   단언 중 이 변경으로 red가 될 것은 여기 별도로 열거한다(정확 일치 단언, 게이트 자체를 막는 회귀를
   특히 놓치기 쉽다).
 
-`orca-evaluate`가 이 제안(AC 초안 포함)을 **원본 issue 전문**에 대조해 검토하고 `verdict-r<라운드>.json`으로 판정을 남긴다. 반려되면 그 `reasons`를 읽고 **수정된 사실로** 다시 제안한다(`proposal-r2.json` — 서술형 반박이 아니라 필드 수준의 변경으로 응답한다). 각 라운드는 별도 dispatch로 도착한다: 제안서를 쓰고 나면 이번 턴을 끝낸다(주입된 preamble의 worker_done 지시대로), 같은 턴 안에서 반려 여부를 기다리거나 폴링하지 않는다. **최대 2 라운드.** 2라운드 안에 합의가 안 되면 이 스킬(generator)이 결정권을 가지고 그 제안대로 진행한다 — evaluator의 verdict 파일은 수정하지 않고, `override.json`(스키마 문서 참고)에 미해소 `reasons`를 복사해 남긴 뒤 진행한다. 이후 모든 단계(§2 subtask 분해 포함)가 참조하는 확정 AC는 최종 라운드 proposal의 `draft_acceptance_criteria`다.
+`orca-evaluate`가 이 제안(AC 초안 포함)을 **원본 issue 전문**에 대조해 검토하고 `verdict-r<라운드>.json`으로 판정을 남긴다. 반려되면 그 `reasons`를 읽고 **수정된 사실로** 다시 제안한다(`proposal-r2.json` — 서술형 반박이 아니라 필드 수준의 변경으로 응답한다). 각 라운드는 별도 dispatch로 도착한다: 제안서를 쓰고 나면 이번 턴을 끝낸다(주입된 preamble의 worker_done 지시대로), 같은 턴 안에서 반려 여부를 기다리거나 폴링하지 않는다. **최대 2 라운드(조건부로 3 — 아래 "라운드 2→3 조건부 연장" 문단 참고).** 2라운드 안에 합의가 안 되면 이 스킬(generator)이 결정권을 가지고 진행한다 — evaluator의 verdict 파일은 수정하지 않고, `override.json`(스키마 문서 참고)에 미해소 `reasons`를 복사해 남긴 **직후 같은 스텝에서 `proposal-r3.json`을 새로 쓴다**(`verdict-r2.json`의 reasons 중 해소한 항목을 반영한 최종 확정 계약, `round: 3`, verdict 없음 — 쓰기 순서는 override.json 먼저, 스키마 문서의 "override 후속 라운드" 절이 정본, issue #130). 동결된 이전 라운드 파일(`proposal-r1/r2`)은 절대 제자리 수정하지 않는다. 이후 모든 단계(§2 subtask 분해 포함)가 참조하는 확정 AC는 최종 라운드(가장 큰 n) proposal의 `draft_acceptance_criteria`다.
+
+**라운드 2→3 조건부 연장**(`contract-schema.md`): 라운드2 반려 사유가 `plan_coverage`뿐이면,
+코디네이터가 override 모드 대신 "라운드3 제안서 작성" 모드로 재호출할 수 있다 — 그 경우 이 스킬은
+평소 라운드 갱신과 동일하게(§1 본문의 "반려되면...다시 제안") `verdict-r2.json`을 읽고
+`proposal-r3.json`을 작성한다(override.json 작성 없음). 라운드3도 반려되면 그때 override
+모드로 재호출된다 — 그 경우 `override.json`(`final_round: 3`) + `proposal-r4.json`(최종
+확정)을 쓴다(위 override 절차와 동일하되 라운드 번호만 한 칸씩 밀림).
 
 ## 2. Subtask DAG 구성
 
@@ -182,7 +191,7 @@ acceptEdits`로 틀어진 채 `--effort` 누락).
 
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
-sidecar="$HOME/.local/state/orca-workflows/logs/run-<issue 번호>-orca-task-runner.txt"
+sidecar="$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<issue 번호>-orca-task-runner.txt"
 [ -s "$sidecar" ] || { echo "orca-task-runner §0 Run 생성이 실행되지 않음 — 사이드카 없음: $sidecar" >&2; exit 1; }
 RUN_ID="$(cat "$sidecar")"   # §0에서 남긴 사이드카
 orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
@@ -211,7 +220,7 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
 # 통과한 뒤의 실패는 별도 재시도 없이 self-recovery.md의 `dead` 판정(worker-abandon → worker-start
 # --retry-of)에 맡긴다.
 # 로그 — ~/.agents/orca-workflows/logging.md 절차대로. dispatch와 같은 블록에서 즉시 실행(누락 방지).
-#  logging.md §1 assign 이벤트: role="subtask-impl", issue=<issue-num>, task_id=<task_id>, wave_index=<n>,
+#  logging.md §1 assign 이벤트: role="subtask-impl", issue=<issue-num>, repo=<대상 repo — spec으로 받은 값>, task_id=<task_id>, wave_index=<n>,
 #    subtask_type=<전사|통합|아키텍처>, provider/model/effort=resolved 값, terminal=<impl_handle>,
 #    worktree=<worktree 경로>. wave_index는 아래 wave_start 로그와 join한다.
 #  logging.md §2 term 로그: skill="orca-task-runner", role="subtask-impl", terminal=<impl_handle>,
@@ -225,7 +234,7 @@ orca_call_with_retry "orca-task-runner" "subtask-impl" -- \
 
 ```bash
 # wave_start 로그 — ~/.agents/orca-workflows/logging.md §1 절차대로 waves-<오늘 UTC 날짜>.jsonl에 기록.
-# event="wave_start", issue=<issue-num>, wave_index=<n>, wave_size=<이 wave 터미널 수>,
+# event="wave_start", issue=<issue-num>, repo=<대상 repo — spec으로 받은 값>, wave_index=<n>, wave_size=<이 wave 터미널 수>,
 # nproc=$(sysctl -n hw.ncpu 2>/dev/null || nproc), ts_epoch=$(date -u +%s)
 ```
 
@@ -280,7 +289,7 @@ else
   elapsed_ms=null   # 매칭되는 wave_start가 없음 — §0 orphan 확인을 건너뛴 경우거나 데이터 유실
 fi
 # wave_end 로그 — ~/.agents/orca-workflows/logging.md §1 절차대로 waves-<오늘 UTC 날짜>.jsonl에 기록.
-# event="wave_end", issue=<issue-num>, wave_index=<n>, wave_size=<이 wave 터미널 수>,
+# event="wave_end", issue=<issue-num>, repo=<대상 repo — spec으로 받은 값>, wave_index=<n>, wave_size=<이 wave 터미널 수>,
 # retry_count=<이 wave에서 발생한 스폰 실패·timeout 재시도 총 횟수, 알 수 없으면 null>,
 # elapsed_ms=$elapsed_ms, outcome="completed"
 ```
@@ -312,18 +321,22 @@ bash -lc '<repo의 pgTAP 커맨드, 예: pg_prove> > <worktree 루트>/.gate-pgt
 
 실패 시 subtask 게이트(§4)와 같은 방식으로 스스로 고치고 재시도한다. 단 subtask 게이트와 달리 **재시도 한도 2회**(무한 자가치유가 아니다 — `orca-workflow-task` §4의 evaluate-FAIL 재시도 한도와 같은 숫자로 맞췄다). 2회 시도 후에도 통과 못하면 `orca-evaluate`를 호출하지 않고 `orca-workflow-task`에 **`GATE_FAIL`**을 직접 반환한다 — 기계적으로도 안 돌아가는 코드를 agent e2e·code review 같은 비싼 단계에 태울 이유가 없다.
 
-**재시도 후 통과("flake"로 재분류)를 §7 반환값 없이 조용히 넘기지 않는다.** 1회차가 실패하고 이후
-시도가 통과해 게이트를 넘겼다면, §7 반환값에 다음을 반드시 포함한다: 실패했던 attempt의 spec
-파일명·에러 첫 줄(위 attempt 로그에서 추출), 그리고 레포에 알려진 flake 목록(예:
-`.claude/memory/project_known_flaky_e2e.md`, 존재하는 repo에 한함)이 있으면 그 목록과 대조한 결과.
-이 기록이 없으면 `orca-evaluate`·`orca-workflow-task`가 "이 diff와 무관한 flake였다"는 재실행측 판단을 사후에
-검증할 방법이 없다 — 재실행-green과 "게이트 통과"를 구분하지 못하게 된다.
+**재시도 후 통과("flake"로 재분류)를 기록 없이 조용히 넘기지 않는다.** 1회차가 실패하고 이후
+시도가 통과해 게이트를 넘겼다면, `CONTRACT_DIR/gate-flake-a<attempt>.json`을 쓴다(스키마·필드 의미는
+`~/.agents/orca-workflows/contract-schema.md`의 해당 절 — 실패 attempt의 spec 파일명·에러 첫 줄을 위
+attempt 로그에서 추출하고, 레포에 알려진 flake 목록(예: `.claude/memory/project_known_flaky_e2e.md`,
+존재하는 repo에 한함)이 있으면 그 대조 결과 포함). **산문 반환값이 아니라 파일인 이유**: 이 증거의
+소비자는 `orca-evaluate` §3의 code-reviewer인데, 반환값은 "본문을 읽지 않는" `orca-workflow-task`를
+거치므로 산문에 실으면 소비자에게 도달할 경로가 없다 — evaluator가 결정론적 경로로 직접 읽는다.
+이 기록이 없으면 "이 diff와 무관한 flake였다"는 재실행측 판단을 사후에 검증할 방법이 없다 —
+재실행-green과 "게이트 통과"를 구분하지 못하게 된다. 첫 시도에 전부 통과했으면 파일을 만들지
+않는다(부재 자체가 신호다).
 
 ## 7. 완료
 
-Task 레벨 게이트(§6)를 통과하면 → task 전체 diff를 정리해 `orca-workflow-task`에 반환한다(diff 경로 + resolved providers/models + wave 구성 기록 + (§6에서 재시도 후 통과한 경우) flake 증거: 실패 attempt의 spec 파일명·에러 첫 줄 + 알려진 flake 목록 대조 결과). **`orca-evaluate`는 이 스킬이 직접 호출하지 않는다** — `orca-workflow-task`가 호출한다. (§6에서 `GATE_FAIL`을 반환한 경우엔 diff를 넘기지 않는다 — 그 자체가 반환값이다.)
+Task 레벨 게이트(§6)를 통과하면 → task 전체 diff를 정리해 `orca-workflow-task`에 반환한다(diff 경로 + resolved providers/models + wave 구성 기록). flake 증거는 반환값에 싣지 않는다 — §6이 이미 `CONTRACT_DIR/gate-flake-a<attempt>.json`으로 남겼고, `orca-evaluate`가 그 경로를 직접 읽는다. **`orca-evaluate`는 이 스킬이 직접 호출하지 않는다** — `orca-workflow-task`가 호출한다. (§6에서 `GATE_FAIL`을 반환한 경우엔 diff를 넘기지 않는다 — 그 자체가 반환값이다.)
 
-**Evaluate-FAIL 재시도로 재호출된 경우**(spec에 attempt 번호가 있음): contract 협상(§1)을 다시 하지 않는다 — 확정 AC는 그대로다. `CONTRACT_DIR`의 `eval-report-a<attempt>.json`과 `proposal-r<확정라운드>.json`을 이 순서로 직접 읽고(`orca-workflow-task`는 findings 본문도 확정 AC 본문도 중계하지 않는다 — `~/.agents/orca-workflows/contract-schema.md`의 "확정 AC의 정본"), 그 수정에 필요한 만큼만 §2~§5를 다시 태운 뒤 §6 task-레벨 게이트를 전체 재통과시키고 위 §7 반환을 반복한다. 수정 결과에 대한 서술형 해명을 evaluator에게 보내지 않는다 — 재평가의 입력은 diff의 사실 변화뿐이다(같은 문서의 "재시도 입력 격리").
+**Evaluate-FAIL 재시도로 재호출된 경우**(spec에 attempt 번호가 있음): contract 협상(§1)을 다시 하지 않는다 — 확정 AC는 그대로다. `CONTRACT_DIR`의 `eval-report-a<attempt>.json`과 **최종 라운드 proposal**(가장 큰 `proposal-r<n>.json` — 네가 직접 확인)을 이 순서로 직접 읽고(`orca-workflow-task`는 findings 본문도 확정 AC 본문도 중계하지 않는다 — `~/.agents/orca-workflows/contract-schema.md`의 "확정 AC의 정본"), 그 수정에 필요한 만큼만 §2~§5를 다시 태운 뒤 §6 task-레벨 게이트를 전체 재통과시키고 위 §7 반환을 반복한다. findings가 코드가 아니라 **계약 파일 자체의 결함**을 지적하면(override 이후에만 가능 — approved 계약이면 ESCALATE 사안), 동결 파일을 제자리 수정하지 말고 `proposal-r<n+1>.json`을 새로 쓴다(스키마 문서의 "override 후속 라운드" 절, issue #130). 수정 결과에 대한 서술형 해명을 evaluator에게 보내지 않는다 — 재평가의 입력은 diff의 사실 변화뿐이다(같은 문서의 "재시도 입력 격리").
 
 ## 폴백
 

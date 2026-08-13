@@ -75,6 +75,22 @@ Closes #<id>"
 충분하다. 단 base가 default branch가 아니면 키워드가 동작하지 않으므로,
 `close_issue`로 머지 후 상태를 한 번 더 확인하는 것이 안전망이 된다(호출자인 `orca-workflow-task` §4 참고).
 
+## `find_regressions()`
+
+**컨벤션**: 머지된 task issue가 사후 결함의 원인으로 판명되면, 결함 이슈 본문에
+`regressed-by #<task-issue>` 라인을 단다(대소문자 무관 — 사람이 결함을 접수하며 원인 커밋/PR을
+추적했을 때). 이 오퍼레이션은 그 trailer가 달린 열린 결함 이슈를 찾아 (결함 이슈 번호, 지목된
+task issue 번호) 쌍을 반환한다. 소비자는 `orca-retro` §2 렌즈 5(false-PASS 관측, issue #157)다.
+
+```bash
+gh issue list --state open --search '"regressed-by" in:body' --json number,title,body \
+  | jq -c '.[] | select(.body | test("(?i)regressed-by[[:space:]]+#[0-9]+"))
+      | {defect: .number, title: .title,
+         task: (.body | capture("(?i)regressed-by[[:space:]]+#(?<n>[0-9]+)").n)}'
+```
+
+`capture`는 첫 매치만 잡는다 — 결함 하나가 여러 task를 지목하면(드묾) 본문을 직접 읽어 쌍을 늘린다.
+
 ## acceptance criteria
 
 issue body의 AC 섹션은 전제가 아니다 — acceptance criteria는 contract 협상에서 초안·승인되며

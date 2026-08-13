@@ -27,7 +27,7 @@ SCRIPT = REPO_ROOT / "orca-workflows" / "scripts" / "log_dispatch.sh"
 SHELLS = ["bash", "zsh"]
 
 CALL = (
-    'log_dispatch --skill orca-workflow --role task-runner --issue 68 --task-id task_abc '
+    'log_dispatch --skill orca-workflow --role task-runner --repo own/repo --issue 68 --task-id task_abc '
     "--terminal term_x --worktree /tmp/wt --provider claude --model opus --effort high "
     '--spec-text "hello world"'
 )
@@ -86,6 +86,7 @@ def test_writes_assign_event_with_all_fields(tmp_path, shell):
     assert rec["skill"] == "orca-workflow"
     assert rec["role"] == "task-runner"
     assert rec["issue"] == "68"
+    assert rec["repo"] == "own/repo"
     assert rec["task_id"] == "task_abc"
     assert rec["provider"] == "claude-code"
     assert rec["model"] == "opus"
@@ -104,6 +105,7 @@ def test_writes_term_meta_and_sent(tmp_path, shell):
     assert lines[0]["type"] == "meta"
     assert lines[0]["skill"] == "orca-workflow"
     assert lines[0]["role"] == "task-runner"
+    assert lines[0]["repo"] == "own/repo"
     assert lines[0]["terminal"] == "term_x"
     assert "created_at" in lines[0]
     assert lines[1]["direction"] == "sent"
@@ -166,6 +168,53 @@ def test_missing_required_argument_returns_nonzero_and_writes_nothing(tmp_path, 
     script = CALL.replace("--effort high ", "")
     result, home = _run(tmp_path, script, shell=shell)
     assert result.returncode != 0
+    assert not _assign_lines(home)
+    assert not _term_lines(home, "term_x")
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_attempt_written_as_number(tmp_path, shell):
+    """Issue #128: the implementation-mode dispatch carries an attempt number so the assign record
+    joins mechanically with CONTRACT_DIR's eval-report-a<k>.json -- without it, "was the FAIL
+    re-dispatch really sent to orca-task-runner" is unanswerable from logs alone."""
+    result, home = _run(tmp_path, CALL + " --attempt 2", shell=shell)
+    assert result.returncode == 0, result.stderr
+    rec = _assign_lines(home)[0]
+    assert rec["attempt"] == 2  # a JSON number, not the string "2"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_attempt_omitted_when_not_passed(tmp_path, shell):
+    result, home = _run(tmp_path, CALL, shell=shell)
+    assert result.returncode == 0, result.stderr
+    assert "attempt" not in _assign_lines(home)[0]
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_attempt_empty_value_omits_the_field(tmp_path, shell):
+    """Same policy as log_outcome's optional flags (#127): empty value means omit, never ""."""
+    result, home = _run(tmp_path, CALL + ' --attempt ""', shell=shell)
+    assert result.returncode == 0, result.stderr
+    assert "attempt" not in _assign_lines(home)[0]
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_attempt_non_numeric_is_a_caller_error(tmp_path, shell):
+    script = CALL + " --attempt abc\necho rc=$?"
+    result, home = _run(tmp_path, script, shell=shell)
+    assert "rc=64" in result.stdout
+    assert not _assign_lines(home)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_missing_repo_returns_nonzero_and_writes_nothing(tmp_path, shell):
+    """Issue #158: repo is a required field -- without it, records from different repositories
+    sharing an issue number are indistinguishable, which is exactly the cross-repo log pollution
+    orca-retro's (repo, issue) composite filter exists to prevent."""
+    script = CALL.replace("--repo own/repo ", "")
+    result, home = _run(tmp_path, script, shell=shell)
+    assert result.returncode != 0
+    assert "--repo" in result.stderr
     assert not _assign_lines(home)
     assert not _term_lines(home, "term_x")
 

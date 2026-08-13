@@ -80,7 +80,9 @@ inject sub-branch는 도달하는 caller가 없는 상태로 남아 있다 — �
 Run this once per pending dispatch. `WORKER_HANDLE`/`TASK_ID`/`DISPATCH_ID`/`MY_HANDLE`/`RUN_ID`/
 `DISPATCH_CREATED_VIA`/`SPEC_TEXT` are caller-supplied for that dispatch (see the caller table above for
 `DISPATCH_CREATED_VIA`'s value per call site); `CALLING_SKILL` (`orca-task-runner`, `orca-workflow-task`,
-or `orca-workflow-epic`) and `ISSUE_NUM` are caller-supplied constants for the whole session. Set
+or `orca-workflow-epic`), `ISSUE_NUM`, and `REPO_SLUG` (the 대상 repo identifier the invocation received,
+passed down the spec chain — logging.md §1's required `repo` field, issue #158) are caller-supplied
+constants for the whole session. Set
 `prev_delivery_id=""` once, immediately before this loop's first iteration (loop-local, not
 caller-supplied) — the loop code below both reads and updates it every iteration. A wave has
 one pending-set entry per subtask, keyed by `task_id` (stable across retries for the `worker_abandon_retry`
@@ -345,16 +347,20 @@ if [ "$timed_out" = "true" ]; then
   # non-empty when action_taken=worker_abandon_retry or action_taken=task_recreate_retry
   # (logging.md's schema keeps both fields distinct so a late completion from the old dispatch
   # can't be confused with the retry).
-  # orca-task-runner adds "wave_index":<n> to the JSON object below as an extra field (same
-  # per-call-site extra-field convention logging.md §1 already uses for "assign" events) so it
-  # joins with that wave's wave_start/wave_end records; orca-workflow-task/orca-workflow-epic omit it (no wave concept).
-  install -d -m 700 ~/.local/state/orca-workflows/logs
-  target="$HOME/.local/state/orca-workflows/logs/waves-$(date -u +%F).jsonl"   # orca-task-runner
-  # or: target="$HOME/.local/state/orca-workflows/logs/assignments-$(date -u +%F).jsonl"   # orca-workflow-task / orca-workflow-epic
-  printf '{"ts":"%s","event":"self_recovery","skill":"%s","issue":"%s","task_id":"%s","dispatch_id":"%s","terminal":"%s","waited_ms":3600000,"terminal_status":"%s","action_taken":"%s","new_dispatch_id":"%s","raw_action":"%s","schema_gap_issue":"%s"}\n' \
-    "$(date -u +%FT%TZ)" "$CALLING_SKILL" "$ISSUE_NUM" "$TASK_ID" "$DISPATCH_ID" "$WORKER_HANDLE" \
-    "$terminal_status" "$action_taken" "$new_dispatch_id" "${raw_action:-}" "${schema_gap_issue:-}" >> "$target"
-  chmod 600 "$target"
+  # Written via log_self_recovery(), never a hand-copied printf (issue #127: the printf this
+  # replaced always emitted new_dispatch_id/raw_action/schema_gap_issue as "%s", so valid-action
+  # records carried forbidden empty-string conditional fields, and a hand-typed action_taken typo
+  # bypassed the UNMAPPED_BRANCH safeguard). The helper validates action_taken against the
+  # canonical enum, omits empty conditional fields entirely, and picks the target file from
+  # --skill: orca-task-runner -> waves-<date>.jsonl (pass --wave-index <n> so it joins that
+  # wave's wave_start/wave_end records); orca-workflow-task/orca-workflow-epic ->
+  # assignments-<date>.jsonl (no wave concept, no --wave-index).
+  source ~/.agents/orca-workflows/scripts/log_dispatch.sh
+  log_self_recovery --skill "$CALLING_SKILL" --issue "$ISSUE_NUM" --repo "$REPO_SLUG" --task-id "$TASK_ID" \
+    --dispatch-id "$DISPATCH_ID" --terminal "$WORKER_HANDLE" --waited-ms 3600000 \
+    --terminal-status "$terminal_status" --action-taken "$action_taken" \
+    --new-dispatch-id "$new_dispatch_id" --raw-action "${raw_action:-}" \
+    --schema-gap-issue "${schema_gap_issue:-}"
   # If a retry happened, this pending-set entry's dispatch_id moves forward now (see the opening
   # paragraph above: "update the entry's dispatch_id in place").
   # WARNING (issue #121, not fixed here): for action_taken=task_recreate_retry (the inject sub-branch

@@ -4,7 +4,8 @@ had the issue #84 fresh-REPL boot-quiesce check at both its round-1 spawn sites,
 `terminal wait --for tui-idle` and injected immediately after -- the same unprotected window that
 made `worker-start --agent codex` lose task prompts (issue #151), reachable here too since both
 sites can resolve to a REPL provider with a heavy MCP boot sequence. This guards that both sites
-now run the same cursor-scoped quiesce loop before `task-create`/`dispatch --inject`.
+now run the same cursor-scoped quiesce loop before `task-create`/attaching the worker (epic's site
+migrated to `worker-start` in issue #94 stage 1; retro's still uses `dispatch --inject`).
 """
 from __future__ import annotations
 
@@ -81,7 +82,9 @@ def test_workflow_retro_site_routes_quiesce_failure_to_retro_fail_not_exit_1():
     guard = 'if [ "$boot_quiesced" != "1" ]; then'
     guard_idx = after_boot.index(guard)
     fail_branch = after_boot[guard_idx + len(guard) : after_boot.index("else", guard_idx)]
-    assert '"outcome":"RETRO_FAIL"' in fail_branch
+    # main since moved this from a hand-rolled printf-JSON line to the log_outcome helper call.
+    assert "log_outcome" in fail_branch
+    assert "--outcome RETRO_FAIL" in fail_branch
     assert "orca orchestration task-create" not in fail_branch
     assert "orca orchestration dispatch" not in fail_branch
 

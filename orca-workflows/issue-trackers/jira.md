@@ -71,6 +71,19 @@ Duplicate/Won't Do). **repo 문서의 워크플로 표에 없는 transition은 �
   available transition 목록에 없을 때(Jira transition은 현재 status에 따라 달라지므로 발생 가능) —
   가장 비슷한 이름으로 임의 대체하지 않는다
 
+## `find_regressions()`
+
+**컨벤션**: 머지된 task issue가 사후 결함의 원인으로 판명되면, 결함 이슈 description에
+`regressed-by <ISSUE-KEY>` 라인을 단다(대소문자 무관). 열린 결함 이슈에서 그 라인을 찾아
+(결함 이슈 키, 지목된 task issue 키) 쌍을 반환한다. 소비자는 `orca-retro` §2 렌즈 5(issue #157)다.
+
+```
+searchJiraIssuesUsingJql(cloudId, jql='text ~ "regressed-by" AND statusCategory != Done')
+```
+
+반환된 각 이슈의 description에서 `regressed-by <ISSUE-KEY>` 라인을 파싱한다 — JQL `text ~`는
+토큰 매칭이라 오탐이 있을 수 있으므로 description 원문 확인이 필수다.
+
 ## `link_pr_for_close(pr_number, id)`
 
 **merge-magic 없음** — GitHub PR 머지로 Jira 티켓이 자동으로 닫히지 않는다. 이 오퍼레이션 자체는
