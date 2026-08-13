@@ -99,7 +99,12 @@ way: it creates a brand-new `task_id` and terminal handle, and only `dispatch_id
 entry afterward — the entry's own `TASK_ID`/`WORKER_HANDLE` keep pointing at the dead original. Not fixed
 here; see the warning below the loop code and issue #121). `retry_count` is likewise tracked per `task_id`
 in that same pending-set entry, not as one shell scalar shared across a wave's concurrent subtasks. A
-contract round has exactly one entry. `SPEC_TEXT` is this specific dispatch's own original spec, stored in that same pending-set
+contract round has exactly one entry. `transport_stall_count` (issue #103) follows the same per-`task_id`
+pending-set-entry rule as `retry_count`, for the same reason: `orca-task-runner` waits on several
+concurrent subtasks per wave, and a bare shell scalar would either be shared across their iterations
+(one subtask's stall count contaminating another's) or reset on every iteration and never reach its
+escalation threshold, depending on how the caller's own loop is structured around this snippet.
+`SPEC_TEXT` is this specific dispatch's own original spec, stored in that same pending-set
 entry at dispatch-creation time — **never** a single shell variable a caller reuses across several
 dispatches in one code block. A caller whose own dispatch-creation site assigns a shared `spec_text`
 variable more than once before this loop runs (e.g. `orca-workflow-task` §1 round 1's task-runner and
@@ -158,16 +163,107 @@ mechanism this document verifies end-to-end.
 # zsh does not word-split an unquoted ${var:+...} expansion the way bash/POSIX sh do (confirmed
 # live: it collapses "--ack $id" into one malformed argv word), so this is an explicit if/else, not
 # a one-line conditional flag (same portability constraint as scripts/log_dispatch.sh).
+#
+# This blocking call is wrapped in orca_call_with_retry (issue #103) -- an Orca-app-restart mid-wait
+# ("The Orca runtime closed the connection before responding.") previously produced no error
+# signature this loop recognized, so $result held garbage/empty JSON and `jq -r '.result.timedOut'`
+# silently returned empty, which this loop's un-wrapped code then treated as timed_out=false --
+# i.e. a total transport failure was silently read as "zero messages this batch", quietly dropping
+# prev_delivery_id (see tail of this loop) with no escalation and no log trail.
+#
+# ORCA_RETRY_MAX_CYCLES=1 (scoped to only this call, confirmed live not to leak to the rest of this
+# shell) deliberately disables the wrapper's own internal retry-with-full-timeout: with max_cycles=1,
+# the wrapper's `[ "$cycle" -ge "$max_cycles" ]` check fires immediately after the first failure,
+# before it would ever poll `orca status --json` or re-invoke the command -- so it does exactly one
+# thing here: detect a matching failure signature and log one consistently-shaped
+# spawn-failures.jsonl occurrence (this is what issue #103's report flagged as missing -- the two
+# real incidents it cites were hand-labeled after the fact because this call was never wrapped).
+# Retrying the identical `--timeout-ms 3600000` call at the wrapper level would silently restart the
+# full 1-hour window on every retry, invisible to this loop's own `retry_count` accounting below (that
+# counter already bounds total wait to ~3x this timeout before escalating) -- letting the wrapper also
+# retry would multiply that bound without this loop ever seeing it happen.
+#
+# Cleared unconditionally here, before either branch below runs (issue #103 review): every branch
+# that has an outcome assigns action_taken directly (resumed_wait, retried_enter,
+# worker_abandon_retry, task_recreate_retry, escalated_spawn_failure, or "" for the transport-stall
+# recover-and-reloop sub-case), but the *plain success* path (call_status=0 and timed_out=false)
+# enters neither the `call_status -ne 0` nor the `timed_out = true` branch at all, so without this
+# line it would silently carry forward whatever the *previous* iteration's outcome was --
+# and the guarded `log_self_recovery` call below is reached unconditionally every iteration
+# (outside the branch structure), so a stale non-empty value here would wrongly re-log a prior
+# iteration's already-logged event against this iteration's (unrelated) dispatch state.
+source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
+action_taken=""
 if [ -n "$prev_delivery_id" ]; then
-  result="$(orca orchestration check --run "$RUN_ID" --ack "$prev_delivery_id" --wait \
+  result="$(ORCA_RETRY_MAX_CYCLES=1 orca_call_with_retry "$CALLING_SKILL" "wait-loop" -- \
+    orca orchestration check --run "$RUN_ID" --ack "$prev_delivery_id" --wait \
     --types worker_done,escalation,question,decision_gate --timeout-ms 3600000 --json)"
+  call_status=$?
 else
-  result="$(orca orchestration check --run "$RUN_ID" --wait \
+  result="$(ORCA_RETRY_MAX_CYCLES=1 orca_call_with_retry "$CALLING_SKILL" "wait-loop" -- \
+    orca orchestration check --run "$RUN_ID" --wait \
     --types worker_done,escalation,question,decision_gate --timeout-ms 3600000 --json)"
+  call_status=$?
 fi
-timed_out="$(printf '%s' "$result" | jq -r '.result.timedOut')"
+if [ "$call_status" -ne 0 ]; then
+  # The call itself failed (wrapper already logged+gave up above) -- do not compute timed_out from
+  # $result, it is not valid JSON. Do not treat this the same as timed_out=true either: that branch's
+  # first step is a worker liveness probe (`orca terminal read`), which would fail for the same
+  # transport-down reason and could misclassify a perfectly healthy worker as "dead", wrongly firing
+  # worker-abandon during what is actually an Orca app restart, not a stuck worker (issue #103 review).
+  timed_out=""
+  transport_stall_count=$(( ${transport_stall_count:-0} + 1 ))
+else
+  timed_out="$(printf '%s' "$result" | jq -r '.result.timedOut')"
+  transport_stall_count=0   # a live call came back -- reset, this counter tracks *consecutive* stalls
+fi
 
-if [ "$timed_out" = "true" ]; then
+if [ "$call_status" -ne 0 ]; then
+  # The check --wait call itself failed (transport down), not a normal timeout -- tested directly on
+  # $call_status (still in scope from just above), not inferred from $timed_out being empty: a
+  # successful call (call_status=0) whose JSON happens to be malformed in some other way would also
+  # leave $timed_out empty, and that must not be routed here. Recover by polling Orca's own readiness (same bounded pattern the wrapper itself would
+  # have used, but owned here so this loop's own counter -- not the wrapper's -- decides when to stop
+  # and escalate) and re-issuing the identical call; do not touch retry_count (that counter is about
+  # worker liveness, orthogonal to Orca runtime availability) and do not run the worker liveness probe
+  # (see the comment above this call for why that probe is unsafe here). Same escalate-on-the-3rd-
+  # occurrence cadence as retry_count's own convention above (2 recovery attempts, then escalate
+  # instead of a 3rd), for the same reason: bound total time before handing off to a human -- the
+  # threshold below reads `-ge 3` rather than retry_count's `-ge 2` only because this counter
+  # increments *before* the check on the same iteration (so it already reads 3 on the would-be-3rd
+  # stall), whereas retry_count increments *after* a completed recovery attempt and is checked at the
+  # top of the *next* iteration (so it still reads 2, not 3, when that next attempt would be the 3rd).
+  new_dispatch_id=""
+  if [ "${transport_stall_count:-0}" -ge 3 ]; then
+    terminal_status=n/a
+    action_taken=escalated_spawn_failure
+    # Orca itself hasn't come back after repeated attempts -- spawn-failures.md's grep-first
+    # procedure, not a worker-recovery sub-branch (there is no worker-side problem here to recover).
+  else
+    n=0; ready=0
+    while [ "$n" -lt 6 ]; do
+      if [ "$(orca status --json 2>/dev/null | jq -r '.result.runtime.state // empty')" = "ready" ]; then
+        ready=1
+        break
+      fi
+      n=$((n + 1))
+      sleep 5
+    done
+    if [ "$ready" -eq 0 ]; then
+      terminal_status=n/a
+      action_taken=escalated_spawn_failure
+    else
+      # Orca is back. Explicitly clear action_taken (not just "leave it unset" -- a prior loop
+      # iteration may have set it, and this is a loop, so a stale non-empty value here would wrongly
+      # satisfy the log_self_recovery guard below with a previous iteration's outcome) so that guard
+      # correctly skips logging for this sub-case. retry_count and prev_delivery_id (tail of this
+      # loop) both stay untouched, so the next iteration re-issues check --wait with the same --ack
+      # (idempotent if it already landed server-side despite the dropped connection).
+      terminal_status=n/a
+      action_taken=""
+    fi
+  fi
+elif [ "$timed_out" = "true" ]; then
   new_dispatch_id=""
   if [ "${retry_count:-0}" -ge 2 ]; then
     terminal_status=n/a
@@ -365,12 +461,22 @@ if [ "$timed_out" = "true" ]; then
   # --skill: orca-task-runner -> waves-<date>.jsonl (pass --wave-index <n> so it joins that
   # wave's wave_start/wave_end records); orca-workflow-task/orca-workflow-epic ->
   # assignments-<date>.jsonl (no wave concept, no --wave-index).
-  source ~/.agents/orca-workflows/scripts/log_dispatch.sh
-  log_self_recovery --skill "$CALLING_SKILL" --issue "$ISSUE_NUM" --repo "$REPO_SLUG" --task-id "$TASK_ID" \
-    --dispatch-id "$DISPATCH_ID" --terminal "$WORKER_HANDLE" --waited-ms 3600000 \
-    --terminal-status "$terminal_status" --action-taken "$action_taken" \
-    --new-dispatch-id "$new_dispatch_id" --raw-action "${raw_action:-}" \
-    --schema-gap-issue "${schema_gap_issue:-}"
+  # Guarded on non-empty action_taken (issue #103's transport-stall branch above explicitly clears
+  # it for its "Orca came back within budget, just re-loop" sub-case): that sub-case isn't a
+  # self_recovery-schema event at all -- no worker-liveness decision was made, nothing for
+  # logging.md's schema to describe -- and it's already durably recorded at the spawn-failures.jsonl
+  # level by orca_call_with_retry itself (which orca-retro already consumes), so logging it again
+  # here under an invented/misapplied action_taken would be redundant at best and, if forced into an
+  # existing enum value like resumed_wait, actively misleading (that value specifically means "we
+  # probed the worker and found it alive" -- no worker probe happened here).
+  if [ -n "$action_taken" ]; then
+    source ~/.agents/orca-workflows/scripts/log_dispatch.sh
+    log_self_recovery --skill "$CALLING_SKILL" --issue "$ISSUE_NUM" --repo "$REPO_SLUG" --task-id "$TASK_ID" \
+      --dispatch-id "$DISPATCH_ID" --terminal "$WORKER_HANDLE" --waited-ms 3600000 \
+      --terminal-status "$terminal_status" --action-taken "$action_taken" \
+      --new-dispatch-id "$new_dispatch_id" --raw-action "${raw_action:-}" \
+      --schema-gap-issue "${schema_gap_issue:-}"
+  fi
   # If a retry happened, this pending-set entry's dispatch_id moves forward now (see the opening
   # paragraph above: "update the entry's dispatch_id in place").
   # WARNING (issue #121, not fixed here): for action_taken=task_recreate_retry (the inject sub-branch
@@ -402,8 +508,14 @@ fi
 # iteration itself passed as --ack (if prev_delivery_id was non-empty) has already been applied
 # server-side by this point -- ack happens before the wait portion of the same call, so this holds
 # whether or not this iteration also timed out. Overwriting prev_delivery_id here, unconditionally,
-# is therefore correct for both outcomes, not just the non-timeout path:
-if [ "$timed_out" = "true" ]; then
+# is therefore correct for both outcomes, not just the non-timeout path. The transport-failure case
+# (call_status != 0, issue #103) is neither: $result is not valid JSON there, and whether this
+# iteration's --ack was actually applied server-side before the connection dropped is unknown, so
+# prev_delivery_id is left exactly as it was (untouched) -- the next iteration retries the same
+# --ack, which is safe if it already landed (idempotent) and correct if it didn't.
+if [ "$call_status" -ne 0 ]; then
+  : # prev_delivery_id untouched -- see above
+elif [ "$timed_out" = "true" ]; then
   prev_delivery_id=""
 else
   prev_delivery_id="$(printf '%s' "$result" | jq -r '.result.deliveryId')"
@@ -459,9 +571,15 @@ which sub-branch handled it), matching `orca-task-runner` §6's task-level-gate 
 
 **1-hour (`--timeout-ms 3600000`) is a starting default**, spot-checked live only up to ~180 seconds
 during the design investigation and once for ~10 minutes during implementation — not proven safe for a
-full hour of connection/keepalive durability. If a future session observes `connectionLost` or a
-dropped `check --wait` before the configured timeout, that is the first thing to revisit; the loop
-structure itself does not need to change.
+full hour of connection/keepalive durability. A dropped `check --wait` before the configured timeout
+(observed live, issue #103 — "The Orca runtime closed the connection before responding." mid app
+auto-update) is now handled by this loop's own transport-stall branch above (`orca_call_with_retry`
+wrapping the call + a dedicated `transport_stall_count`, distinct from worker-liveness `retry_count`);
+the loop structure itself did not need to change beyond that. What remains open: a *silent* early
+return with no error signature at all — `check --wait --timeout-ms 3600000` observed returning
+`timedOut:true` after only ~10 minutes, with nothing for the transport-stall branch to detect since the
+call itself succeeded — is a distinct, still-unfixed gap (issue #103 comment, 2026-08-11 recurrence,
+studio-hevv/selah-android#20).
 
 ## `worker-release` (re-verified 2026-08-10, Orca 1.4.178 — no longer a rejected candidate)
 
