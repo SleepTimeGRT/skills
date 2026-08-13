@@ -1,19 +1,17 @@
 ---
 name: orca-retro
 description: >-
-  Use right after an orca-workflow invocation ends, regardless of how it ended — analyzes that
-  invocation's logs under ~/.local/state/orca-workflows/logs/ (assignments/outcome events,
-  spawn-failures, term transcripts) through six defect lenses (documented-schema violations,
-  repeated FAILs attributable to skill prose, preventable escalations or human interventions, new
-  spawn-failure signatures, false-PASS regressions: tracker issues with a regressed-by trailer
-  pointing back at merged PASS verdicts — the one lens crossing invocation boundaries, and
-  contract-verdict mismatches: approved or plan_coverage-only contract verdicts contradicted by
-  downstream eval-report FAILs or human escalation) and files at
-  most 3 evidence-backed skill-defect issues on the sleeptimegrt-skills repo, deduplicating against
-  open issues via recurrence comments. Never edits skills directly — output is issues only; fixes
-  flow through the normal /orca-workflow pipeline later. Best-effort by contract: no retro failure
-  may block the invocation. Self-relative. Do NOT use for general retrospectives or ad-hoc log
-  analysis — runs only as the closing step of an orca-workflow invocation.
+  Use after any orca-workflow invocation ends, regardless of outcome — mines that invocation's
+  logs (~/.local/state/orca-workflows/logs/: assignments/outcome events, spawn-failures, term
+  transcripts) via six defect lenses (documented-schema violations, prose-attributable repeated
+  FAILs, preventable escalations/interventions, new spawn-failure signatures, false-PASS
+  regressions (regressed-by trailer on a merged PASS verdict — crosses invocation boundaries),
+  contract-verdict mismatches (approved/plan_coverage verdicts contradicted by later eval-report
+  FAIL or escalation)) and files up to 3 evidence-backed skill-defect issues on this repo, deduped
+  against open issues via recurrence comments. Never edits skills directly — output is issues
+  only; fixes flow through /orca-workflow later. Best-effort: no retro failure blocks the
+  invocation. Self-relative. Do NOT use for general retrospectives or ad-hoc log analysis — runs
+  only as orca-workflow's closing step.
 compatibility: Requires the `orca` CLI (skill set last verified against Orca app 1.4.180), the `~/.agents/orca-workflows/` symlink to this repo's orca-workflows/, and the `gh` CLI. Reads logs under ~/.local/state/orca-workflows/logs/.
 ---
 
