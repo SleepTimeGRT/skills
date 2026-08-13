@@ -10,6 +10,10 @@ structural in this workflow's default layout), and the loop read the exit code a
 polling the already-merged PR (mergeStateStatus=UNKNOWN matches no branch) until the 1800s budget.
 The fix moves the judgment from command exit code to actual PR state, so both that shape and the
 "already merged before the loop even starts" resume case must exit merged=true without polling.
+
+Also covers issue #115's `--subject`/`--body` fix: the loop must pin the squash commit message to
+the PR's own title/body rather than letting `gh pr merge --squash` fall back to inheriting a single
+commit's message.
 """
 from __future__ import annotations
 
@@ -31,7 +35,11 @@ printf '%s\\n' "$*" >> "$GH_CALL_LOG"
 case "$*" in
   "pr view 7 --json state -q .state")
     cat "$STATE_FILE" ;;
-  "pr merge 7 --squash --delete-branch")
+  "pr view 7 --json title -q .title")
+    printf 'stub-title\\n' ;;
+  "pr view 7 --json body -q .body")
+    printf 'stub-body\\n' ;;
+  "pr merge 7 --squash --delete-branch --subject stub-title --body stub-body")
     case "$GH_MERGE_BEHAVIOR" in
       merge_ok_cleanup_fails)
         # issue #135's exact shape: the remote merge lands, then local cleanup dies non-zero.
@@ -60,7 +68,7 @@ esac
 
 def _loop_block() -> str:
     text = SKILL.read_text()
-    start = text.index("merge_started_file=")
+    start = text.index('pr_title="$(gh pr view')
     end = text.index('rm -f "$merge_started_file"', start)
     end = text.index("\n", end)
     return text[start:end]
@@ -122,6 +130,18 @@ def test_remote_merge_with_failed_local_cleanup_is_still_a_merge(tmp_path, shell
     result, calls = _run(tmp_path, shell, state="OPEN", behavior="merge_ok_cleanup_fails")
     assert "RESULT merged=true outcome=" in result.stdout, result.stdout + result.stderr
     assert calls.count("pr merge 7 --squash --delete-branch") == 1
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_merge_command_pins_subject_and_body_to_the_pr(tmp_path, shell):
+    """Issue #115: gh pr merge --squash must not fall back to inheriting a single commit's message
+    (which can carry a stray `Closes #N` trailer and defeat a deliberate deferred-close). The loop
+    must fetch the PR's own title/body and pass them explicitly via --subject/--body."""
+    result, calls = _run(tmp_path, shell, state="OPEN", behavior="merge_ok_cleanup_fails")
+    assert "RESULT merged=true outcome=" in result.stdout, result.stdout + result.stderr
+    assert "pr view 7 --json title -q .title" in calls
+    assert "pr view 7 --json body -q .body" in calls
+    assert "pr merge 7 --squash --delete-branch --subject stub-title --body stub-body" in calls
 
 
 @pytest.mark.parametrize("shell", SHELLS)
