@@ -203,7 +203,10 @@ if [ "$timed_out" = "true" ]; then
           orca orchestration worker-abandon --dispatch "$DISPATCH_ID" --json
           # Re-launch per the calling skill's own explicit launch template (fresh terminal), or reuse
           # the existing handle if it is a live process just not answering this dispatch.
-          new_result="$(orca orchestration worker-start --task "$TASK_ID" --worktree active \
+          # --worktree active는 여기서 쓰지 않는다(issue #118 부록) -- --terminal과 함께 쓰면
+          # selector_not_found로 항상 실패한다(orca-task-runner SKILL.md §0). <impl_handle>이 이미
+          # 그 worktree에 고정된 터미널이므로 --worktree 자체가 불필요하다.
+          new_result="$(orca orchestration worker-start --task "$TASK_ID" \
             --terminal "$NEW_OR_SAME_HANDLE" --retry-of "$DISPATCH_ID" --run "$RUN_ID" \
             --from "$MY_HANDLE" --json)"
           new_dispatch_id="$(printf '%s' "$new_result" | jq -r '.result.dispatchId')"
