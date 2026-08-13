@@ -16,6 +16,22 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
   `--agent`·`--terminal` 두 조합 모두에서 `selector_not_found`로 항상 실패한다(라이브 확인, 2026-08-11).
   `--agent` 호출은 `--worktree current`를 쓰고, `--terminal` 호출은 터미널 핸들이 이미 worktree를
   고정하므로 `--worktree`를 아예 생략한다 — §5 템플릿 참조.
+- **격리 가드(issue #136)** — 위 전제는 §2/§3/§5의 fan-out 경로(subtask-impl 워커는 `--worktree active`로
+  스폰되므로 항상 격리된다)에는 이미 지켜진다. 사각지대는 **이 세션 자신이 fan-out 없이 직접 커밋하는
+  경우**(예: 단일 trivial subtask라 wave를 생략하고 스스로 구현)다 — dispatch가 이 세션을 메인
+  체크아웃 위에 얹었는데 fan-out도 안 쓰면, 그 무엇도 격리를 보장하지 않는다(실측: studio-hevv/
+  selah-android issue #22, task-runner가 메인 worktree에서 직접 `git checkout -b` + commit해 main의
+  HEAD가 feature 브랜치로 전환된 채 커밋까지 진행됨). 이 세션이 첫 `git commit`을 실행하기 **직전에**
+  매번 아래를 확인한다 — 메인 체크아웃은 `.git`이 디렉터리, `git worktree add`로 만든 격리 worktree는
+  `.git`이 gitdir 포인터 파일이라는 구조적 차이를 쓴다(경로 하드코딩·비교 불필요):
+  ```bash
+  if [ -d ".git" ]; then
+    # 메인 체크아웃 위에서 실행 중 — 격리 없이 커밋하지 않는다. 브랜치를 만들며 즉시 격리 worktree로
+    # 옮긴다(이후 이 세션의 나머지 작업은 그 worktree 안에서 계속한다).
+    git worktree add "<격리 worktree 절대경로 — 예: ~/worktrees/<repo>/<branch>>" -b "<브랜치명>" origin/main
+    cd "<격리 worktree 절대경로>"
+  fi
+  ```
 - claude 워커는 `worker-start --agent`로 스폰한다 — approval/sandbox는 Orca 계정 레벨 Agent 설정
   프리셋이 맡는다. `--permission-mode` 같은 per-dispatch 플래그는 없고, 필요하지도 않다
   (`orca-workflows/self-recovery.md`의 `worker-release` 절, 2026-08-08/2026-08-11 라이브 검증). 이
