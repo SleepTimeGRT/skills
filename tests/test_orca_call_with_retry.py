@@ -319,6 +319,48 @@ def test_broadened_signature_catches_stale_bootstrap_without_new_literal(tmp_pat
     assert "bootstrap" in logs[0]["failure_signature"].lower()
 
 
+def test_broadened_signature_catches_closed_the_connection_message(tmp_path):
+    """issue #103: 실측된 리터럴 그대로("The Orca runtime closed the connection before
+    responding.") — 기존 6개 키워드 어느 것과도 매칭 안 됐던 문구가 잡히는지."""
+    stubs = {
+        "orca": """
+            #!/usr/bin/env bash
+            [ "$1" = "status" ] && echo '{"result":{"runtime":{"state":"ready"}}}' && exit 0
+            exit 1
+        """,
+        "real-cmd": """
+            #!/usr/bin/env bash
+            count=0
+            [ -f "$COUNTER_FILE" ] && count="$(cat "$COUNTER_FILE")"
+            count=$((count + 1))
+            echo "$count" > "$COUNTER_FILE"
+            if [ "$count" -eq 1 ]; then
+              echo "The Orca runtime closed the connection before responding. Restart Orca and try again." >&2
+              exit 1
+            fi
+            echo recovered-ok
+            exit 0
+        """,
+    }
+    counter_file = tmp_path / "counter"
+    result, home = _run(
+        tmp_path,
+        stubs,
+        'orca_call_with_retry "test-skill" "test-role" -- real-cmd',
+        extra_env={
+            "COUNTER_FILE": str(counter_file),
+            "ORCA_RETRY_POLL_INTERVAL": "0",
+            "ORCA_RETRY_POLL_MAX": "1",
+        },
+    )
+    assert result.returncode == 0
+    assert "recovered-ok" in result.stdout
+    logs = _log_lines(home)
+    assert len(logs) == 1
+    assert logs[0]["outcome"] == "retrying"
+    assert "closed the connection" in logs[0]["failure_signature"].lower()
+
+
 def test_broadened_signature_catches_generic_reconnect_message(tmp_path):
     stubs = {
         "orca": """
