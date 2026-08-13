@@ -169,6 +169,54 @@ def test_exhausts_after_max_cycles_when_signature_persists(tmp_path):
     assert [line["attempts"] for line in logs] == [1, 2]
 
 
+def test_max_cycles_1_logs_once_and_never_retries(tmp_path):
+    # Pins the behavior issue #103's self-recovery.md fix depends on: with
+    # ORCA_RETRY_MAX_CYCLES=1, the wrapper's own `[ "$cycle" -ge "$max_cycles" ]` check fires
+    # immediately after the first failure -- before it would ever poll `orca status --json` or
+    # re-invoke the wrapped command. This lets a caller use the wrapper purely for uniform
+    # signature-detection + spawn-failures.jsonl logging on a call it does NOT want silently
+    # retried (e.g. a long blocking `check --wait --timeout-ms 3600000` call, where a wrapper-level
+    # retry would restart the full timeout window from scratch). The counter file below proves the
+    # wrapped command was invoked exactly once -- zero retries -- not just that the final outcome
+    # was "exhausted".
+    stubs = {
+        "orca": """
+            #!/usr/bin/env bash
+            [ "$1" = "status" ] && echo '{"result":{"runtime":{"state":"ready"}}}' && exit 0
+            exit 1
+        """,
+        "real-cmd": """
+            #!/usr/bin/env bash
+            count=0
+            [ -f "$COUNTER_FILE" ] && count="$(cat "$COUNTER_FILE")"
+            count=$((count + 1))
+            echo "$count" > "$COUNTER_FILE"
+            echo "The Orca runtime closed the connection before responding." >&2
+            exit 1
+        """,
+    }
+    counter_file = tmp_path / "counter"
+    result, home = _run(
+        tmp_path,
+        stubs,
+        'orca_call_with_retry "test-skill" "wait-loop" -- real-cmd',
+        extra_env={
+            "COUNTER_FILE": str(counter_file),
+            "ORCA_RETRY_POLL_INTERVAL": "0",
+            "ORCA_RETRY_POLL_MAX": "1",
+            "ORCA_RETRY_MAX_CYCLES": "1",
+        },
+    )
+    assert result.returncode == 1
+    assert counter_file.read_text().strip() == "1", "wrapped command must be invoked exactly once"
+    logs = _log_lines(home)
+    assert len(logs) == 1
+    assert logs[0]["outcome"] == "exhausted"
+    assert logs[0]["attempts"] == 1
+    assert logs[0]["skill"] == "test-skill"
+    assert logs[0]["role"] == "wait-loop"
+
+
 def test_returns_failure_when_orca_never_becomes_ready(tmp_path):
     stubs = {
         "orca": """
