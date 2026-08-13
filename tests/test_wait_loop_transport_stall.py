@@ -13,9 +13,10 @@ worker as "dead" (see self-recovery.md's inline comments at the branch itself fo
 rationale).
 
 These tests run the real, unmodified bash extracted from self-recovery.md against stubbed
-`orca`/`sleep`, following this repo's established convention (see
-tests/test_dispatch_created_via_wiring.py's `_run_inject_subbranch`) of exercising the document's
-own code verbatim rather than a reimplementation of it.
+`orca`/`sleep`, following this repo's established convention of exercising the document's own code
+verbatim rather than a reimplementation of it (precedent: the now-removed
+tests/test_dispatch_created_via_wiring.py inject-subbranch tests, deleted alongside their dead code
+by issue #94 stage 3).
 """
 from __future__ import annotations
 
