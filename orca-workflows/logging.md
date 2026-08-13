@@ -229,7 +229,11 @@ find "$HOME/.local/state/orca-workflows/logs" -name 'waves-*.jsonl' 2>/dev/null 
 (`cat waves-*.jsonl` breaks under zsh when no dated file exists yet — the glob's `nomatch` fires during
 expansion, before `2>/dev/null` can suppress it. `find | sort | xargs cat` is portable across bash/zsh and
 the `sort` keeps dated files in chronological order, which matters wherever the caller does `tail -1` to
-find the most recent matching record.)
+find the most recent matching record. Caveat found 2026-08-14 (issue #188): plain `xargs` word-splits on
+whitespace, so this exact form still breaks if any path component under `$HOME` contains a space — use the
+NUL-delimited form (`find ... -print0 | sort -z | xargs -0 cat`) wherever that's possible. This page and the
+call sites that copied it (`skills/orca-retro/SKILL.md`, `skills/orca-workflow-task/SKILL.md`'s Generate
+audit gate) still use the plain form as of this note — #188 tracks migrating them.)
 
 **`assignments*.jsonl` has one extra wrinkle `waves*.jsonl` doesn't**: a pre-date-partition
 `assignments.jsonl` (no date suffix) exists from before this scheme, holds only records older than every

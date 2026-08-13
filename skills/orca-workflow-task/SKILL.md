@@ -79,13 +79,40 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
 
   ```bash
   source ~/.agents/orca-workflows/scripts/contract_resume.sh
-  contract_resume_state "<CONTRACT_DIR>"
+  resume_state="$(contract_resume_state "<CONTRACT_DIR>")"
+  resume="$(printf '%s' "$resume_state" | jq -r '.resume')"
+  attempt="$(printf '%s' "$resume_state" | jq -r '.attempt')"
+  retry="$(printf '%s' "$resume_state" | jq -r '.retry')"
+  if [ "$resume" = "section-2" ] && [ "$attempt" = "1" ] && [ "$retry" = "0" ]; then
+    # issue #161: maxa=0 alone can't tell "구현 완료, evaluate만 안 됨" apart from "구현 자체
+    # 없음" -- only fires on section-2's fresh-attempt shape (attempt=1, retry=0); a FAIL-retry
+    # section-2 (attempt>=2, retry>=1, contract_resume.sh's other section-2 producer) never
+    # matches this guard, so a real retry is never clobbered into re-evaluating the already-FAILed
+    # attempt. Both signals below must hold, and any lookup failure fails closed to the original
+    # section-2 (today's behavior, unchanged):
+    has_assign="$(find "$HOME/.local/state/orca-workflows/logs" -name 'assignments-*.jsonl' -print0 2>/dev/null | sort -z | xargs -0 cat 2>/dev/null \
+      | jq -e -s --arg issue "<issue-num>" --arg repo "<대상 repo>" \
+          '[.[] | select(.event=="assign" and .skill=="orca-workflow-task" and .role=="task-runner"
+                         and .issue==$issue and .repo==$repo)] | length > 0' 2>/dev/null)"
+    default_branch="$(gh repo view "<대상 repo>" --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null)"
+    base_sha=""
+    [ -n "$default_branch" ] && base_sha="$(git merge-base HEAD "origin/$default_branch" 2>/dev/null)"
+    commit_count=0
+    [ -n "$base_sha" ] && commit_count="$(git rev-list --count "$base_sha..HEAD" 2>/dev/null)"
+    if [ "$has_assign" = "true" ] && [ "${commit_count:-0}" -gt 0 ]; then
+      resume="section-3"
+    fi
+  fi
   ```
 
-  출력 JSON의 `resume` 필드가 가리키는 §로 점프한다 — `section-1-proposal`/`-verdict`/`-override`는
+  `resume`이 가리키는 §로 점프한다 — `section-1-proposal`/`-verdict`/`-override`는
   §1의 해당 스텝부터(`round` 필드의 라운드), `section-2`는 §2부터(`attempt`/`retry` 필드를 §2 spec과
-  §4 재시도 카운터로 이어받는다), `section-4`는 §4의 PASS 라우팅부터(PR 확보와
-  merge 루프는 재실행-안전 — #72), `section-5`는 `outcome` 필드 값으로 §5로. 규칙:
+  §4 재시도 카운터로 이어받는다), `section-3`(issue #161, `contract_resume_state` 자신은 절대 emit
+  하지 않는 이 세션 로컬 오버라이드 값)은 §3 Evaluate부터(`attempt` 필드를 그대로 §3의 Generate 감사
+  게이트·`eval-report-a<attempt>.json`에 이어받는다 — 그 게이트가 같은 조건을 attempt 번호까지
+  맞춰 다시 확인하므로, 위 오버라이드가 잘못 판단해도 §2로 돌아갈 뿐이다), `section-4`는 §4의 PASS
+  라우팅부터(PR 확보와 merge 루프는 재실행-안전 — #72), `section-5`는 `outcome` 필드 값으로 §5로.
+  규칙:
   - `recent_write`가 true면(기본 10분 내 아티팩트 수정) 이전 세션의 워커가 아직 쓰고 있을 수 있다 —
     점프하지 않는다. hitl이면 사람에게 확인하고, afk면 10분 대기 후 1회 재스캔, 그래도 true면 §5
     afk 보존 절차로 가서 outcome=ESCALATE로 보고한다(근거: "재개 모호 — 이전 세션 워커 생존 의심").
@@ -504,7 +531,9 @@ log_dispatch --skill "orca-workflow-task" --role "task-runner" --issue "<issue-n
 `role="task-runner"` assign 레코드가 실제로 남아 있는지 확인한다 — 없으면 §2가 정식 dispatch 없이
 통과된 것이므로(코디네이터 직접 편집 포함, 어느 쪽이든 §2 위반) evaluate로 넘어가지 않고 §2로
 돌아가 레시피대로 실행한다. 직접 만든 변경이 이미 worktree에 있어도 그것을 평가에 넘기는 경로는
-없다:
+없다 — 유일한 예외는 §0의 crash-resume 진입점(issue #161)으로, 거기서도 같은 조건(이번 attempt의
+role=task-runner assign 존재)을 이미 확인하고 들어오므로 이 게이트를 우회하는 게 아니라 그대로
+통과한다:
 
 ```bash
 find "$HOME/.local/state/orca-workflows/logs" -name 'assignments-*.jsonl' 2>/dev/null | sort | xargs cat 2>/dev/null \
