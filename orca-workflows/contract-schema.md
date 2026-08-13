@@ -32,9 +32,9 @@ install -d -m 700 "$CONTRACT_DIR"
 
 | file | writer | when |
 |---|---|---|
-| `proposal-r<n>.json` | orca-task-runner (generator) | 라운드 n 제안 (r3+는 override 후속 라운드 — 아래 절) |
+| `proposal-r<n>.json` | orca-task-runner (generator) | 라운드 n 제안 (r3는 라운드 2→3 조건부 연장 시 정식 협상 라운드, 그 외에는 r3+가 override 후속 라운드 — 아래 두 절) |
 | `verdict-r<n>.json` | orca-evaluate (evaluator) | 라운드 n 판정 |
-| `override.json` | orca-task-runner | 2라운드에도 rejected일 때 결정권 행사 기록 |
+| `override.json` | orca-task-runner | 2라운드에도 rejected일 때 결정권 행사 기록 (라운드 2→3 조건부 연장이 발동했으면 3라운드 — 아래 두 절) |
 | `gate-flake-a<k>.json` | orca-task-runner (generator) | attempt k의 task 게이트가 재시도 후 통과(flake 재분류)했을 때만 |
 | `eval-report-a<k>.json` | orca-evaluate (evaluator) | 구현 attempt k의 평가 판정 기록 |
 
@@ -57,11 +57,22 @@ install -d -m 700 "$CONTRACT_DIR"
 
 - **모든 필드 필수.** `destructive_operations`/`existing_tests_affected`의 빈 배열 `[]`은
   "명시적으로 없음"이다 — 필드가 아예 없으면 스키마 위반이므로 "언급 안 함" 상태는 존재할 수
-  없다(종전 prose 제안서의 "공란 vs 없음" 구분을 스키마 필수성이 대체한다). `verification_plan[].fails_before_fix`도 같은 규칙이다 — 비어 있거나 필드 자체가 없으면 스키마 위반이다. 변별 불가일 때도 침묵이 아니라 그 사실을 명시적으로 적는다 — 예: 이 항목이 fix 전후 구분이 불가능한 이유를 그대로 서술한다.
+  없다(종전 prose 제안서의 "공란 vs 없음" 구분을 스키마 필수성이 대체한다). `verification_plan[].fails_before_fix`도 같은 규칙이다 — 비어 있거나 필드 자체가 없으면 스키마 위반이다. 변별 불가일 때도 침묵이 아니라 그 사실을 명시적으로 적는다 — 예: 이 항목이 fix 전후 구분이 불가능한 이유를 그대로 서술한다. **무동작(no-op) 통과 금지**: `fails_before_fix`를 채울 때, 이 검증 방법이 stub/no-op(빈 구현, 아무 것도 하지 않는 구현)에서도 통과하는지 스스로 점검한다. 통과한다면 그 검증 방법 자체가 스키마 위반이다 — 구조적 존재 확인(예: 특정 API 호출 문자열이 소스에 있는지)만으로는 무동작 구현을 배제하지 못하는 경우가 이에 해당한다. 여러 경로를 커버해도 전부 구조적 확인이면 여전히 무동작을 통과시킨다는 점에 유의한다(happy-path만 커버 금지 규칙과는 별개 축).
 - **설득 서술 필드는 의도적으로 없다.** "왜 이 제안이 충분한가"류 정당화는 어떤 필드에도 넣지
-  않는다(`scope.summary` 포함 — 사실 서술만). `verification_plan[].fails_before_fix`도 같은 경계를 따른다 — pre-fix 동작에 대한 사실 서술이지 "왜 이 항목이 검증으로 충분한가" 정당화가 아니다. 근거는 아래 "라운드 2 입력 격리".
+  않는다(`scope.summary` 포함 — 사실 서술만). `verification_plan[].fails_before_fix`도 같은 경계를 따른다 — pre-fix 동작에 대한 사실 서술이지 "왜 이 항목이 검증으로 충분한가" 정당화가 아니다. 근거는 아래 "라운드 2+ 입력 격리".
 - `verification_plan[].covers`는 `draft_acceptance_criteria`의 id만 참조한다. 어떤 plan 항목도
   커버하지 않는 ac id가 남으면 evaluator가 기계적으로 잡을 수 있다. `fails_before_fix`가 비어 있거나 없거나 "fix 이후에도 동일하다"고 스스로 적은 항목도 evaluator가 기계적으로 반려할 수 있다.
+- `draft_acceptance_criteria`의 각 항목은 (a) **binary**(판정 가능 — "좋다/나쁘다" 같은 주관적
+  기준 금지) (b) **independent**(정확히 한 가지만 검증 — 여러 조건을 접속사로 묶지 않음) (c) 배열에
+  쓰는 순서가 곧 **중요도 순서**(ordered by importance)여야 한다. 새 필드를 추가하지 않는다 — 배열
+  순서 자체가 우선순위다. evaluator는 이 3원칙 위반을 `plan_coverage` 반려 사유로 삼을 수 있다 —
+  `ac_fidelity`는 원본 issue 요구와의 불일치(무엇을 만들지의 이견, human escalation 대상)로 좁게
+  유지하고, AC 초안 자체의 구조적 결함(3원칙 위반)은 generator가 사람 개입 없이 고칠 수 있는
+  문제이므로 `plan_coverage`로 분류한다(verification_plan 커버리지 누락·`fails_before_fix` 결함을
+  새 axis 대신 같은 target에 묶는 기존 관행과 동일한 이유, Task 1 리뷰에서 확인된 라운드-캡-확장과의
+  충돌 — `ac_fidelity`였다면 3원칙 위반이 라운드3 연장 없이 즉시 `CONTRACT_ESCALATE`됐을 것). (Spec-
+  Driven Development 관행 — round1 반려율 88%의 근본 원인이 AC 자체 품질이라는 실측 근거,
+  `docs/superpowers/specs/2026-08-12-contract-sprint-improvements-design.md`).
 
 ## verdict-r&lt;n&gt;.json
 
@@ -87,6 +98,36 @@ install -d -m 700 "$CONTRACT_DIR"
   소비자(generator, coordinator의 기계적 검사)는 이 불변식으로 파일 정합성을 확인한다.
 - `"rejected"`면 `reasons`는 비어 있을 수 없다.
 
+## 라운드 2→3 조건부 연장 (issue: contract-sprint-improvements, 2026-08-12)
+
+`verdict-r2.json`이 `rejected`이고 `reasons[].target`이 전부 `"plan_coverage"`(즉
+`"ac_fidelity"`가 하나도 없음)면, 아래 "override" 절의 라운드 한도(2)에 아직 도달한 것으로 보지
+않는다 — override 대신 `proposal-r3.json`(정식 협상 라운드, verdict 있음)을 한 번 더 허용한다.
+
+- `verdict-r3.json` → `approved`: 확정 AC = `proposal-r3`("확정 AC의 정본" 절이 이미 라운드
+  번호에 열려 있어 별도 처리 불필요), 정상 종료.
+- `verdict-r3.json` → `rejected`이고 `reasons[].target`에 `"ac_fidelity"`가 하나라도 있음: 아래
+  "override" 절의 `ac_fidelity` 규칙을 그대로 적용 — `CONTRACT_ESCALATE`(단 `round=3`으로 기록).
+- `verdict-r3.json` → `rejected`이고 여전히 `plan_coverage`-only: 아래 "override" 절차를 그대로
+  한 라운드 밀어서 수행 — `override.json`(`final_round: 3`) 작성 직후 같은 스텝에서
+  `proposal-r4.json`(신규 최종 확정 계약, verdict 없음)을 작성한다.
+
+`ac_fidelity`가 라운드2에 이미 있으면 이 연장은 발동하지 않는다 — 아래 "override" 절의 라운드1→2
+규칙이 그대로 적용된다(이 연장은 라운드1→2 게이트를 변경하지 않는다).
+
+**`ROUND3_NEGOTIATION_SINCE`**(이 절 도입 시각 — 아래 "override" 절의 `R3_REQUIRED_SINCE`와 동일
+패턴, `orca-workflows/scripts/contract_resume.sh`가 정의하고 크래시-재개(§0) 경로에서만 사용한다.
+`orca-workflow-task` SKILL.md §1은 이 상수를 쓰지 않는다 — 라이브 코디네이터는 이 확장이 배포된
+이후로는 `plan_coverage`-only 라운드2 반려를 override 대신 라운드3 협상으로 돌리므로, 이 상수가
+구분하는 모호 상태(legacy `final_round: 2` override) 자체를 스스로 만들지 않는다; 그 상태는
+디스크에 남은 과거(이 확장 도입 이전) 세션의 산출물로만 존재할 수 있고, 그건 오직 크래시-재개가
+다루는 영역이다): 이
+연장 도입 이전에는 `verdict-r2.json`이 `plan_coverage`-only로 반려되면 항상 즉시 override했다
+(`final_round: 2`). 도입 이후에는 이 절의 규칙대로 라운드3을 먼저 시도한다. `override.json`의
+`final_round: 2` + `plan_coverage`-only 조합을 만났을 때, 그 `override.json`의 mtime이 이 상수
+이전이면 legacy(정상 종료)로, 이후면 이례 상태(코디네이터/생성기 불일치)로 구분한다 — 정확한
+비교 메커니즘은 위 `R3_REQUIRED_SINCE`와 동일(`touch -t` + `find -newer`, TZ=Asia/Seoul 고정).
+
 ## override.json
 
 ```json
@@ -100,7 +141,9 @@ install -d -m 700 "$CONTRACT_DIR"
 }
 ```
 
-- 2라운드에도 rejected일 때만 존재한다. evaluator의 verdict 파일은 수정하지 않는다 — 판정은
+- 2라운드에도 rejected일 때만 존재한다(위 "라운드 2→3 조건부 연장" 절의 조건에 해당하면 3라운드에
+  도달할 때까지 미룬다 — 그 경우 `final_round: 3`). evaluator의 verdict 파일은 수정하지 않는다 —
+  판정은
   rejected로 남고, 진행 결정만 여기 기록된다. `unresolved_reasons`는 `verdict-r2.json`의
   `reasons` 중 generator가 해소하지 못한 항목을 그대로 복사한다.
 - **override의 라우팅은 무조건 진행이 아니다** — 코디네이터(`orca-workflow-task` §1)가 기계적으로
@@ -119,14 +162,22 @@ install -d -m 700 "$CONTRACT_DIR"
 ## override 후속 라운드 (proposal-r3+, issue #130)
 
 override는 협상의 종착점이지 계약의 종착점이 아니다 — override 발동 시 generator는
-`override.json`을 쓴 **직후, 같은 스텝에서** `proposal-r3.json`을 새로 쓴다(쓰기 순서 고정:
+`override.json`을 쓴 **직후, 같은 스텝에서** 확정 계약(`final_round: 2`면 `proposal-r3.json`,
+"라운드 2→3 조건부 연장"이 발동해 `final_round: 3`이면 `proposal-r4.json`)을 새로 쓴다(쓰기 순서
+고정:
 override.json 먼저 — 크래시 시 재구성이 "override 없이 r3만 있는" 비정상 상태를 만들지 않게).
 
-- `proposal-r3.json` = `verdict-r2.json`의 `reasons` 중 generator가 해소한 항목을 반영한 **최종
-  확정 계약**이다. `round: 3`, 나머지 필드는 proposal 스키마 그대로. `proposal-r2.json`/
-  `override.json`은 그대로 둔다(append-only).
-- **`verdict-r3.json`은 존재하지 않는 것이 정상이다** — 이 라운드는 evaluator 재검토를 구하지
-  않는다(협상 라운드 한도는 2). 검증은 `orca-evaluate` §3 diff 리뷰가 최종 AC 기준으로 한다.
+- override 시점의 확정 계약(`final_round: 2`면 `proposal-r3.json`, "라운드 2→3 조건부 연장"이
+  발동해 `final_round: 3`이면 `proposal-r4.json`)은 그 직전 라운드의 `verdict-r<final_round>.json`의
+  `reasons` 중 generator가 해소한 항목을 반영한 **최종 확정 계약**이다. `round`는
+  `final_round + 1`(2→3 또는 3→4), 나머지 필드는 proposal 스키마 그대로. 이전 라운드 파일들은
+  그대로 둔다(append-only).
+- **override 시점에 만들어지는 확정 계약(final_round+1번째 proposal)에는 그 라운드의 verdict가
+  존재하지 않는 것이 정상이다** — 이 라운드는 evaluator 재검토를 구하지 않는다(예: `final_round: 2`
+  override면 `verdict-r3.json` 없음, `final_round: 3` override면 `verdict-r4.json` 없음). 검증은
+  `orca-evaluate` §3 diff 리뷰가 최종 AC 기준으로 한다. **주의**: "라운드 2→3 조건부 연장"이 발동한
+  경우의 `verdict-r3.json`은 이것과 다르다 — 그건 override 산출물이 아니라 정식 협상 라운드의
+  verdict이므로 정상적으로 존재한다.
 - **override 이후 계약 자체의 결함이 발견되면**(eval FAIL findings가 코드가 아니라 proposal 필드를
   지적) 동결된 라운드 파일을 절대 제자리 수정하지 않는다 — 다음 라운드 번호(`proposal-r4.json`, …)로
   새 파일을 쓴다. 제자리 수정은 이미 그 파일을 인용해 둔 `verdict-r*`/`override.json`의 인용
@@ -212,6 +263,10 @@ override.json 먼저 — 크래시 시 재구성이 "override 없이 r3만 있�
   verdict를 갖지 않는다(위 절). 반대로 override가 있는데 `proposal-r3.json`이 없으면 override 스텝이
   쓰다 죽은 것이므로 그 스텝을 다시 태운다. 이때 같은 번호 파일을 덮어쓰는
   것은 append-only 위반이 아니다 — append-only는 라운드 간(r1을 r2에서 수정 금지) 규칙이다.
+- **"라운드 2→3 조건부 연장"의 신규 정상 상태**: `override.json`이 없고 `proposal-r3.json`만 있고
+  `verdict-r3.json`이 아직 없는 상태는 모호 상태가 아니라 정상이다 — 라운드3 협상이 진행 중이며
+  evaluator 재검토를 기다리는 것뿐이다(`orca-evaluate` §1 재호출 대기). 이는 위 예외(override.json
+  있을 때의 verdict-less proposal-r3+)와는 다른, 별개의 정상 상태다.
 - override 라우팅 게이트(위 override 절)는 재개 경로에서도 동일하게 적용된다 —
   `contract_resume.sh`가 `orca-workflow-task` §1의 인라인 분기를 미러링한다. 한쪽을 바꾸면 함께
   바꾼다.
@@ -222,7 +277,7 @@ override.json 먼저 — 크래시 시 재구성이 "override 없이 r3만 있�
 attempt 2+의 리뷰 입력에 추가되는 것은 **자신의 직전 `eval-report-a<k-1>.json`의 findings**뿐이다
 (지적 항목이 실제 수정됐는지 확인용 — 협상 라운드 2가 자신의 `verdict-r1.json`을 입력으로 받는
 것과 동일). generator의 수정 요약·서술형 해명은 입력에 넣지 않는다 — 판정을 바꾸는 근거는 diff의
-사실 변화뿐이다("라운드 2 입력 격리"와 같은 근거, arXiv:2509.16533).
+사실 변화뿐이다("라운드 2+ 입력 격리"와 같은 근거, arXiv:2509.16533).
 
 ## 확정 AC의 정본
 
@@ -240,12 +295,16 @@ adversarial-review 프롬프트 차용 + grounding 제약):
 - "선의, 부분적 커버, '후속에서 보완 예정'에 점수를 주지 않는다."
 - "happy-path만 커버하는 검증 계획은 그 자체로 결함으로 보고한다."
 - "결함을 지어내지 않는다 — 모든 reason은 원본 issue 또는 proposal의 구체 필드를 가리켜야 한다."
+- "무동작(no-op) 구현을 상상해 이 `verification_plan` 항목이 통과하는지 자문한다 — 통과하면 그
+  자체로 결함이다."
 
-## 라운드 2 입력 격리 (sycophancy 방어)
+## 라운드 2+ 입력 격리 (sycophancy 방어)
 
-evaluator의 라운드 2 입력은 정확히 셋: **원본 issue 전문, `proposal-r2.json`, 자신의
-`verdict-r1.json`.** generator의 서술형 반박·해명은 입력에 존재하지 않는다 — proposal 스키마에
-그런 필드가 없어서 구조적으로 배제된다. 판정 지침에 다음을 명시한다:
+evaluator의 라운드 N(N≥2) 입력은 정확히 셋: **원본 issue 전문, `proposal-r<N>.json`, 자신의
+`verdict-r<N-1>.json`.** 라운드 3(조건부 연장이 발동한 경우)도 동일하게 적용한다 — 입력은 원본
+issue 전문·`proposal-r3.json`·`verdict-r2.json` 셋뿐이다. generator의 서술형 반박·해명은 입력에
+존재하지 않는다 — proposal 스키마에 그런 필드가 없어서 구조적으로 배제된다. 판정 지침에 다음을
+명시한다:
 
 > "직전 판정을 뒤집을 때는 proposal의 사실 변화(필드 수준 차이)에 근거해야 한다. 단순 재제출·표현
 > 변경은 뒤집을 근거가 아니다."

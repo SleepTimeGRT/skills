@@ -174,15 +174,30 @@ def test_invalid_verdict_status_reruns_verdict_step(tmp_path: Path, shell: str) 
 
 
 @pytest.mark.parametrize("shell", SHELLS)
-def test_rejected_r2_without_override_resumes_override_step(tmp_path: Path, shell: str) -> None:
+def test_rejected_r2_plan_coverage_only_resumes_round3_proposal(tmp_path: Path, shell: str) -> None:
+    """Round-cap conditional extension: plan_coverage-only at round 2 gets one more negotiated
+    round instead of an immediate override (contract-sprint-improvements design, 2026-08-12)."""
     d = tmp_path / "issue-42"
     _write(d, "proposal-r1.json", _proposal(1))
     _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
     _write(d, "proposal-r2.json", _proposal(2))
     _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
     state = _state(d, shell)
+    assert state["resume"] == "section-1-proposal"
+    assert state["round"] == 3
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_rejected_r2_with_ac_fidelity_still_resumes_override_step(tmp_path: Path, shell: str) -> None:
+    """ac_fidelity at round 2 is unchanged by the extension -- still goes straight to override."""
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage", "ac_fidelity"]))
+    state = _state(d, shell)
     assert state["resume"] == "section-1-override"
-    assert state["round"] == 3  # the proposal round the override step produces (issue #130)
+    assert state["round"] == 3
 
 
 # ── override gate (mirrors orca-workflow-task §1) ───────────────────────────────────────────
@@ -210,12 +225,16 @@ def test_override_without_verdict_r2_fails_closed(tmp_path: Path, shell: str) ->
 
 
 def _finalized_contract(d: Path) -> None:
-    """Round limit hit, plan_coverage-only rejection, override step completed (override + r3)."""
+    """Round limit hit, plan_coverage-only rejection, override step completed (override + r3).
+    Backdated before ROUND3_NEGOTIATION_SINCE: this is the legacy final_round=2 finalize path --
+    post-gate, plan_coverage-only at round 2 goes through the round-3 extension instead (see
+    test_rejected_r2_plan_coverage_only_resumes_round3_proposal)."""
     _write(d, "proposal-r1.json", _proposal(1))
     _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
     _write(d, "proposal-r2.json", _proposal(2))
     _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
-    _write(d, "override.json", _override())
+    override_path = _write(d, "override.json", _override(), fresh=True)
+    _set_mtime(override_path, ROUND3_NEGOTIATION_SINCE_EPOCH - 3600)
     _write(d, "proposal-r3.json", _proposal(3))
 
 
@@ -229,6 +248,24 @@ def test_override_plan_coverage_only_finalizes_and_resumes_generate(tmp_path: Pa
     assert state["approved_round"] == 3  # the override follow-up round IS the final contract (#130)
     assert state["attempt"] == 1
     assert state["retry"] == 0
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_override_final_round2_plan_coverage_after_gate_is_anomalous(tmp_path: Path, shell: str) -> None:
+    """final_round=2 + plan_coverage-only found AFTER ROUND3_NEGOTIATION_SINCE should never happen
+    if the coordinator routes correctly (post-gate, that case goes through round-3 negotiation
+    instead) -- fail closed to CONTRACT_ESCALATE rather than silently finalizing."""
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
+    override_path = _write(d, "override.json", _override(), fresh=True)
+    _set_mtime(override_path, ROUND3_NEGOTIATION_SINCE_EPOCH + 3600)
+    _write(d, "proposal-r3.json", _proposal(3))
+    state = _state(d, shell)
+    assert state["resume"] == "section-5"
+    assert state["outcome"] == "CONTRACT_ESCALATE"
 
 
 @pytest.mark.parametrize("shell", SHELLS)
@@ -246,6 +283,9 @@ def test_override_without_r3_reruns_override_step(tmp_path: Path, shell: str) ->
 
 
 R3_REQUIRED_SINCE_EPOCH = 1786495497  # 2026-08-12T09:44:57+09:00, commit 79b7c3b -- mirrors contract_resume.sh's R3_REQUIRED_SINCE
+
+ROUND3_NEGOTIATION_SINCE_EPOCH = 1786549920  # 2026-08-13T00:52:00+09:00
+# mirrors contract_resume.sh's ROUND3_NEGOTIATION_SINCE
 
 
 def _set_mtime(path: Path, epoch: float) -> None:
@@ -361,8 +401,9 @@ def test_override_after_r3_gate_still_reruns_override_step(tmp_path: Path, shell
 
 
 @pytest.mark.parametrize("shell", SHELLS)
-def test_r3_without_override_or_approval_escalates(tmp_path: Path, shell: str) -> None:
-    """proposal-r3+ may only exist after override — anything else is an out-of-contract state."""
+def test_r3_proposal_without_verdict_resumes_verdict_step(tmp_path: Path, shell: str) -> None:
+    """proposal-r3 without override.json is now legitimate: the round-2->3 extension's negotiated
+    round, waiting for verdict-r3 (not the old out-of-contract state)."""
     d = tmp_path / "issue-42"
     _write(d, "proposal-r1.json", _proposal(1))
     _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
@@ -370,8 +411,155 @@ def test_r3_without_override_or_approval_escalates(tmp_path: Path, shell: str) -
     _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
     _write(d, "proposal-r3.json", _proposal(3))
     state = _state(d, shell)
+    assert state["resume"] == "section-1-verdict"
+    assert state["round"] == 3
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_r3_without_override_and_verdict_r2_has_ac_fidelity_escalates(tmp_path: Path, shell: str) -> None:
+    """proposal-r3 without override is legitimate ONLY when the round-cap extension actually
+    fired (verdict-r2 valid+rejected+plan_coverage-only). If verdict-r2 has ac_fidelity, the
+    extension never should have produced proposal-r3 -- out-of-contract, fail-closed to
+    CONTRACT_ESCALATE rather than silently waiting on verdict-r3 (which would launder an
+    unresolved ac_fidelity disagreement toward code generation)."""
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage", "ac_fidelity"]))
+    _write(d, "proposal-r3.json", _proposal(3))
+    state = _state(d, shell)
     assert state["resume"] == "section-5"
     assert state["outcome"] == "CONTRACT_ESCALATE"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_r4_without_override_or_approval_escalates(tmp_path: Path, shell: str) -> None:
+    """proposal-r4+ may only exist after a final_round=3 override -- anything else is
+    out-of-contract (the extension's equivalent of the old r3 guard)."""
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r3.json", _proposal(3))
+    _write(d, "verdict-r3.json", _verdict(3, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r4.json", _proposal(4))
+    state = _state(d, shell)
+    assert state["resume"] == "section-5"
+    assert state["outcome"] == "CONTRACT_ESCALATE"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_r3_approved_resumes_generate_attempt1(tmp_path: Path, shell: str) -> None:
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r3.json", _proposal(3))
+    _write(d, "verdict-r3.json", _verdict(3, "approved"))
+    state = _state(d, shell)
+    assert state["contract"] == "approved"
+    assert state["approved_round"] == 3
+    assert state["resume"] == "section-2"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_r3_rejected_ac_fidelity_escalates_round3(tmp_path: Path, shell: str) -> None:
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r3.json", _proposal(3))
+    _write(d, "verdict-r3.json", _verdict(3, "rejected", ["ac_fidelity"]))
+    state = _state(d, shell)
+    assert state["resume"] == "section-5"
+    assert state["outcome"] == "CONTRACT_ESCALATE"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_r3_rejected_plan_coverage_only_resumes_override_round4(tmp_path: Path, shell: str) -> None:
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r3.json", _proposal(3))
+    _write(d, "verdict-r3.json", _verdict(3, "rejected", ["plan_coverage"]))
+    state = _state(d, shell)
+    assert state["resume"] == "section-1-override"
+    assert state["round"] == 4
+
+
+def _override_r3(unresolved: list[str] | None = None) -> dict:
+    return {
+        "schema_version": 1, "issue": "42", "overridden_by": "generator",
+        "final_round": 3,
+        "unresolved_reasons": [{"target": t, "ac_id": None, "reason": "x"} for t in (unresolved or [])],
+    }
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_override_final_round3_with_ac_fidelity_escalates(tmp_path: Path, shell: str) -> None:
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r3.json", _proposal(3))
+    _write(d, "verdict-r3.json", _verdict(3, "rejected", ["plan_coverage", "ac_fidelity"]))
+    _write(d, "override.json", _override_r3())
+    state = _state(d, shell)
+    assert state["resume"] == "section-5"
+    assert state["outcome"] == "CONTRACT_ESCALATE"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_override_final_round3_without_verdict_r3_fails_closed(tmp_path: Path, shell: str) -> None:
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r3.json", _proposal(3))
+    _write(d, "override.json", _override_r3())
+    state = _state(d, shell)
+    assert state["resume"] == "section-5"
+    assert state["outcome"] == "CONTRACT_ESCALATE"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_override_final_round3_without_r4_reruns_override_step(tmp_path: Path, shell: str) -> None:
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r3.json", _proposal(3))
+    _write(d, "verdict-r3.json", _verdict(3, "rejected", ["plan_coverage"]))
+    _write(d, "override.json", _override_r3())
+    state = _state(d, shell)
+    assert state["resume"] == "section-1-override"
+    assert state["round"] == 4
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_override_final_round3_plan_coverage_only_finalizes(tmp_path: Path, shell: str) -> None:
+    d = tmp_path / "issue-42"
+    _write(d, "proposal-r1.json", _proposal(1))
+    _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r2.json", _proposal(2))
+    _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage"]))
+    _write(d, "proposal-r3.json", _proposal(3))
+    _write(d, "verdict-r3.json", _verdict(3, "rejected", ["plan_coverage"]))
+    _write(d, "override.json", _override_r3())
+    _write(d, "proposal-r4.json", _proposal(4))
+    state = _state(d, shell)
+    assert state["contract"] == "finalized"
+    assert state["approved_round"] == 4
+    assert state["resume"] == "section-2"
 
 
 @pytest.mark.parametrize("shell", SHELLS)

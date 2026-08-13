@@ -89,7 +89,49 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
 
 ## 1. Contract 협상 relay
 
-`orca-task-runner`를 "제안서 작성" 모드로 호출(제안서 = `contract-schema.md` 스키마의 `proposal-r<n>.json`, **AC 초안 포함**) → `orca-evaluate`에 "검토" 모드로 전달(판정 = `verdict-r<n>.json`) → 반려면 다시 `orca-task-runner`에 전달. 산출물 경로는 §0의 `CONTRACT_DIR`와 라운드 번호로 결정론적이므로 **이 스킬은 파일을 읽지도, 경로를 추출하지도 않고 CONTRACT_DIR·라운드 번호만 중계**한다. 최대 2라운드, 그 이후는 `orca-task-runner`가 결정권을 가질 수 있다(`override.json` 존재가 그 기록이다) — 단 무조건 §2로 가는 것이 아니다. **라운드 한도 도달 시점에** — §2로 넘어가기 전에 — 다음 기계적 분기를 먼저 태운다(구조 필드 1개 추출이라 "diff/report 본문을 읽지 않는다" 원칙과 충돌하지 않는다 — dispatch-verify의 불투명 비교와 같은 결). 이 분기는 §0 재개 분기의 `contract_resume.sh`가 미러링한다 — 여기를 바꾸면 그쪽도 함께 바꾼다(`tests/test_contract_resume.py`가 스크립트 쪽을 고정한다):
+`orca-task-runner`를 "제안서 작성" 모드로 호출(제안서 = `contract-schema.md` 스키마의 `proposal-r<n>.json`, **AC 초안 포함**) → `orca-evaluate`에 "검토" 모드로 전달(판정 = `verdict-r<n>.json`) → 반려면 다시 `orca-task-runner`에 전달. 산출물 경로는 §0의 `CONTRACT_DIR`와 라운드 번호로 결정론적이므로 **이 스킬은 파일을 읽지도, 경로를 추출하지도 않고 CONTRACT_DIR·라운드 번호만 중계**한다. 최대 2라운드(조건부로 3 — 아래 "라운드 2→3 조건부 연장" 참고), 그 이후는 `orca-task-runner`가 결정권을 가질 수 있다(`override.json` 존재가 그 기록이다) — 단 무조건 §2로 가는 것이 아니다. **라운드 한도 도달 시점에** — §2로 넘어가기 전에 — 다음 기계적 분기를 먼저 태운다(구조 필드 1개 추출이라 "diff/report 본문을 읽지 않는다" 원칙과 충돌하지 않는다 — dispatch-verify의 불투명 비교와 같은 결). 이 분기는 §0 재개 분기의 `contract_resume.sh`가 미러링한다 — 여기를 바꾸면 그쪽도 함께 바꾼다(`tests/test_contract_resume.py`가 스크립트 쪽을 고정한다):
+
+**라운드 2→3 조건부 연장** — 아래 "라운드 한도 도달 시점" 분기를 태우기 전에, `verdict-r2.json`이
+`rejected`이고 `reasons[].target`이 전부 `"plan_coverage"`면(즉 `ac_fidelity`가 하나도 없으면)
+아래 분기 대신 이 분기를 태운다 — 아직 라운드 한도(2)에 도달한 것으로 보지 않는다:
+
+```bash
+if [ ! -f "<CONTRACT_DIR>/verdict-r2.json" ]; then
+  : # 라운드2 verdict가 아직 없다 — 이 시점(라운드2 검토 결과 수신 직후)엔 있어야 정상이다. 없으면
+    # 이 분기는 개입하지 않는다 — 아래 "라운드 한도 도달 시점" 분기의 기존 `elif [ ! -f
+    # "<CONTRACT_DIR>/verdict-r2.json" ]` 가드가 같은 부재를 fail-closed로 잡는다.
+elif jq -e '[.reasons[].target] | index("ac_fidelity")' "<CONTRACT_DIR>/verdict-r2.json" >/dev/null; then
+  : # ac_fidelity 있음 — 이 연장은 발동하지 않는다, 아래 "라운드 한도 도달 시점" 분기를 그대로 태운다
+else
+  # plan_coverage뿐 — override 대신 라운드3 제안서 작성 모드로 orca-task-runner를 재호출한다
+  # (spec_text에 round=3 + CONTRACT_DIR + "verdict-r2.json을 읽고 proposal-r3.json 작성" 포함).
+  # verdict-r3.json이 approved면 §2로(확정 AC=proposal-r3). rejected면 아래 "라운드 한도 도달
+  # 시점" 분기와 동일한 구조를 verdict-r2.json→verdict-r3.json, round=2→3, proposal-r3→proposal-r4로
+  # 치환해 그대로 적용한다(아래 두 번째 코드 블록):
+  :
+fi
+```
+
+라운드3이 반려돼 `orca-task-runner`를 override 모드로 재호출한 뒤(`worker_done` 수신 시점) 태우는
+분기 — 아래와 동일한 구조를 한 라운드 밀어서:
+
+```bash
+if [ ! -f "<CONTRACT_DIR>/override.json" ]; then
+  # 라운드3 한도에 도달했는데 override.json이 없다 — fail-closed: outcome=CONTRACT_ESCALATE로 남기고 §5로.
+elif [ ! -f "<CONTRACT_DIR>/verdict-r3.json" ]; then
+  # override는 있는데 라운드3 verdict가 없다 — fail-closed: outcome=CONTRACT_ESCALATE로 남기고 §5로.
+elif [ ! -f "<CONTRACT_DIR>/proposal-r4.json" ]; then
+  # override 기록(final_round=3)과 verdict-r3.json은 있는데 확정 계약(proposal-r4)이 없다.
+  # worker_done까지 왔으므로 쓰다 죽은 게 아니다 — 기록 계약 위반이다. final_round=3은 이 확장
+  # 자체가 도입한 개념이라 legacy 세션이 있을 수 없으므로(R3_REQUIRED_SINCE류의 staleness 구분
+  # 자체가 불필요) 곧장 fail-closed: outcome=CONTRACT_ESCALATE, round=3으로 남기고 §5로.
+elif jq -e '[.reasons[].target] | index("ac_fidelity")' "<CONTRACT_DIR>/verdict-r3.json" >/dev/null; then
+  # AC 자체에 이견이 남음 — outcome=CONTRACT_ESCALATE, round=3으로 남기고 §5로.
+else
+  # 최종 verdict(r3)의 반려가 plan_coverage뿐 — outcome=CONTRACT_FINALIZED_BY_GENERATOR, round=3을
+  # 남기고 §2로(확정 AC=proposal-r4).
+fi
+```
 
 ```bash
 if [ ! -f "<CONTRACT_DIR>/override.json" ]; then
@@ -152,6 +194,9 @@ else
   # round=<도달한 라운드 수>를 남기고 §2로 (issue #63).
 fi
 ```
+
+(이 분기는 위 "라운드 2→3 조건부 연장"이 발동하지 않은 경우 — 즉 `verdict-r2.json`에
+`ac_fidelity`가 있는 경우에만 실행된다. 발동한 경우는 위 두 번째 코드 블록을 대신 따른다.)
 
 **계약이 승인된 시점에도(몇 라운드에서 승인되든)** — 마찬가지로 §2로 넘어가기 전에 — 같은 레시피대로 `outcome=CONTRACT_APPROVED, round=<승인된 라운드 수>`를 남긴다(issue #69, #86).
 
@@ -255,7 +300,7 @@ while :; do
   fi
 done
 # End pre-dispatch boot-quiesce
-spec_text="<orca-evaluate SKILL.md 지침 + CONTRACT_DIR 절대경로와 대상 라운드 번호(검토 대상 proposal-r<n>.json·판정 산출 verdict-r<n>.json — 스키마·적대적 판정 지침·라운드 2 입력 격리 규칙은 contract-schema.md) + issue 원문 + issue 번호 + 대상 repo(logging.md §1 repo 필드용, issue #158) + 요청 모드 + orphan-폴백 계약(§0) 전문>"
+spec_text="<orca-evaluate SKILL.md 지침 + CONTRACT_DIR 절대경로와 대상 라운드 번호(검토 대상 proposal-r<n>.json·판정 산출 verdict-r<n>.json — 스키마·적대적 판정 지침·라운드 2+ 입력 격리 규칙은 contract-schema.md) + issue 원문 + issue 번호 + 대상 repo(logging.md §1 repo 필드용, issue #158) + 요청 모드 + orphan-폴백 계약(§0) 전문>"
 orca_call_with_retry "orca-workflow-task" "evaluator" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-task" "evaluator" -- \
@@ -300,7 +345,7 @@ spec만 재전송된다. 대신 매 라운드 새 task를 만들어 같은 터�
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 source ~/.agents/orca-workflows/scripts/log_dispatch.sh
 RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<issue 번호>-orca-workflow-task.txt")"   # §0에서 남긴 사이드카
-spec_text="<round 번호 + CONTRACT_DIR 절대경로(파일명은 contract-schema.md 컨벤션으로 결정론적 — task-runner행이면 직전 verdict-r<n-1>.json을 읽고 proposal-r<n>.json 작성, evaluator행이면 라운드 2 입력 격리 규칙대로 원본 issue·proposal-r<n>.json·자신의 직전 verdict만 입력) + orphan-폴백 계약(§0) 전문>"
+spec_text="<round 번호 + CONTRACT_DIR 절대경로(파일명은 contract-schema.md 컨벤션으로 결정론적 — task-runner행이면 직전 verdict-r<n-1>.json을 읽고 proposal-r<n>.json 작성, evaluator행이면 라운드 2+ 입력 격리 규칙대로 원본 issue·proposal-r<n>.json·자신의 직전 verdict만 입력) + orphan-폴백 계약(§0) 전문>"
 orca_call_with_retry "orca-workflow-task" "contract-round" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-task" "contract-round" -- \

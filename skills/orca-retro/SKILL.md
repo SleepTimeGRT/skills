@@ -3,10 +3,12 @@ name: orca-retro
 description: >-
   Use right after an orca-workflow invocation ends, regardless of how it ended — analyzes that
   invocation's logs under ~/.local/state/orca-workflows/logs/ (assignments/outcome events,
-  spawn-failures, term transcripts) through five defect lenses (documented-schema violations,
+  spawn-failures, term transcripts) through six defect lenses (documented-schema violations,
   repeated FAILs attributable to skill prose, preventable escalations or human interventions, new
-  spawn-failure signatures, and false-PASS regressions: tracker issues with a regressed-by trailer
-  pointing back at merged PASS verdicts — the one lens crossing invocation boundaries) and files at
+  spawn-failure signatures, false-PASS regressions: tracker issues with a regressed-by trailer
+  pointing back at merged PASS verdicts — the one lens crossing invocation boundaries, and
+  contract-verdict mismatches: approved or plan_coverage-only contract verdicts contradicted by
+  downstream eval-report FAILs or human escalation) and files at
   most 3 evidence-backed skill-defect issues on the sleeptimegrt-skills repo, deduplicating against
   open issues via recurrence comments. Never edits skills directly — output is issues only; fixes
   flow through the normal /orca-workflow pipeline later. Best-effort by contract: no retro failure
@@ -32,8 +34,9 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
   넘어온 경우에만 `list_children(root-num)`으로 해석한다(child 없는 issue면 빈 목록). root issue ∪
   이 목록(중복 제거)이 이번 분석의 issue 집합이다 — size-1 큐면 root 1건이다.
 - 로그 루트 `~/.local/state/orca-workflows/logs/`가 없거나 비어 있으면 §5 요약(filed=[])으로 즉시
-  종료한다 — harness 밖에서 처리된 실행은 정상 케이스다. 단 렌즈 5는 로그가 아니라 트래커·
-  CONTRACT_DIR 기반이므로, 로그 공집합 종료 전에 렌즈 5 스캔만은 수행한다(§2 렌즈 5의 스코프 예외).
+  종료한다 — harness 밖에서 처리된 실행은 정상 케이스다. 단 렌즈 5·6은 로그가 아니라 트래커·
+  CONTRACT_DIR 기반이므로, 로그 공집합 종료 전에 렌즈 5·6 스캔만은 수행한다(§2 해당 렌즈의 스코프
+  예외).
 
 ## 1. 수집
 
@@ -70,16 +73,16 @@ done
 `worktree` 경로 휴리스틱으로 저장소를 역추정하지 않는다(outcome 레코드 대부분이 `worktree:null`이라
 커버리지가 없고, 나머지도 추정 오염을 다른 오염으로 바꿀 뿐이다). 이 제외는 렌즈 2~4의 분석 집합과
 아래 날짜 범위 계산에 반영된다 — 렌즈 1도 그 날짜 범위를 쓰므로 스캔 범위가 함께 좁아지는데, 그것이
-바로 #158이 지적한 왜곡(오염된 최소 ts로 2주+ 과대 확장)의 수정이다. 렌즈 5(로그 비의존)만 무관하다.
+바로 #158이 지적한 왜곡(오염된 최소 ts로 2주+ 과대 확장)의 수정이다. 렌즈 5·6(로그 비의존)만 무관하다.
 
 **날짜 범위**: (repo, issue) 필터에 걸린 레코드의 최소 `ts`부터 현재까지. §2 렌즈 1은 이 범위의 dated 파일
 전체 내용을 대상으로 한다(아래).
 
 **필터 공집합**: (repo, issue) 필터에 걸린 레코드가 0개면 렌즈 1~4를 건너뛴다 — 로그 루트에 다른 실행의
-기록만 있는 경우가 이에 해당한다. 이때도 렌즈 5(로그 비의존)는 수행한 뒤 §5로 간다. `spawn-failures.jsonl`에는 `issue` 필드가
+기록만 있는 경우가 이에 해당한다. 이때도 렌즈 5·6은 수행한 뒤 §5로 간다. `spawn-failures.jsonl`에는 `issue` 필드가
 없으므로 렌즈 4도 이 날짜 범위(`ts` 기준)로 한정한다 — 범위 밖 항목은 이번 실행의 후보가 아니다.
 
-## 2. 결함 후보 — 렌즈 5개
+## 2. 결함 후보 — 렌즈 6개
 
 각 렌즈의 표적은 "스킬 문서를 고치면 사라질 결함"이다. 에이전트의 일회성 실수는 표적이 아니다 —
 같은 지점에서 재발했거나, 스킬 문구가 그 실수를 유도·방치했다는 근거가 있어야 한다(예외: 렌즈 5 —
@@ -127,12 +130,20 @@ done
       (재발 요건의 예외) — evaluator 오판은 파이프라인에서 가장 비싼 결함 종류이고, 이 렌즈가
       유일한 관측 경로다. 수집된 사례를 evaluator 판정 지침으로 되먹이는 것은 별도 단계다(#157의
       2번) — 이 렌즈는 관측·이슈화까지만 한다.
+6. **contract-verdict 오판 대조**: 이 invocation이 다룬 issue들 중 `verdict-r*.json`이
+   `approved` 또는 `plan_coverage`-only `override`로 종결된 것을 골라, 같은 issue의 최종
+   `eval-report-a*.json`의 FAIL findings 또는 human escalation 기록과 대조한다. 다운스트림에서
+   같은 결함(같은 `ac_id` 또는 같은 지적 내용)이 실제로 재현되면, evidence-backed defect issue로
+   파일링한다(기존 "invocation당 최대 3건" 한도, 기존 중복 방지 — open issue에 recurrence 코멘트
+   — 규칙 그대로 적용).
 
 ## 3. 증거 기준·상한
 
 - 후보마다 **로그 파일 경로 + 원문 인용(레코드 라인 그대로) 최소 1개**. 인용을 못 붙이는 후보는
-  이슈화하지 않고 폐기 카운트에만 넣는다. 렌즈 5는 로그 대신 **결함 이슈의 `regressed-by` 라인
-  인용 + PASS `eval-report-a<k>.json` 절대경로와 그 `verdict` 라인**이 같은 기준을 충족한다.
+  이슈화하지 않고 폐기 카운트에만 넣는다. 렌즈 5·6은 로그 대신 다음이 같은 기준을 충족한다 —
+  렌즈 5: **결함 이슈의 `regressed-by` 라인 인용 + PASS `eval-report-a<k>.json` 절대경로와 그
+  `verdict` 라인**; 렌즈 6: **`verdict-r<n>.json` 절대경로와 해당 `reasons`/`status` 라인 +
+  대조된 `eval-report-a<k>.json` 절대경로와 그 finding 라인**.
 - 신규 이슈는 **실행(root issue)당 최대 3개**. 우선순위: 재발 횟수 → 영향 범위(걸린 스킬·사이트 수). 4번째
   이하 후보는 가장 우선순위 높은 신규 이슈 본문의 "부록" 섹션에 목록으로 넣는다.
 
