@@ -15,6 +15,10 @@
 #     "schema_version": 1,
 #     "contract": "fresh|negotiating|approved|finalized|escalated",
 #     "resume":  "section-1-proposal|section-1-verdict|section-1-override|section-2|section-4|section-5",
+#       // (orca-workflow-task §0 may locally override a "section-2" result to "section-3" when
+#       // maxa==0's fresh-attempt shape (attempt=1, retry=0) coincides with evidence of an already-
+#       // completed task-runner dispatch -- issue #161. This script itself never emits "section-3";
+#       // that value only ever exists in the caller's own resume variable.)
 #     "round": <n|null>,           // section-1-*: the round to (re-)run (for -override: the r3 it produces)
 #     "approved_round": <n|null>,  // final contract round: approved verdict round, or max r<n> post-override (#130)
 #     "attempt": <k|null>,         // section-2: attempt to run; section-4/5: last evaluated attempt
