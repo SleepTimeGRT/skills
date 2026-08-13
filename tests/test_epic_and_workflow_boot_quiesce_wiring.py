@@ -33,13 +33,15 @@ def test_epic_task_coordinator_site_has_boot_quiesce_before_dispatch():
         ".result.terminal.returnedLineCount",
         BOOT_END,
         "orca orchestration task-create --spec",
-        "orca orchestration dispatch --task",
+        # issue #94 stage 1: this site attaches its worker with worker-start, not dispatch --inject.
+        "orca orchestration worker-start --task",
     )
     boot = text[text.index(BOOT_START):text.index(BOOT_END)]
     assert "<coord-handle>" in boot
     assert 'orca terminal read --terminal <coord-handle> --json)" || exit 1' in boot
     assert "spawn-failures.md" in boot
     assert "orca orchestration task-create" not in boot
+    assert "orca orchestration worker-start" not in boot
     assert "orca orchestration dispatch" not in boot
 
 

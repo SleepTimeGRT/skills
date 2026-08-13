@@ -92,7 +92,7 @@ while :; do
   fi
   cur="$(printf '%s' "$boot_read" | jq -r '.result.terminal.latestCursor')"
   if [ "$(date -u +%s)" -ge "$boot_deadline" ]; then
-    # spawn-failures.md의 grep-first 절차를 따른다. task-create/dispatch --inject로 진행하지 않는다.
+    # spawn-failures.md의 grep-first 절차를 따른다. task-create/worker-start로 진행하지 않는다.
     exit 1
   fi
 done
