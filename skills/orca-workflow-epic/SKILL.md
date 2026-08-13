@@ -130,6 +130,15 @@ log_dispatch --skill "orca-workflow-epic" --role "task-coordinator" --issue "<ta
   - mode=hitl: 이 outcome은 `-task`의 질문에 사람이 "중단"을 답한 결과다 — 그 자리에서 사람에게
     "다음 task 계속 / 전체 중단"을 묻고 따른다. 전체 중단을 고르면 아직 시도하지 않은 나머지 큐
     항목 전부를 **skipped** 목록에 담되, 막은 선행 task 자리에는 이 중단 사실을 적는다.
+  - **classifier 거부로 인한 ESCALATE(issue #118)** — outcome이 `ESCALATE`이고 그 `detail`이
+    `spawn-failures.md`의 classifier 거부 시그니처(`Permission for this action was denied by the Claude Code auto mode classifier`, known_issue #118)를 가리키면, 위 afk-park 기록과 hitl 질문
+    모두 그 `detail`에 담긴 `CONTRACT_DIR` 절대경로와(있다면) 살아있는 task-runner 터미널 핸들을
+    그대로 포함해야 한다 — 나중에 재스폰(사람이 하든, 이 스킬의 이후 재실행이 하든)이 그 값으로
+    라운드 0부터 다시 돌지 않고 재개하도록. hitl에서 이 경우 사람에게 제시하는 선택지는 위 바
+    "다음 task 계속 / 전체 중단" 대신 "재스폰(같은 CONTRACT_DIR·핸들 재사용) / 중단"으로 바꾼다.
+    이 스킬 자신이 새 코디네이터 터미널을 자동으로 재스폰하지는 않는다 — 이관 절차의 명문화가 이
+    이슈의 범위이고(issue #118 본문), 실측상 회복까지 자녀 issue당 여러 차례의 재시도가 필요했으므로
+    한 번의 자동 재시도로 성공을 단정할 근거가 없다.
 
 ## 4. root close
 
