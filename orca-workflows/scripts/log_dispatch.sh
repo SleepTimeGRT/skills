@@ -426,7 +426,7 @@ log_outcome() {
 # self_recovery").
 #
 #   log_self_recovery --skill <skill> --issue <issue-num> --repo <대상 repo> --task-id <task_id> \
-#     --dispatch-id <dispatch_id> --terminal <handle> --terminal-status <alive|dead|stuck_draft> \
+#     --dispatch-id <dispatch_id> --terminal <handle> --terminal-status <alive|dead|stuck_draft|n/a> \
 #     --action-taken <value> [--waited-ms <n>] [--new-dispatch-id <id>] [--raw-action <text>] \
 #     [--schema-gap-issue <slug>] [--wave-index <n>]
 #
@@ -435,9 +435,14 @@ log_outcome() {
 #   (--wave-index dropped with a warning — those skills have no wave concept).
 # - --waited-ms omitted/empty → JSON null (a fixed field whose value can genuinely be unknown —
 #   observed null in real records), NOT omitted; all other empty optionals are omitted (#127).
-# - --terminal-status has no documented substitution safeguard (logging.md defines no raw_* field
-#   for it), so an unknown value is a hard caller error (return 64) — same policy as
-#   log_dispatch's --provider validation (issue #90) — rather than silently persisting a typo.
+# - --terminal-status accepts a 4th value, `n/a`, alongside the 3 worker-liveness classifications
+#   (issue #183): self-recovery.md's escalation branches that never ran a worker-liveness probe
+#   (retry-budget-exhausted, transport-stall-budget-exhausted) have no accurate alive/dead/
+#   stuck_draft classification to report — forcing one of those three would misrepresent an
+#   unperformed probe as a performed one. Still no documented substitution safeguard beyond that
+#   4th value (logging.md defines no raw_* field for it), so anything outside all four remains a
+#   hard caller error (return 64) — same policy as log_dispatch's --provider validation (issue #90)
+#   — rather than silently persisting a typo.
 # - --action-taken outside LOG_SELF_RECOVERY_ACTION_ENUM gets the same UNMAPPED_BRANCH
 #   substitution as log_outcome (raw_action=<attempted>, schema_gap_issue default "unfiled",
 #   stderr warning, exit 0) because logging.md documents exactly that safeguard for this field.
@@ -497,9 +502,9 @@ log_self_recovery() {
   fi
 
   case "$terminal_status" in
-    alive|dead|stuck_draft) ;;
+    alive|dead|stuck_draft|n/a) ;;
     *)
-      echo "log_self_recovery: --terminal-status must be one of alive|dead|stuck_draft (got:" \
+      echo "log_self_recovery: --terminal-status must be one of alive|dead|stuck_draft|n/a (got:" \
         "\"$terminal_status\")" >&2
       return 64
       ;;

@@ -187,12 +187,22 @@ wait/recovery loop):
 source ~/.agents/orca-workflows/scripts/log_dispatch.sh
 log_self_recovery --skill <skill> --issue <issue-num> --repo <대상 repo> --task-id <task_id> --dispatch-id <dispatch_id> \
   --terminal <handle> --waited-ms <n> \
-  --terminal-status <alive|dead|stuck_draft> \
+  --terminal-status <alive|dead|stuck_draft|n/a> \
   --action-taken <resumed_wait|retried_enter|worker_abandon_retry|task_recreate_retry|escalated_spawn_failure|none_decision_gate_self_timed_out_worker_proceeded|UNMAPPED_BRANCH>
 # 조건부 필드(해당할 때만): --new-dispatch-id <id> (action_taken=worker_abandon_retry|task_recreate_retry
 #   전용), --raw-action <관측 문자열>/--schema-gap-issue <slug> (action_taken=UNMAPPED_BRANCH 전용),
 #   --wave-index <n> (orca-task-runner 전용). 값이 빈 문자열이면 필드 자체가 생략된다(#127).
 ```
+
+`--terminal-status n/a`(issue #183)는 worker-liveness 프로브를 아예 돌리지 않은 escalation 전용이다 —
+`self-recovery.md`의 retry-budget-소진, transport-stall-budget-소진 분기가 여기 해당한다.
+alive/dead/stuck_draft 셋 다 "워커를 관측했더니 이랬다"는 뜻이라, 프로브를 안 돌린 상황에 셋 중
+아무거나 강제로 붙이면 실제로 하지 않은 관측을 한 것처럼 기록하는 셈이 된다. 이 4번째 값을 추가하기
+전에는(issue #183, 2026-08-13까지) 헬퍼가 exit 64로 거부해 retry-budget-소진 분기의 self_recovery
+이벤트가 조용히 하나도 안 남았다. transport-stall-budget-소진 분기는 별도 원인이 하나 더 있었다 —
+공유 `log_self_recovery` 호출부가 `elif` 분기 안에만 스코프되어 있어 이 분기에서는 호출 자체가 아예
+일어나지 않았다(issue #186, 2026-08-14 수정). 두 원인이 모두 고쳐진 지금은 두 분기 다 이벤트가
+정상적으로 기록된다.
 
 **`action_taken`의 기계-검증 정본도 같은 스크립트의 `log_self_recovery()`(enum 변수
 `LOG_SELF_RECOVERY_ACTION_ENUM`)다** — `"event":"self_recovery"` raw printf 금지. enum 밖 값(오타 포함 —
