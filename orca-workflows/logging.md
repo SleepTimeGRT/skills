@@ -82,7 +82,7 @@ orca-task-runner에 dispatch됐는가"를 로그만으로 판정할 수 있게 �
 - **진행-분기 축** — 판정이 아니라 정상적인 워크플로 상태 전이:
   `NO_DONE_TRANSITION`|`CONTRACT_FINALIZED_BY_GENERATOR`|`CONTRACT_APPROVED`|`CONTRACT_SCHEMA_STALE`|
   `MANUAL_RECOVERY_COMPLETED`|`CI_GATE_TIMEOUT`|`MERGE_CONFLICT`|`RETRO_DONE`|`RETRO_FAIL`|
-  `escalation_parked`|`skipped`|`NO_ACCEPTANCE_CRITERIA`|`UNMAPPED_BRANCH`
+  `escalation_parked`|`skipped`|`unblocked_requeue`|`NO_ACCEPTANCE_CRITERIA`|`UNMAPPED_BRANCH`
 
 **기계-검증 정본은 `orca-workflows/scripts/log_dispatch.sh`의 `log_outcome()`(enum 변수
 `LOG_OUTCOME_ENUM`)이다** — 위 목록은 사람이 읽는 미러이고, 둘이 어긋나면 스크립트가 정본이다. 모든
@@ -162,7 +162,15 @@ mtime이 그 요구사항 도입 시점(commit 79b7c3b, 2026-08-12T09:44:57+09:0
 `skipped`는 `orca-workflow-epic`이 afk-escalation으로 park된 선행 task의 dependent를 건너뛸 때(또는
 hitl 전체-중단 선택으로 남은 큐를 건너뛸 때) dependent issue별로 남기는 정상 진행-분기다 — issue #138에서
 즉석 발명으로 최초 관측된 뒤 정식 등재. 이 값에는 조건부 필드 `blocked_by`(막은 선행 issue 번호)가
-**필수**이며, `blocked_by`는 `outcome=skipped`일 때만 쓴다(다른 outcome에 실리면 헬퍼가 경고 후 버린다).
+**필수**이며, `blocked_by`는 `outcome=skipped` 또는 `outcome=unblocked_requeue`일 때만 쓴다(다른
+outcome에 실리면 헬퍼가 경고 후 버린다).
+
+`unblocked_requeue`는 `skipped`의 짝이다 — park됐던 선행 issue가 나중에 PASS/merge로 풀려,
+그것 때문에 `skipped`로 건너뛰었던 dependent를 `orca-workflow-epic`이 큐에 다시 올릴 때 남기는
+정상 진행-분기다(issue #165, studio-hevv/selah-android issue #23에서 즉석 문자열 `raw_outcome:
+"unblocked_requeue"`로 최초 관측된 뒤 정식 등재). `blocked_by`에는 그때 자신을 막았던 바로 그
+선행 issue 번호를 그대로 남긴다 — `skipped` 레코드와 값이 같아야 두 이벤트가 같은 (repo, issue,
+blocked_by) 조합으로 짝지어 읽힌다.
 
 `NO_ACCEPTANCE_CRITERIA`는 issue 본문이 Acceptance Criteria를 초안할 만큼 구체적이지 않아 진행 불가로
 판정된 정상 분기다(issue-drain/AC 초안 단계) — issue #105에서 즉석 발명으로 최초 관측된 뒤, 그 이슈의
