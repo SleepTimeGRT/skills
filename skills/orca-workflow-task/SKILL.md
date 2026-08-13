@@ -1,16 +1,65 @@
 ---
 name: orca-workflow-task
-description: Single-issue coordinator for one task issue — invoked in-session by `orca-workflow` (entry) or spawned as a separate coordinator terminal by `orca-workflow-epic`; invoke explicitly, do not phrase-match. Owns exactly one relay Run keyed by the issue, drives the orca-task-runner/orca-evaluate contract negotiation relay, generation, evaluation, PR/merge (merge-time verification delegated to repo CI required checks), and issue close. Mode [afk|hitl] (default hitl) governs escalation — hitl raises a blocking question to the caller/human (decision gate), afk preserves the work (worktree, CONTRACT_DIR artifacts, logs) and returns the outcome so the caller can move on. Never generates or evaluates code directly — pure orchestration, kept context-light. Self-relative. Do NOT use for ad-hoc coordination or terminal control (use the `orchestration` or `orca-cli` skills) — this skill runs only as part of the orca-workflow pipeline.
+description: Single-issue coordinator for one task issue — invoked in-session by `orca-workflow` (entry) or spawned as a separate coordinator terminal by `orca-workflow-epic`; invoke explicitly, do not phrase-match. Owns exactly one relay Run keyed by the issue, drives the orca-task-runner/orca-evaluate contract negotiation relay, generation, evaluation, PR/merge (merge-time verification delegated to repo CI required checks), and issue close. Mode [afk|hitl] (default hitl) governs §1 contract drafting (hitl has the coordinator draft with the human in-session, no sub-spawn; afk dispatches orca-task-runner) and escalation (hitl blocks via decision gate; afk preserves work, returns outcome). Never generates or evaluates code directly — pure orchestration, kept context-light. Self-relative. Do NOT use for ad-hoc coordination or terminal control (use the `orchestration` or `orca-cli` skills) — this skill runs only as part of the orca-workflow pipeline.
 compatibility: Requires the `orca` CLI (skill set last verified against Orca app 1.4.180), the `~/.agents/orca-workflows/` symlink to this repo's orca-workflows/, and the `gh` CLI.
 ---
 
 # Orca Workflow Task
 
-이슈 하나를 받아 끝까지(merge까지) 가져가는 단일 issue coordinator다. **코드를 생성하지도, 평가하지도 않는다** — 그 일은 각각 `orca-task-runner`, `orca-evaluate`가 한다. 이 스킬의 컨텍스트에는 issue 번호·task 상태·짧은 판정 결과만 남긴다. diff나 report 본문을 직접 읽지 않는다.
+이슈 하나를 받아 끝까지(merge까지) 가져가는 단일 issue coordinator다. **코드를 생성하지도, 평가하지도 않는다** — 그 일은 각각 `orca-task-runner`, `orca-evaluate`가 한다. 이 스킬의 컨텍스트에는 issue 번호·task 상태·짧은 판정 결과만 남긴다. diff나 report 본문을 직접 읽지 않는다 — **단, mode=hitl의 generator측(계약 초안 작성)은 예외다**(issue #180, 아래 §1 "mode=hitl일 때 generator 역할" 참고): 그 경우 이 세션이 `verdict-r<n>.json`의 반려 사유를 직접 읽고 `proposal-r<n>.json`/`override.json`을 직접 쓴다.
 
 ## 0. 전제
 
 - `orca status --json` ready. 실패 시 아래 "폴백".
+- **격리 가드(issue #180)** — 이 코디네이터 세션 자신이 대상 repo의 main 체크아웃 위에서 뜨는 사고가
+  실측됐다(2026-08-13, 라이브 확인: `orca terminal create --worktree active`를 이 파이프라인의 어느
+  지점도 선행 worktree 생성 없이 호출하므로 "active"가 그대로 main으로 떨어진다). §1 이하 모든 하위
+  스폰(`--worktree active`/`current`)은 **이 세션의 cwd를 기준으로 resolve된다**(라이브 확인 —
+  main에서 부르면 main, Orca가 추적하는 linked worktree 안에서 부르면 그 worktree로 정확히 간다).
+  즉 여기서 이 세션 자신을 격리 worktree로 옮겨두기만 하면 그 아래 전부가 따라온다.
+
+  `orca-task-runner`의 격리 가드(issue #136, 그 스킬 §0)와 같은 목적이지만 메커니즘은 다르다 — 그
+  가드처럼 `git worktree add`를 직접 쓰지 않는다: **Orca가 추적하지 않는 worktree는
+  `--worktree active`/`current`가 `selector_not_found`로 실패한다**(라이브 확인 — `git worktree add`로
+  만든 디렉터리에서 재현). 대신 Orca 자신의 `orca worktree create`/`show`를 쓴다(AGENTS.md "Prefer
+  Orca's current recommended mechanism" 원칙과 같은 이유 — 이 세션이 등록한 worktree라야 뒤따르는
+  `--worktree active` 호출이 그 worktree를 찾는다). 이름은 `CONTRACT_DIR`처럼 이슈 번호로 결정론적으로
+  짓는다 — 재개(crash-resume) 시 `orca worktree show`로 같은 이름을 다시 찾아 재사용하고, 이 값이
+  이후 §1/§4가 참조하는 `<task-branch>`/`<worktree 경로>`의 정본이 된다. `name:` 셀렉터는 호출 시점의
+  repo 컨텍스트로 스코프된다(라이브 확인, 2026-08-13 — 다른 repo(`vprop`)에 실제 존재·추적 중인
+  동일 이름의 워크트리를 이 repo 컨텍스트에서 `name:`으로 조회하면 `selector_not_found`로 실패한다) —
+  저장소 간 이름 충돌은 걱정할 필요가 없다. base 브랜치는 하드코딩하지
+  않는다 — `--base-branch`를 생략하면 Orca가 repo의 실제 default 브랜치를 쓴다(`main`이 아닌 repo도
+  있다 — `orca worktree create --help` 참고). `--activate`는 쓰지 않는다 — `cd`만으로 이후
+  `--worktree active` 해석에 충분함이 라이브 확인됐고(`--activate` 없이 생성한 워크트리에서 `cd` 후
+  `--worktree active`가 정확히 그 워크트리로 resolve됨을 확인), `--activate`는 Orca 앱 UI의 "활성"
+  표시를 바꾸는 부수효과가 있어 afk 경로를 포함한 매 태스크 실행마다 이를 발동시킬 이유가 없다:
+
+  ```bash
+  source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
+  task_branch="task-<이슈번호>"
+  existing="$(orca_call_with_retry "orca-workflow-task" "self-worktree" -- \
+    orca worktree show --worktree "name:$task_branch" --json)"
+  if printf '%s' "$existing" | jq -e '.ok' >/dev/null 2>&1; then
+    task_worktree="$(printf '%s' "$existing" | jq -r '.result.worktree.path')"   # 재개 — 이미 있음
+  else
+    created="$(orca_call_with_retry "orca-workflow-task" "self-worktree" -- \
+      orca worktree create --name "$task_branch" --json)"                       # 완전히 새로 시작
+    if ! printf '%s' "$created" | jq -e '.ok' >/dev/null 2>&1; then
+      # 생성 자체가 실패 — 이 세션의 cwd가 Orca가 추적하는 어떤 repo에도 속하지 않는 등, 여기서
+      # 회복 불가능하다. 위에서 이미 거부한 raw git 대체 수단으로 우회하지 않는다(Orca가 추적하지
+      # 못해 이후 모든 --worktree active 호출이 깨진다). spawn-failures.md의 grep-first 절차로
+      # 진단하고, 이 자리에서 자기치유를 시도하지 않는다.
+      exit 1
+    fi
+    task_worktree="$(printf '%s' "$created" | jq -r '.result.worktree.path')"
+  fi
+  cd "$task_worktree"
+  ```
+
+  `orca-task-runner` 자신의 격리 가드(issue #136)는 그대로 둔다 — 정상 경로에서는 이 가드가 먼저
+  격리를 끝내두므로(§1에서 스폰되는 task-runner 터미널도 이 세션의 cwd를 물려받아 같은 worktree에서
+  뜬다) 더는 발동하지 않는 안전망으로 남는다.
 - **이슈 트래커 해석** (실행 시작 시 1회, 캐싱 없이 — 매 실행마다 새로 읽는다): `~/.agents/orca-workflows/issue-trackers/selection.md`가 정의하는 절차로 백엔드를 정하고, 그 백엔드의 `~/.agents/orca-workflows/issue-trackers/{github,jira}.md`가 정의하는 오퍼레이션 중 이 스킬이 쓰는 `get_issue`(§1 evaluator spec의 issue 원문 확보)/`is_open`/`close_issue`/`link_pr_for_close`(§4)를 이후 실행에서 쓴다. 구체 값(project key, transition id 등)은 이 스킬에 복제하지 않는다 — 항상 selection.md가 가리키는 대상 repo의 tracker 문서에서 얻는다.
 - **'대상 repo' 값은 무가공 전달(issue #164)**: 호출자(진입 시 직접, 또는 `orca-workflow-epic`이 spawn하는
   경우 spec_text)로부터 받는 "대상 repo" 값은 `~/.agents/orca-workflows/logging.md` §1 repo 필드에 그대로
@@ -108,8 +157,10 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
   `task-create`가 `--run` 생략 시 호출 터미널에 바인딩된 Run을 그대로 물려받는 것으로 실측 확인했다
   (`--run` 없이 만든 task의 `.run_id`가 이미 바인딩돼 있던 Run과 일치) — 따라서 라운드 2+의
   `check --wait --run "$RUN_ID"`와 `task-list --run "$RUN_ID"`는 라운드 1의 결과도 정상적으로 찾는다. 이 세션을 `orca-workflow-epic`이 스폰했더라도 epic의 Run을 재사용하지 않는다 — coordinator 세션마다 자기 Run 1개(`orca-task-runner` §0의 같은 규칙과 동일한 이유).
-- **Mode** — spec/인자로 `afk` 또는 `hitl`을 받는다(생략 시 `hitl`). 의미는 §5가 정의한다 — §1~§4의
-  동작은 mode와 무관하게 동일하다.
+- **Mode** — spec/인자로 `afk` 또는 `hitl`을 받는다(생략 시 `hitl`). §5가 정의하는 escalation 분기
+  외에, §1의 generator측(제안서/override 작성) 디스패치도 mode에 따라 갈린다(issue #180 — 아래 §1
+  "mode=hitl일 때 generator 역할" 참고). evaluator 디스패치와 라운드-한도/override 라우팅은 mode
+  무관, §1의 해당 절 그대로. §2~§4는 mode와 무관하게 동일하다.
 - **보고 채널** — spec에 "spawn된 coordinator" 지시가 있으면 최종 outcome은 `worker_done`으로, hitl
   질문은 ask(decision gate)로 호출자에게 보낸다. 그 지시가 없으면(entry 세션) 사람에게 직접 보고한다.
   ask/reply의 정확한 호출 문법은 실행 시점에 `orca skills get orchestration` 또는
@@ -117,7 +168,7 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
 
 ## 1. Contract 협상 relay
 
-`orca-task-runner`를 "제안서 작성" 모드로 호출(제안서 = `contract-schema.md` 스키마의 `proposal-r<n>.json`, **AC 초안 포함**) → `orca-evaluate`에 "검토" 모드로 전달(판정 = `verdict-r<n>.json`) → 반려면 다시 `orca-task-runner`에 전달. 산출물 경로는 §0의 `CONTRACT_DIR`와 라운드 번호로 결정론적이므로 **이 스킬은 파일을 읽지도, 경로를 추출하지도 않고 CONTRACT_DIR·라운드 번호만 중계**한다. 최대 2라운드(조건부로 3 — 아래 "라운드 2→3 조건부 연장" 참고), 그 이후는 `orca-task-runner`가 결정권을 가질 수 있다(`override.json` 존재가 그 기록이다) — 단 무조건 §2로 가는 것이 아니다. **라운드 한도 도달 시점에** — §2로 넘어가기 전에 — 다음 기계적 분기를 먼저 태운다(구조 필드 1개 추출이라 "diff/report 본문을 읽지 않는다" 원칙과 충돌하지 않는다 — dispatch-verify의 불투명 비교와 같은 결). 이 분기는 §0 재개 분기의 `contract_resume.sh`가 미러링한다 — 여기를 바꾸면 그쪽도 함께 바꾼다(`tests/test_contract_resume.py`가 스크립트 쪽을 고정한다):
+`orca-task-runner`를 "제안서 작성" 모드로 호출(제안서 = `contract-schema.md` 스키마의 `proposal-r<n>.json`, **AC 초안 포함**) → `orca-evaluate`에 "검토" 모드로 전달(판정 = `verdict-r<n>.json`) → 반려면 다시 `orca-task-runner`에 전달. 산출물 경로는 §0의 `CONTRACT_DIR`와 라운드 번호로 결정론적이므로 **이 스킬은 파일을 읽지도, 경로를 추출하지도 않고 CONTRACT_DIR·라운드 번호만 중계**한다 — **단, mode=hitl의 generator측은 예외다**(아래 "mode=hitl일 때 generator 역할" 참고): 그 절차에서는 이 세션 자신이 `verdict-r<n-1>.json`을 읽고 `proposal-r<n>.json`을 쓴다. 아래 라운드-한도/override 라우팅 로직(파일 내용만으로 분기)과 evaluator 디스패치는 이 예외와 무관하게 그대로다. 최대 2라운드(조건부로 3 — 아래 "라운드 2→3 조건부 연장" 참고), 그 이후는 `orca-task-runner`가 결정권을 가질 수 있다(`override.json` 존재가 그 기록이다) — 단 무조건 §2로 가는 것이 아니다. **라운드 한도 도달 시점에** — §2로 넘어가기 전에 — 다음 기계적 분기를 먼저 태운다(구조 필드 1개 추출이라 "diff/report 본문을 읽지 않는다" 원칙과 충돌하지 않는다 — dispatch-verify의 불투명 비교와 같은 결). 이 분기는 §0 재개 분기의 `contract_resume.sh`가 미러링한다 — 여기를 바꾸면 그쪽도 함께 바꾼다(`tests/test_contract_resume.py`가 스크립트 쪽을 고정한다):
 
 **라운드 2→3 조건부 연장** — 아래 "라운드 한도 도달 시점" 분기를 태우기 전에, `verdict-r2.json`이
 `rejected`이고 `reasons[].target`이 전부 `"plan_coverage"`면(즉 `ac_fidelity`가 하나도 없으면)
@@ -234,7 +285,38 @@ fi
 
 **계약이 승인된 시점에도(몇 라운드에서 승인되든)** — 마찬가지로 §2로 넘어가기 전에 — 같은 레시피대로 `outcome=CONTRACT_APPROVED, round=<승인된 라운드 수>`를 남긴다(issue #69, #86).
 
-**"호출"의 실체**: `orca-task-runner`/`orca-evaluate`는 이 스킬(orca-workflow-task)과 같은 세션에서 도는 게 아니라, 각각 orchestration으로 별도 터미널을 띄워서 넘기는 것이다 — 그래야 이 스킬이 "diff나 report 본문을 직접 읽지 않는다"는 원칙이 실제로 지켜진다.
+**"호출"의 실체**: `orca-task-runner`/`orca-evaluate`는 이 스킬(orca-workflow-task)과 같은 세션에서 도는 게 아니라, 각각 orchestration으로 별도 터미널을 띄워서 넘기는 것이다 — 그래야 이 스킬이 "diff나 report 본문을 직접 읽지 않는다"는 원칙이 실제로 지켜진다. **단, 이 원칙은 evaluator와 afk의 generator에 적용된다** — hitl의 generator측은 아래 절대로 다르다.
+
+**mode=hitl일 때 generator 역할(issue #180)** — 별도 스폰 없이 코디네이터 자신이 처리한다. 아래
+"라운드 1"·"라운드 2+" 블록 중 **task-runner를 향하는 부분**(대상이 evaluator인 부분은 라운드·mode
+무관하게 항상 그대로 스폰한다)은 hitl에서 실행하지 않는다. `proposal-r<n>.json`(라운드 1이든 2+든)과
+`override.json`은 이 코디네이터 세션이 사람과 직접 협의해 쓴다:
+
+- 대화 방식은 `superpowers:brainstorming`의 질문법(한 번에 한 질문, 2-3안 제시 후 추천, 섹션별 승인)을
+  따르되, **그 스킬 자신의 종료 조건은 따르지 않는다** — `docs/superpowers/specs/`에 디자인 문서를
+  쓰고 커밋하는 스텝, `writing-plans` 호출 스텝 둘 다 여기서는 존재하지 않는다. 대신 사람이
+  draft_acceptance_criteria·scope·verification_plan에 합의하면 그 자리에서 `contract-schema.md`
+  스키마대로 `proposal-r<n>.json`(라운드 1은 초안부터, 2+는 직전 `verdict-r<n-1>.json`의 반려 사유를
+  반영)을 CONTRACT_DIR에 직접 쓴다. override 단계도 동일 — 아래 라운드-한도 분기가 override 시점에
+  도달했다고 판정하면, 그 사유(`verdict-r2.json`의 `reasons`)를 사람에게 그대로 보여주고 진행할지
+  묻는다. 진행이면 `override.json` + 확정 `proposal-r<n+1>.json`을 이 자리에서 쓴다.
+- **질문 전달 경로**는 §0 "보고 채널"과 동일하다 — entry 세션(호출자 없음)이면 사람과 직접 대화하고,
+  spawn된 세션(`orca-workflow-epic`이 스폰)이면 질문마다 `ask`(decision gate)로 올려 응답을
+  기다린다(브레인스토밍 대화 전체에 걸쳐 반복 — `orca skills get orchestration` 확인 결과 `ask`는
+  `--timeout-ms`를 받고, 타임아웃/연결 끊김이어도 질문 자체는 pending으로 남는다: 같은 질문을 다시
+  묻지 말고 `ask --resume <message_id> --timeout-ms <n>`로 이어 기다린다 — 사람이 생각할 시간이
+  필요한 대화형 질문이라 매 호출에 넉넉한 `--timeout-ms`를 주고, 타임아웃이면 이 resume으로
+  반복한다. 이건 이 세션이 스스로 던진 질문을 기다리는 것이라 `self-recovery.md`의
+  alive/stuck_draft/dead 대기 루프(이 세션이 스폰한 워커를 기다리는, 반대 방향의 절차)와는 다른
+  경로다). epic 드레인 중 hitl 하위 task마다 이 대화가 순차로 사람을 기다리는 것은 의도된 동작이다
+  — hitl은 애초에 "이 task의 contract-sprint에 개입하겠다"는 선택이지, epic 자신이 개입할 지점이
+  아니다.
+- 아래 라운드-한도/override 라우팅(파일 내용만으로 분기하는 기존 bash 블록)과 evaluator 디스패치는
+  이 파일들을 누가 썼는지와 무관하게 그대로 실행한다 — 바뀌는 것은 이 파일들의 작성 주체뿐이다.
+- afk는 아래 "라운드 1"·"라운드 2+"의 task-runner 디스패치 그대로(변경 없음).
+
+**아래 두 블록(라운드 1, 라운드 2+) 중 task-runner 스폰 부분은 afk 전용이다** — hitl은 위 절차로
+대체한다. evaluator 스폰 부분은 두 mode 모두 그대로 실행한다.
 
 ```bash
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
@@ -345,7 +427,9 @@ log_dispatch --skill "orca-workflow-task" --role "evaluator" --issue "<issue-num
 # SPEC_TEXT 사이드카는 위 task-runner 블록과 같은 이유로 배선하지 않는다(issue #94 1단계).
 ```
 
-**Contract 협상 relay — 라운드 2+ (반려된 경우만; 승인이면 곧장 §2)**: 라운드 1과 같은 task_id를 재사용하지
+**Contract 협상 relay — 라운드 2+ (반려된 경우만; 승인이면 곧장 §2)**: **재-engage 대상이
+task-runner인 경우는 afk 전용이다** — hitl은 위 "mode=hitl일 때 generator 역할" 절차로 대체한다.
+재-engage 대상이 evaluator인 경우는 mode 무관하게 아래 그대로. 라운드 1과 같은 task_id를 재사용하지
 않는다 — `dispatch`는 이미 `dispatched`/`completed` 상태인 task를 거부하고(`"Task ... is dispatched; only ready tasks can be dispatched"`, 실측), 애초에 텍스트를 override하는 인자가 없어 재사용해도 라운드 1과 같은
 spec만 재전송된다. 대신 매 라운드 새 task를 만들어 같은 터미널(재-engage 대상은 task-runner면
 `<run-handle>`, evaluator면 `<evaluate-handle>`)에 재-dispatch한다 — 단 그 터미널의 직전 dispatch가
@@ -434,7 +518,8 @@ find "$HOME/.local/state/orca-workflows/logs" -name 'assignments-*.jsonl' 2>/dev
 
 ## 4. 라우팅
 
-- PASS → PR 생성/보강, merge, issue 종료(§2가 반환하는 건 diff 경로일 뿐 PR이 아니므로 이 단계에서 처음 PR을 만들거나 기존 PR을 찾아 보강한다):
+- PASS → PR 생성/보강, merge, issue 종료(§2가 반환하는 건 diff 경로일 뿐 PR이 아니므로 이 단계에서 처음 PR을 만들거나 기존 PR을 찾아 보강한다). `<task-branch>`는 §0 격리 가드(issue #180)가 계산한
+  `task_branch`다 — 즉흥적으로 다시 짓지 않고 그 값을 그대로 쓴다:
 
   ```bash
   # task 브랜치에 열린 PR이 있는지 확인 — 없으면 여기서 만든다(할당 로그의 worktree/branch 사용)

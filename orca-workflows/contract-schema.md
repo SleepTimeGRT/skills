@@ -32,9 +32,14 @@ install -d -m 700 "$CONTRACT_DIR"
 
 | file | writer | when |
 |---|---|---|
-| `proposal-r<n>.json` | orca-task-runner (generator) | 라운드 n 제안 (r3는 라운드 2→3 조건부 연장 시 정식 협상 라운드, 그 외에는 r3+가 override 후속 라운드 — 아래 두 절) |
+| `proposal-r<n>.json` | orca-task-runner (generator)† | 라운드 n 제안 (r3는 라운드 2→3 조건부 연장 시 정식 협상 라운드, 그 외에는 r3+가 override 후속 라운드 — 아래 두 절) |
 | `verdict-r<n>.json` | orca-evaluate (evaluator) | 라운드 n 판정 |
-| `override.json` | orca-task-runner | 2라운드에도 rejected일 때 결정권 행사 기록 (라운드 2→3 조건부 연장이 발동했으면 3라운드 — 아래 두 절) |
+| `override.json` | orca-task-runner† | 2라운드에도 rejected일 때 결정권 행사 기록 (라운드 2→3 조건부 연장이 발동했으면 3라운드 — 아래 두 절) |
+
+† `orca-workflow-task` §0의 mode가 `hitl`이면 이 두 파일의 실제 writer는 별도 스폰된 `orca-task-runner`가
+아니라 `orca-workflow-task` 코디네이터 자신이다(사람과 직접 협의해 작성 — issue #180, 그 스킬 SKILL.md §1
+"mode=hitl일 때 generator 역할" 참고). 스키마·파일 형식·라운드/override 규칙은 동일하다 — 바뀌는 것은
+작성 주체뿐이다. `afk`는 이 표대로 `orca-task-runner`가 쓴다.
 | `gate-flake-a<k>.json` | orca-task-runner (generator) | attempt k의 task 게이트가 재시도 후 통과(flake 재분류)했을 때만 |
 | `eval-report-a<k>.json` | orca-evaluate (evaluator) | 구현 attempt k의 평가 판정 기록 |
 
