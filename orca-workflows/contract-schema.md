@@ -235,16 +235,23 @@ override.json 먼저 — 크래시 시 재구성이 "override 없이 r3만 있�
   "attempt": 1,
   "verdict": "FAIL",
   "code_review_ran": true,
-  "findings": [ {"severity": "critical", "finding": "<결함 서술>", "evidence": "<file:line 또는 e2e 관찰>", "fix_direction": "<수정 방향>"} ]
+  "findings": [ {"severity": "critical", "finding": "<결함 서술>", "evidence": "<file:line 또는 e2e 관찰>", "fix_direction": "<수정 방향>", "in_diff_footprint": true} ]
 }
 ```
 
 - `verdict`: `"PASS"` | `"FAIL"` | `"ESCALATE"` — `orca-workflow-task`에 반환하는 값과 반드시 일치한다.
 - `findings[].severity`: `"critical"` | `"important"` | `"minor"`.
+- `findings[].in_diff_footprint`(issue #119): `evidence`가 `file:line` 형태면 그 파일이 확정된
+  `proposal-r<n>.json`의 `scope.files`(위 절)에 있는지 기계적으로 대조한 결과 — 있으면 `true`, 없으면
+  `false`. `evidence`가 e2e 관찰(파일 경로 없음)이면 항상 `true`. 리뷰어의 산문 판단을 신뢰하지 않는,
+  파일 경로 대 `scope.files` 목록의 순수 포함 여부 검사다(`orca-evaluate` SKILL.md §4). `false`인
+  finding은 diff가 도입한 게 아니라 diff가 드러냈을 뿐인 기존 결함으로 취급되어 아래 PASS/FAIL
+  판정에서 제외된다 — 삭제되지 않고 이 배열에 그대로 남는다.
 - `code_review_ran`: 이 attempt에서 §3 code review가 실제 실행됐는가. agent e2e 실패 확정으로
   fail-fast 생략된 attempt는 `false`.
-- **불변식**: `"FAIL"`이면 `findings`는 비어 있을 수 없고, `"PASS"`면 `critical`/`important`
-  finding이 없어야 하며 `code_review_ran`은 `true`여야 한다(리뷰 생략 후 PASS는 위반이다).
+- **불변식**: `"FAIL"`이면 `findings`는 비어 있을 수 없고, `"PASS"`면 `in_diff_footprint: true`인
+  `critical`/`important` finding이 없어야 하며(`false`인 항목은 있어도 무방) `code_review_ran`은
+  `true`여야 한다(리뷰 생략 후 PASS는 위반이다).
 - **이 파일이 FAIL feedback의 정본이다.** 경로가 `CONTRACT_DIR`와 attempt 번호로 결정론적이므로
   코디네이터는 attempt 번호와 확정 라운드 번호만 중계하고 본문을 요약·중계하지 않는다 — 재-dispatch된 generator가
   직접 읽는다(협상 라운드 2+의 verdict 전달과 같은 원칙).
