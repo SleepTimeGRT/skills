@@ -59,6 +59,16 @@ gh issue view <id> --json state -q .state
 gh issue close <id> --comment "<note>"
 ```
 
+## `add_comment(id, note)`
+
+```bash
+gh issue comment <id> --body "<note>"
+```
+
+`close_issue`와 달리 상태를 건드리지 않는다 — issue가 이미 닫혀 있어도(다른 채널로 닫혔든, 정상
+`link_pr_for_close`로 닫혔든) 그냥 코멘트만 남긴다. 이미 닫힌 issue에 감사 코멘트를 남겨야 할 때
+(`orca-workflow-task` §4의 머지-후 라우팅, issue #115) `close_issue` 대신 이걸 쓴다.
+
 ## `link_pr_for_close(pr_number, id)`
 
 **merge-magic 있음** — PR 머지가 "Closes #id" 키워드로 issue를 자동으로 닫아준다.
@@ -74,6 +84,14 @@ Closes #<id>"
 끝 경계 `([^0-9]|$)`는 `id=12`가 `#123`에 잘못 매칭되는 것을 막는다. 키워드가 확인/보강되면 그걸로
 충분하다. 단 base가 default branch가 아니면 키워드가 동작하지 않으므로,
 `close_issue`로 머지 후 상태를 한 번 더 확인하는 것이 안전망이 된다(호출자인 `orca-workflow-task` §4 참고).
+
+**auto-close 채널은 PR 본문 하나가 아니다(issue #115, MediCount#540 실측)**: `gh pr merge --squash`가
+커밋 메시지를 지정받지 않으면, 브랜치에 커밋이 1개뿐인 PR은 그 원 커밋의 메시지(본문 포함)를 그대로
+스쿼시 커밋 메시지로 쓴다 — 이 함수가 관리하는 PR 본문이 아니다. 그 원 커밋에 `Closes #N` 트레일러가
+실려 있으면(흔한 커밋 메시지 컨벤션), PR 본문에서 keyword를 의도적으로 뺐어도 이 두 번째 채널을 통해
+issue가 그대로 자동 종료된다. 그래서 `orca-workflow-task` §4는 merge 시 `--subject`/`--body`를 명시해
+스쿼시 커밋 메시지를 이 함수가 관리하는 PR 본문으로 고정한다 — auto-close 채널이 이 함수 하나로
+좁혀지도록. 호출자가 그 인자를 빠뜨리면 이 두 번째 채널이 다시 열린다.
 
 ## `find_regressions()`
 

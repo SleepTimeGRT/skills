@@ -71,6 +71,16 @@ Duplicate/Won't Do). **repo 문서의 워크플로 표에 없는 transition은 �
   available transition 목록에 없을 때(Jira transition은 현재 status에 따라 달라지므로 발생 가능) —
   가장 비슷한 이름으로 임의 대체하지 않는다
 
+## `add_comment(id, note)`
+
+```
+addCommentToJiraIssue(cloudId, issueIdOrKey=id, comment=note)
+```
+
+`close_issue`와 달리 transition을 요구하지 않는다 — issue가 이미 어떤 상태로 전환돼 있어도 그냥
+코멘트만 남긴다. 이미 닫힌 issue에 감사 코멘트를 남겨야 할 때(`orca-workflow-task` §4의 머지-후
+라우팅, issue #115) `close_issue` 대신 이걸 쓴다.
+
 ## `find_regressions()`
 
 **컨벤션**: 머지된 task issue가 사후 결함의 원인으로 판명되면, 결함 이슈 description에

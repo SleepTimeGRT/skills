@@ -419,6 +419,14 @@ find "$HOME/.local/state/orca-workflows/logs" -name 'assignments-*.jsonl' 2>/dev
 
   ```bash
   pr_num="$(gh pr list --head "<task-branch>" --json number -q '.[0].number')"
+  # 스쿼시 커밋 메시지를 이 스킬이 소유한다(issue #115) — 지정하지 않으면 gh pr merge는 커밋이
+  # 1개뿐인 브랜치에서 그 원 커밋 메시지를 그대로 스쿼시 메시지로 쓴다. 그 원 커밋에 우연히
+  # `Closes #N` 트레일러가 있으면(흔한 커밋 컨벤션), 위 link_pr_for_close가 관리하는 PR 본문에서
+  # keyword를 뺐어도 이 두 번째 채널로 issue가 그대로 자동 종료된다(MediCount#540 실측,
+  # issue-trackers/github.md의 link_pr_for_close 문서 참고). --subject/--body를 명시해 auto-close
+  # 채널을 link_pr_for_close가 관리하는 PR 본문 하나로 고정한다.
+  pr_title="$(gh pr view "$pr_num" --json title -q .title)"
+  pr_body="$(gh pr view "$pr_num" --json body -q .body)"
   # merge — stale-main·게이트-무결성 검증은 이 스킬이 하지 않는다:
   # 그 검증은 대상 repo의 CI required check(e2e gate)와 branch protection 설정(required check 지정 +
   # "Require branches to be up to date" 또는 merge queue) 몫이다. 그 설정이 없는 repo에서는 이 merge가
@@ -437,7 +445,7 @@ find "$HOME/.local/state/orca-workflows/logs" -name 'assignments-*.jsonl' 2>/dev
     # mergeStateStatus=UNKNOWN이라 아래 어느 분기에도 안 걸려 예산 소진까지 폴링하게 된다.
     # 매 회차 진입 시(재실행 재개 케이스, #72) + merge 시도 직후 두 곳에서 상태로 판정한다.
     if [ "$(gh pr view "$pr_num" --json state -q .state)" = "MERGED" ]; then merged=true; break; fi
-    gh pr merge "$pr_num" --squash --delete-branch || true   # 종료 코드는 판정에 쓰지 않는다
+    gh pr merge "$pr_num" --squash --delete-branch --subject "$pr_title" --body "$pr_body" || true   # 종료 코드는 판정에 쓰지 않는다
     if [ "$(gh pr view "$pr_num" --json state -q .state)" = "MERGED" ]; then merged=true; break; fi
     state="$(gh pr view "$pr_num" --json mergeStateStatus -q .mergeStateStatus)"
     if [ "$state" = "DIRTY" ]; then
@@ -468,7 +476,16 @@ find "$HOME/.local/state/orca-workflows/logs" -name 'assignments-*.jsonl' 2>/dev
   # 마지막 state와 실패 check 이름·링크(gh pr checks "$pr_num")를 §5 보고에 첨부한다.
   ```
 
-  머지 성공 시(`merged=true`) **`is_open(task-issue-num)`이 true면 `close_issue(task-issue-num, "Merged via PR #$pr_num")`를 호출**한다 — 코드호스팅(PR 머지)은 GitHub 전용이라 미변경이고, issue 종료는 트래커 무관하게 이 한 경로로 처리된다: GitHub는 위 `link_pr_for_close`가 보통 이미 닫아둬서 여기선 안전망(no-op)이고, Jira 등 merge-magic이 없는 트래커는 이 호출이 유일한 종료 경로다. (`is_open`/`close_issue`/`link_pr_for_close`는 실제 셸 커맨드가 아니라 tracker adapter 오퍼레이션이다 — 문자 그대로 셸에 붙여넣지 말 것.) `close_issue`가 "완료" transition을 찾지 못하면 그 시점에서 `outcome=NO_DONE_TRANSITION`을 직접 로깅하고 §5로 간다.
+  머지 성공 시(`merged=true`) **`is_open(task-issue-num)`이 true면 `close_issue(task-issue-num, "Merged via PR #$pr_num")`를 호출**한다 — 코드호스팅(PR 머지)은 GitHub 전용이라 미변경이고, issue 종료는 트래커 무관하게 이 한 경로로 처리된다: GitHub는 위 `link_pr_for_close`가 보통 이미 닫아둬서 여기선 안전망(no-op)이고, Jira 등 merge-magic이 없는 트래커는 이 호출이 유일한 종료 경로다. `close_issue`가 "완료" transition을 찾지 못하면 그 시점에서 `outcome=NO_DONE_TRANSITION`을 직접 로깅하고 §5로 간다.
+
+  **`is_open`이 이미 false면**(issue #115 — GitHub의 정상 케이스가 흔히 이렇다: `link_pr_for_close`가
+  관리하는 PR 본문 keyword로 머지 시점에 이미 자동 종료돼 있다) `close_issue`를 부르지 않는 대신
+  **`add_comment(task-issue-num, "Merged via PR #$pr_num")`를 호출**한다 — 이 스킬은 그 close가
+  정상 채널(위 keyword)로 일어난 건지 다른 원인인지 구분할 수 없으므로, 거짓 no-op으로 감사 코멘트
+  자체가 유실되지 않도록 무조건 코멘트만은 남긴다. `close_issue`(전환+코멘트를 한 번에 하는
+  adapter 오퍼레이션)와 달리 `add_comment`는 상태를 건드리지 않는다. (`is_open`/`close_issue`/
+  `add_comment`/`link_pr_for_close`는 실제 셸 커맨드가 아니라 tracker adapter 오퍼레이션이다 —
+  문자 그대로 셸에 붙여넣지 말 것.)
 
   task 종료(`merge_outcome`이 남은 경우는 예외 — 아래 CI_GATE_FAIL/CI_GATE_TIMEOUT/MERGE_CONFLICT 참고, task 종료가 아니라 §5로 간다).
 - FAIL → 재시도 카운터 확인. **2회 미만이면** `orca-task-runner`에 재-dispatch(§2로 — spec 구성은 §2의 FAIL 재시도 템플릿을 그대로 따른다: 방금 FAIL한 attempt 번호 + `eval-report-a<attempt>.json`·`proposal-r<확정라운드>.json` 두 파일 포인터, §1 라운드 2+ relay와 같은 원칙). **2회 도달하면** §5로.
