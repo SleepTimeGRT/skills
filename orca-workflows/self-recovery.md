@@ -16,7 +16,14 @@ bit more care). Detect completion via `check --wait` (verified live against Orca
 Diagnose a timeout using the narrowest-scope tool already confirmed to carry a signal: a bounded
 `terminal read` probe (the same one `dispatch-verify.md` already uses), not `worker-show`'s
 `last_heartbeat_at` — every dispatch checked in the design investigation had `last_heartbeat_at: null`,
-so it is not relied on here. Recovery itself branches on how the dispatch was created (Preconditions
+so it is not relied on here. **Parent-side liveness confirmation is this `terminal read` probe, never
+`heartbeat` messages** (issue #142) — a spawned worker's `heartbeat`/`status` sends to its parent Run
+have no consumer here, but each one still interrupts the parent REPL with a runtime notification
+regardless of `check --wait`'s own `--types` filter, costing a full-context turn for zero signal. Since
+this file's own liveness mechanism never reads heartbeat, every dispatch spec built by a caller of this
+loop should explicitly instruct the spawned worker not to send them (`orca-workflow-task`/
+`orca-workflow-epic` SKILL.md's heartbeat-suppression contract). Recovery itself branches on how the
+dispatch was created (Preconditions
 below enumerates both paths, and the `dead` case's two sub-branches implement them): for a dispatch
 created via `worker-start`, recover via `worker-abandon` (fence, non-destructive) followed by
 `worker-start --retry-of` (tracked retry); for a dispatch created via `task-create` + `dispatch --inject`,

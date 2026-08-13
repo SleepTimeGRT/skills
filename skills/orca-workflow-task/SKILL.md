@@ -74,6 +74,13 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
   orchestration 호출을 시도하지 말고(같은 죽은 transport) 즉시 사람에게 알리지 말고
   .orca-orphaned-result-<task_id>.json에 결과를 저장(커밋 금지)한 뒤 터미널에
   ORPHANED_RESULT <task_id> <파일 절대경로> 한 줄을 출력하고 멈춰라."
+- **heartbeat 억제 계약(issue #142)** — §1의 네 spec_text가 공통으로 포함하는 지시문. Orca가
+  `dispatch --inject`에 주입하는 coordinator preamble은 워커에게 `heartbeat`도 보내라고 지시하는데,
+  이 스킬(그리고 이 스킬을 스폰한 `orca-workflow-epic`)은 `check --wait`의 `--types` 필터 event wait +
+  `terminal read` 프로브로만 생존을 확인하므로(`self-recovery.md`의 liveness 절 참고) heartbeat는
+  소비자가 없는 순수 비용이다 — 부모 REPL이 무해한 알림 하나마다 전체 컨텍스트 턴을 소비하는 것으로
+  실측됐다(epic #122 드레인, 40분짜리 evaluate 1건 동안 부모 턴 8회 이상). 각 spec 조립 시 아래 문구를
+  전문 그대로 삽입한다: "부모 run으로 heartbeat/status를 주기 전송하지 마라 — 부모는 event wait + terminal read 프로브로 생존을 확인한다. 실제 이벤트(worker_done/escalation/ask)만 보내라. 네가 스폰하는 워커에게도 동일하게 지시하라(같은 비용이 네 REPL에 발생한다)."
 - **MCP 서버 인증 전제**(세션 시작 시 1회 확인) — §1에서 스폰하는 워커/평가자 터미널이 쓰는 MCP 서버
   (예: Context7)는 스폰 전에 이미 인증이 끝나 있거나, 그 프로필에서 비활성화돼 있어야 한다. 로그인
   프롬프트가 스폰된 세션을 막으면 주입된 spec이 처리되지 않고 사람이 직접 ESC로 해제해야 한다 —
@@ -263,7 +270,7 @@ while :; do
   fi
 done
 # End pre-dispatch boot-quiesce
-spec_text="<issue 번호 + 대상 repo(logging.md §1 repo 필드용 — 받은 문자열 그대로, issue #158) + CONTRACT_DIR 절대경로 + 제안서/구현 모드(제안서 모드면: contract-schema.md 스키마대로 AC 초안을 포함한 proposal-r<라운드>.json을 CONTRACT_DIR에 작성) + orphan-폴백 계약(§0) 전문>"
+spec_text="<issue 번호 + 대상 repo(logging.md §1 repo 필드용 — 받은 문자열 그대로, issue #158) + CONTRACT_DIR 절대경로 + 제안서/구현 모드(제안서 모드면: contract-schema.md 스키마대로 AC 초안을 포함한 proposal-r<라운드>.json을 CONTRACT_DIR에 작성) + orphan-폴백 계약(§0) 전문 + heartbeat 억제 계약(§0) 전문>"
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
@@ -321,7 +328,7 @@ while :; do
   fi
 done
 # End pre-dispatch boot-quiesce
-spec_text="<orca-evaluate SKILL.md 지침 + CONTRACT_DIR 절대경로와 대상 라운드 번호(검토 대상 proposal-r<n>.json·판정 산출 verdict-r<n>.json — 스키마·적대적 판정 지침·라운드 2+ 입력 격리 규칙은 contract-schema.md) + issue 원문 + issue 번호 + 대상 repo(logging.md §1 repo 필드용, issue #158) + 요청 모드 + orphan-폴백 계약(§0) 전문>"
+spec_text="<orca-evaluate SKILL.md 지침 + CONTRACT_DIR 절대경로와 대상 라운드 번호(검토 대상 proposal-r<n>.json·판정 산출 verdict-r<n>.json — 스키마·적대적 판정 지침·라운드 2+ 입력 격리 규칙은 contract-schema.md) + issue 원문 + issue 번호 + 대상 repo(logging.md §1 repo 필드용, issue #158) + 요청 모드 + orphan-폴백 계약(§0) 전문 + heartbeat 억제 계약(§0) 전문>"
 orca_call_with_retry "orca-workflow-task" "evaluator" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-task" "evaluator" -- \
@@ -356,7 +363,7 @@ spec만 재전송된다. 대신 매 라운드 새 task를 만들어 같은 터�
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 source ~/.agents/orca-workflows/scripts/log_dispatch.sh
 RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<issue 번호>-orca-workflow-task.txt")"   # §0에서 남긴 사이드카
-spec_text="<round 번호 + CONTRACT_DIR 절대경로(파일명은 contract-schema.md 컨벤션으로 결정론적 — task-runner행이면 직전 verdict-r<n-1>.json을 읽고 proposal-r<n>.json 작성, evaluator행이면 라운드 2+ 입력 격리 규칙대로 원본 issue·proposal-r<n>.json·자신의 직전 verdict만 입력) + orphan-폴백 계약(§0) 전문>"
+spec_text="<round 번호 + CONTRACT_DIR 절대경로(파일명은 contract-schema.md 컨벤션으로 결정론적 — task-runner행이면 직전 verdict-r<n-1>.json을 읽고 proposal-r<n>.json 작성, evaluator행이면 라운드 2+ 입력 격리 규칙대로 원본 issue·proposal-r<n>.json·자신의 직전 verdict만 입력) + orphan-폴백 계약(§0) 전문 + heartbeat 억제 계약(§0) 전문>"
 orca_call_with_retry "orca-workflow-task" "contract-round" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-task" "contract-round" -- \
@@ -382,7 +389,7 @@ log_dispatch --skill "orca-workflow-task" --role "contract-round" --issue "<issu
 `orca-task-runner` 호출, 결과로 **task 전체 diff 경로** 또는 **`GATE_FAIL`**을 받는다(`orca-task-runner`가 자기 task-레벨 게이트를 재시도 한도(2회) 안에 못 넘긴 경우 — `skills/orca-task-runner/SKILL.md` §6). §4의 FAIL 재시도로 돌아온 호출이면 spec을 아래 템플릿대로 구성한다 — findings를 prose로 요약하지 않고 파일 경로만 넘긴다:
 
 ```
-spec_text="<issue 번호 + 대상 repo(logging.md §1 repo 필드용, issue #158) + CONTRACT_DIR 절대경로 + 구현 모드 + 직전 attempt 번호 + \"CONTRACT_DIR의 eval-report-a<attempt>.json과 최종 라운드 proposal(가장 큰 proposal-r<n>.json — 네가 직접 확인)을 이 순서로 전부 읽어라 — findings를 요약해 넘기지 않는다\" + orphan-폴백 계약(§0) 전문>"
+spec_text="<issue 번호 + 대상 repo(logging.md §1 repo 필드용, issue #158) + CONTRACT_DIR 절대경로 + 구현 모드 + 직전 attempt 번호 + \"CONTRACT_DIR의 eval-report-a<attempt>.json과 최종 라운드 proposal(가장 큰 proposal-r<n>.json — 네가 직접 확인)을 이 순서로 전부 읽어라 — findings를 요약해 넘기지 않는다\" + orphan-폴백 계약(§0) 전문 + heartbeat 억제 계약(§0) 전문>"
 ```
 
 확정 계약 라운드 번호는 이 스킬이 치환하지 않는다 — 확정 AC의 정본은 "최종 라운드(가장 큰 n) proposal"이고(contract-schema.md — override 경로에서는 정정 라운드(r4+)가 나중에 추가될 수 있어 코디네이터가 아는 번호가 낡을 수 있다, issue #130), generator가 CONTRACT_DIR에서 직접 확인한다(이 스킬은 feedback 본문도 확정 AC 본문도 중계하지 않는다).
