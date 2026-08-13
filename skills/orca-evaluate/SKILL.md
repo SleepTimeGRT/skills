@@ -203,8 +203,23 @@ report는 severity(Critical/Important/Minor) + 도달 조건 + 최악 결과 + f
 
 §1(contract 판정 기록) + §2(agent e2e 자기 요약 + 재확인 결과) + §3(code-reviewer report, agent e2e 결과가 이미 반영됨) 세 가지를 이 세션이 하나의 리포트로 합성한다(§2 fail-fast로 §3이 생략된 attempt면 §1+§2 두 가지다) — 이건 판단이 아니라 이미 나온 판단들을 압축하는 일이라(어려운 판단은 §1·§3에서 강한 reasoning 모델이 이미 끝냄) 이 세션(REPL-capable provider, agy 아님)이 그대로 해도 된다. PASS/FAIL/ESCALATE 매핑도 아래 고정 규칙을 그대로 적용하는 것이라 이 세션이 직접 낸다:
 
-- **PASS** — code-reviewer report에 Critical/Important finding 없음, agent e2e 통과(자기 요약과 재확인 결과가 일치), contract 종결이 approved거나 `plan_coverage`-only override(override의 unresolved 항목이 §3 리뷰(입력 ⑥)에서 실제 결함으로 실체화되면 그게 곧 finding이라 첫 조건에서 걸린다 — override 자체는 PASS를 막지 않는다. `ac_fidelity` 미해소 override는 이 스킬에 도달하지 않는다: `orca-workflow-task` §1이 `CONTRACT_ESCALATE`로 먼저 자른다).
-- **FAIL** — 구체적 finding(severity+근거+수정 방향)은 아래 `eval-report-a<attempt>.json`에 남기고, `orca-workflow-task`에는 FAIL verdict만 반환한다. (재시도는 `orca-workflow-task`가 관리한다 — 이 스킬은 재-dispatch하지 않는다. `orca-workflow-task`가 재시도 카운터를 세고, 필요하면 attempt 번호와 함께 `orca-task-runner`에 재-dispatch — evaluator가 task-runner를 직접 부르지 않고, feedback 본문도 `orca-workflow-task`를 거치지 않는다.)
+**diff-footprint 분류(issue #119)** — PASS/FAIL을 가르기 전에, §3 code-reviewer report의 각
+Critical/Important finding에 `in_diff_footprint` 값을 매긴다: `evidence`가 `file:line` 형태면 그
+파일이 최종 확정된 proposal의 `scope.files`(`contract-schema.md`)에 있는지만 기계적으로 대조한다 —
+있으면 `true`, 없으면 `false`. `evidence`가 e2e 관찰(파일 경로가 없음)이면 항상 `true`다 — e2e는 이
+diff가 만든 실제 런타임 동작이지 위치 대조 대상이 아니다. 이 대조는 파일 경로 대 `scope.files` 목록의
+기계적 포함 여부만 본다 — 리뷰어의 산문 판단(예: "이건 pre-existing이다")을 신뢰하지 않는다(issue #119
+triage: reviewer 자기평가에 기반한 판정 완화는 evaluator 스스로 FAIL을 회피하는 구멍이 될 수 있어
+채택하지 않았다). issue가 제안했던 "+ AC 밖" 조건은 넣지 않는다 — AC 경계 판단은 다시 judgment가
+필요해 이 게이트의 기계적 감사 가능성을 해친다(같은 이유로 좁혔다). `in_diff_footprint: false`인
+finding은 `eval-report-a<attempt>.json`의 `findings`에서 빠지지 않고 그대로 남지만(리뷰가 그 결함을
+보고하지 않는 게 아니라 이 attempt를 FAIL시키지 않을 뿐이다), 아래 PASS/FAIL 판정에서는 제외한다 —
+대상 repo에 별도 이슈로 자동 파일링하는 배선은 이 스킬의 범위 밖이다(추후 별도 issue로 추적).
+공유 컴포넌트(N개 호출부를 가진 primitive) 마이그레이션에서 이 분기가 없으면 같은 defect class가
+attempt마다 다른 호출부에서 새로 발견돼 FAIL이 호출부 수만큼 반복될 수 있다(#631 4연속 FAIL 실측).
+
+- **PASS** — code-reviewer report에 `in_diff_footprint: true`인 Critical/Important finding 없음, agent e2e 통과(자기 요약과 재확인 결과가 일치), contract 종결이 approved거나 `plan_coverage`-only override(override의 unresolved 항목이 §3 리뷰(입력 ⑥)에서 실제 결함으로 실체화되면 그게 곧 finding이라 첫 조건에서 걸린다 — override 자체는 PASS를 막지 않는다. `ac_fidelity` 미해소 override는 이 스킬에 도달하지 않는다: `orca-workflow-task` §1이 `CONTRACT_ESCALATE`로 먼저 자른다).
+- **FAIL** — `in_diff_footprint: true`인 Critical/Important finding이 하나라도 있으면(`false`인 finding은 FAIL 사유로 세지 않는다 — 위 분류 참고). 구체적 finding(severity+근거+수정 방향+`in_diff_footprint`)은 아래 `eval-report-a<attempt>.json`에 남기고, `orca-workflow-task`에는 FAIL verdict만 반환한다. (재시도는 `orca-workflow-task`가 관리한다 — 이 스킬은 재-dispatch하지 않는다. `orca-workflow-task`가 재시도 카운터를 세고, 필요하면 attempt 번호와 함께 `orca-task-runner`에 재-dispatch — evaluator가 task-runner를 직접 부르지 않고, feedback 본문도 `orca-workflow-task`를 거치지 않는다.)
 - **ESCALATE** — 다음 중 하나면 재시도 없이 즉시: acceptance criteria 자체가 애매해서 판정이 불가능, 구현이 issue 스코프 밖의 것을 건드림, agent e2e가 인프라 문제(계정·secret·환경, **또는 `docs/agents/e2e-tooling.md` 부재·precondition 미충족** — 후자는 `/project-setup` 실행 안내와 함께)로 판단 불가, **destructive-op 린터가 flag했는데 code-reviewer report가 그 항목이 제안서의 destructive-op 선언에 커버되지 않는다고 명시함**.
 
 판정과 함께 `CONTRACT_DIR`에 `eval-report-a<attempt>.json`을 남긴다(attempt 번호는 spec으로 받은 값, 스키마·불변식은 `contract-schema.md` — `verdict` 필드는 반환값과 반드시 일치). FAIL 시 이 파일의 `findings`가 재-dispatch된 generator의 유일한 feedback 입력이다.
