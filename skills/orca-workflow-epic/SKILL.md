@@ -100,7 +100,7 @@ while :; do
   fi
 done
 # End pre-dispatch boot-quiesce
-spec_text="<orca-workflow-task SKILL.md 지침 + task issue 번호 + mode(afk|hitl) + 대상 repo + '너는 spawn된 coordinator다: 최종 outcome은 worker_done으로 보고하고, hitl 질문은 ask(decision gate)로 올려라' + worker_done을 포함해 네가 보내는 orca orchestration/orca terminal 호출은 항상 orca_call_with_retry로 감싸고(issue #42), wrapper가 exhausted를 반환하면 추가 orchestration 호출 없이 .orca-orphaned-result-<task_id>.json에 결과를 저장(커밋 금지)한 뒤 터미널에 ORPHANED_RESULT <task_id> <파일 절대경로> 한 줄을 출력하고 멈추라는 지시(orca-task-runner SKILL.md subtask spec 항목 ⑦과 동일 계약)>"
+spec_text="<orca-workflow-task SKILL.md 지침 + task issue 번호 + mode(afk|hitl) + 대상 repo(정본 식별자 문자열 — 예: owner/name. logging.md §1 repo 필드에 그대로 쓰일 값이며, worktree 절대경로가 아니다. 이 coordinator가 작업할 worktree 경로가 별도로 필요하면 그건 이 필드와 분리된 별개 항목으로 넣는다 — 하나의 placeholder에 두 값을 섞지 않는다, issue #164) + '너는 spawn된 coordinator다: 최종 outcome은 worker_done으로 보고하고, hitl 질문은 ask(decision gate)로 올려라' + worker_done을 포함해 네가 보내는 orca orchestration/orca terminal 호출은 항상 orca_call_with_retry로 감싸고(issue #42), wrapper가 exhausted를 반환하면 추가 orchestration 호출 없이 .orca-orphaned-result-<task_id>.json에 결과를 저장(커밋 금지)한 뒤 터미널에 ORPHANED_RESULT <task_id> <파일 절대경로> 한 줄을 출력하고 멈추라는 지시(orca-task-runner SKILL.md subtask spec 항목 ⑦과 동일 계약)>"
 orca_call_with_retry "orca-workflow-epic" "task-coordinator" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-epic" "task-coordinator" -- \
