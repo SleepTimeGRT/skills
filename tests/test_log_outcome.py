@@ -53,6 +53,7 @@ DOCUMENTED_OUTCOME_ENUM = [
     "RETRO_FAIL",
     "escalation_parked",
     "skipped",  # issue #138
+    "unblocked_requeue",  # issue #165
     "NO_ACCEPTANCE_CRITERIA",  # issue #105
     "UNMAPPED_BRANCH",
 ]
@@ -193,6 +194,23 @@ def test_skipped_without_blocked_by_warns_but_still_writes(tmp_path, shell):
     assert len(recs) == 1  # never omit the outcome event
     assert recs[0]["outcome"] == "skipped"
     assert "blocked_by" not in recs[0]
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_unblocked_requeue_carries_blocked_by(tmp_path, shell):
+    """Issue #165: unblocked_requeue is skipped's pair -- same blocked_by issue number, logged when
+    the previously-parked dependent is re-queued after its blocker resolves."""
+    script = (
+        "log_outcome --skill orca-workflow-epic --repo own/repo --issue 23 --outcome unblocked_requeue "
+        "--retry 0 --blocked-by 20"
+    )
+    result, home = _run(tmp_path, script, shell=shell)
+    assert result.returncode == 0, result.stderr
+    recs = _records(home)
+    assert len(recs) == 1
+    assert recs[0]["outcome"] == "unblocked_requeue"
+    assert recs[0]["blocked_by"] == "20"
+    assert "raw_outcome" not in recs[0]
 
 
 @pytest.mark.parametrize("shell", SHELLS)

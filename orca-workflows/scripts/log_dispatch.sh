@@ -81,7 +81,7 @@
 # - EPIC_DONE / PR_OPEN_PREMERGE_PASS (observed in #105's recurrence comments) are deliberately
 #   NOT added: neither has a decided semantics yet — they hit the UNMAPPED_BRANCH safeguard, which
 #   is the designed path for values awaiting a schema decision.
-LOG_OUTCOME_ENUM="PASS FAIL ESCALATE GATE_FAIL CONTRACT_ESCALATE CI_GATE_FAIL NO_DONE_TRANSITION CONTRACT_FINALIZED_BY_GENERATOR CONTRACT_APPROVED CONTRACT_SCHEMA_STALE MANUAL_RECOVERY_COMPLETED CI_GATE_TIMEOUT MERGE_CONFLICT RETRO_DONE RETRO_FAIL escalation_parked skipped NO_ACCEPTANCE_CRITERIA UNMAPPED_BRANCH"
+LOG_OUTCOME_ENUM="PASS FAIL ESCALATE GATE_FAIL CONTRACT_ESCALATE CI_GATE_FAIL NO_DONE_TRANSITION CONTRACT_FINALIZED_BY_GENERATOR CONTRACT_APPROVED CONTRACT_SCHEMA_STALE MANUAL_RECOVERY_COMPLETED CI_GATE_TIMEOUT MERGE_CONFLICT RETRO_DONE RETRO_FAIL escalation_parked skipped unblocked_requeue NO_ACCEPTANCE_CRITERIA UNMAPPED_BRANCH"
 
 # self_recovery.action_taken — mirrors logging.md §1's self_recovery recipe. resume_wait (a typo'd
 # variant of resumed_wait, seen 5x in issue #127) is exactly the class the substitution below
@@ -386,12 +386,15 @@ log_outcome() {
     fi
   fi
 
-  # blocked_by is conditionally REQUIRED for skipped and dropped otherwise (issue #138).
-  if [ "$outcome" = "skipped" ]; then
-    [ -n "$blocked_by" ] || echo "log_outcome: WARNING — outcome=skipped without --blocked-by" \
-      "(required conditional field, issue #138); writing the record without it" >&2
+  # blocked_by is conditionally REQUIRED for skipped and unblocked_requeue, dropped otherwise
+  # (issue #138 / issue #165 — unblocked_requeue references the same blocking issue number that
+  # skipped recorded when the dependent was first parked, so the two pair up on retro/audit reads).
+  if [ "$outcome" = "skipped" ] || [ "$outcome" = "unblocked_requeue" ]; then
+    [ -n "$blocked_by" ] || echo "log_outcome: WARNING — outcome=$outcome without --blocked-by" \
+      "(required conditional field, issue #138/#165); writing the record without it" >&2
   elif [ -n "$blocked_by" ]; then
-    echo "log_outcome: WARNING — --blocked-by only applies when outcome=skipped; dropping it" >&2
+    echo "log_outcome: WARNING — --blocked-by only applies when outcome=skipped or" \
+      "outcome=unblocked_requeue; dropping it" >&2
     blocked_by=""
   fi
 
