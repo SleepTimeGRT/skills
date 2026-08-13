@@ -40,7 +40,7 @@ CONTRACT_DIR 산출물이 담는다.
 ## 1. issue-drain
 
 별도로 뜬 세션(이 세션과 다른)에 큐의 issue 전체 검증을 맡긴다. 스폰·수신은 §3 레시피를 그대로
-재사용한다 — `terminal create` → `task-create` → `dispatch --inject` → 미전송 확인 → `log_dispatch`,
+재사용한다 — `terminal create` → `task-create` → `worker-start --terminal` → 미전송 확인 → `log_dispatch`,
 role은 `"issue-drain"`, provider·REPL 제약과 retry 래핑·ORPHANED_RESULT 계약도 §3과 동일, 결과는
 `worker_done`으로 수신 후 터미널 close. spec_text에는 root-num·대상 repo와 아래 검증 기준을 넣는다:
 
@@ -69,8 +69,8 @@ ready task마다 아래를 실행하고, worker_done 수신 후 다음 task로 �
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 source ~/.agents/orca-workflows/scripts/log_dispatch.sh
 RUN_ID="$(cat "$HOME/.local/state/orca-workflows/logs/run-<project-slug>-<root-num>-orca-workflow-epic.txt")"
-# provider: model-selection.md 기준 — 판단·orchestration 작업. REPL 필수(one-shot은 dispatch --inject
-# 수신 불가), agy 제외(models/agy.md).
+# provider: model-selection.md 기준 — 판단·orchestration 작업. REPL 필수(one-shot은 종료된 프로세스라
+# worker-start가 넣는 task 입력을 못 받는다), agy 제외(models/agy.md).
 orca_call_with_retry "orca-workflow-epic" "task-coordinator" -- \
   orca terminal create --worktree active --title task-coord-<task-issue-num> \
   --command "<REPL 가능, agy 제외 provider의 launch 문법 — provider 문서에서 resolve하되, 인라인 permission-bypass 플래그 필수: claude → --dangerously-skip-permissions, codex → --dangerously-bypass-approvals-and-sandbox>" --json
@@ -95,7 +95,7 @@ while :; do
   fi
   cur="$(printf '%s' "$boot_read" | jq -r '.result.terminal.latestCursor')"
   if [ "$(date -u +%s)" -ge "$boot_deadline" ]; then
-    # spawn-failures.md의 grep-first 절차를 따른다. task-create/dispatch --inject로 진행하지 않는다.
+    # spawn-failures.md의 grep-first 절차를 따른다. task-create/worker-start로 진행하지 않는다.
     exit 1
   fi
 done
@@ -104,7 +104,8 @@ spec_text="<orca-workflow-task SKILL.md 지침 + task issue 번호 + mode(afk|hi
 orca_call_with_retry "orca-workflow-epic" "task-coordinator" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-epic" "task-coordinator" -- \
-  orca orchestration dispatch --task <task_id> --to <coord-handle> --retry-request "$(uuidgen)" --inject --json
+  orca orchestration worker-start --task <task_id> --terminal <coord-handle> --run "$RUN_ID" --from <자기 handle> --retry-request "$(uuidgen)" --json
+DISPATCH_CREATED_VIA=worker-start   # self-recovery.md wait 루프의 dead-case 분기 입력 — SPEC_TEXT는 worker-start 복구 분기가 참조하지 않으므로 배선하지 않는다
 # 미전송 확인 — dispatch-verify.md 절차. 로그 — log_dispatch가 §1 assign + §2 meta/sent를 원자 기록:
 log_dispatch --skill "orca-workflow-epic" --role "task-coordinator" --issue "<task-issue-num>" \
   --repo "<대상 repo>" --task-id "<task_id>" --terminal "<coord-handle>" --worktree "<worktree 경로>" \
