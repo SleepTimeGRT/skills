@@ -304,9 +304,14 @@ contract_resume_state() {
           detail='"round limit reached at the extension round, rejected, no override recorded — re-dispatch the generator override step"'
         fi
       elif [ "$maxv" -ge 2 ]; then
-        # maxv==2 with ac_fidelity present (the extension didn't fire): unchanged legacy path.
-        resume="section-1-override"; round=3
-        detail='"round limit reached, rejected, no override recorded — re-dispatch the generator override step"'
+        # maxv==2 with ac_fidelity present (the extension didn't fire): straight to escalation,
+        # not the override step -- an ac_fidelity rejection never reaches override at all
+        # (issue #163, mirrors orca-workflow-task SKILL.md §1's own reordering). The previous
+        # "unchanged legacy path" here routed to section-1-override as if override.json were
+        # merely late, misreporting a normal AC-disagreement escalation as a recording-contract
+        # violation once a human read the resulting detail (studio-hevv/selah-android#23 T25).
+        contract="escalated"; resume="section-5"; outcome='"CONTRACT_ESCALATE"'
+        detail='"ac_fidelity disagreement unresolved at the round limit"'
       else
         resume="section-1-proposal"; round=$((maxv+1))
       fi

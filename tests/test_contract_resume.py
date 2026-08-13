@@ -188,16 +188,21 @@ def test_rejected_r2_plan_coverage_only_resumes_round3_proposal(tmp_path: Path, 
 
 
 @pytest.mark.parametrize("shell", SHELLS)
-def test_rejected_r2_with_ac_fidelity_still_resumes_override_step(tmp_path: Path, shell: str) -> None:
-    """ac_fidelity at round 2 is unchanged by the extension -- still goes straight to override."""
+def test_rejected_r2_with_ac_fidelity_and_no_override_escalates(tmp_path: Path, shell: str) -> None:
+    """ac_fidelity at round 2 is unchanged by the extension -- but it never reaches the override
+    step at all (issue #163): an AC-fidelity disagreement escalates straight to section-5 whether
+    or not override.json exists, since override was never required in the first place. Before the
+    #163 fix this asserted resume=="section-1-override", treating the missing override.json as if
+    it were merely late instead of legitimately absent -- mirrors the same reordering fix in
+    orca-workflow-task SKILL.md §1."""
     d = tmp_path / "issue-42"
     _write(d, "proposal-r1.json", _proposal(1))
     _write(d, "verdict-r1.json", _verdict(1, "rejected", ["plan_coverage"]))
     _write(d, "proposal-r2.json", _proposal(2))
     _write(d, "verdict-r2.json", _verdict(2, "rejected", ["plan_coverage", "ac_fidelity"]))
     state = _state(d, shell)
-    assert state["resume"] == "section-1-override"
-    assert state["round"] == 3
+    assert state["resume"] == "section-5"
+    assert state["outcome"] == "CONTRACT_ESCALATE"
 
 
 # ── override gate (mirrors orca-workflow-task §1) ───────────────────────────────────────────

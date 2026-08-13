@@ -155,12 +155,27 @@ fi
 ```
 
 ```bash
-if [ ! -f "<CONTRACT_DIR>/override.json" ]; then
-  # 라운드 한도에 도달했는데 override.json이 없다 — generator가 §1의 기록 계약을 어긴 것.
-  # 기록 없는 진행을 허용하지 않는다(fail-closed): outcome=CONTRACT_ESCALATE로 남기고 §5로.
-elif [ ! -f "<CONTRACT_DIR>/verdict-r2.json" ]; then
-  # override는 있는데 최종 라운드 verdict가 없다 — evaluator 판정 없이 진행 기록만 있는 상태.
-  # 마찬가지로 fail-closed: outcome=CONTRACT_ESCALATE로 남기고 §5로.
+if [ ! -f "<CONTRACT_DIR>/verdict-r2.json" ]; then
+  # 최종 라운드 verdict 자체가 없다 — evaluator 판정 없이 라운드 한도에 도달한 상태.
+  # fail-closed: outcome=CONTRACT_ESCALATE로 남기고 §5로.
+elif jq -e '[.reasons[].target] | index("ac_fidelity")' "<CONTRACT_DIR>/verdict-r2.json" >/dev/null; then
+  # ac_fidelity 반려는 override.json 존재 여부와 무관하게 곧장 여기로 온다 — 아래 override.json
+  # 체크보다 먼저 확인한다(issue #163). AC 자체("무엇을 만들지")에 이견이 남아 애초에 override
+  # 단계가 존재한 적이 없는 정상 경로이지 "기록 계약 위반"이 아니다 — 순서가 뒤바뀌어 있으면
+  # override.json 부재를 무조건 위반으로 오분류해 사람에게 잘못된 신호("generator가 규칙을
+  # 어겼다")를 전달한다(studio-hevv/selah-android#23 T25 실측, 2026-08-12).
+  # 라우팅 입력은 generator가 쓴 override.json이 아니라 evaluator 소유의 verdict-r2.json이다
+  # (라운드 한도 = 2, §1 상단): override의 unresolved_reasons는 generator가 "해소 못 한" 항목만
+  # 골라 담은 자기 필터라, 그걸 기준으로 삼으면 generator가 ac_fidelity 반려를 "해소했다"고
+  # 자평하는 순간 이 게이트가 뚫린다 — 2라운드 뒤에는 그 자평을 검증할 evaluator 라운드가 없다
+  # (contract-schema.md override 절, docs/references/anthropic-harness-design-long-running-apps.md의
+  # self-evaluation 편향).
+  # logging.md §1 outcome 레시피대로 outcome=CONTRACT_ESCALATE, round=<도달한 라운드 수>,
+  # detail="AC 불일치로 override 단계 스킵, 정상 경로"를 남기고 §2 없이 곧장 §5로.
+elif [ ! -f "<CONTRACT_DIR>/override.json" ]; then
+  # ac_fidelity는 없다(반려 사유는 plan_coverage뿐)인데 override.json이 없다 — generator가 §1의
+  # 기록 계약을 어긴 것. 기록 없는 진행을 허용하지 않는다(fail-closed): outcome=CONTRACT_ESCALATE로
+  # 남기고 §5로.
 elif [ ! -f "<CONTRACT_DIR>/proposal-r3.json" ]; then
   # override 기록은 있는데 확정 계약(proposal-r3 — override 스텝이 override.json 직후에 쓴다,
   # contract-schema.md "override 후속 라운드" 절, issue #130)이 없다 — worker_done까지 왔으므로
@@ -199,19 +214,10 @@ elif [ ! -f "<CONTRACT_DIR>/proposal-r3.json" ]; then
   # (§0 재개 분기는 override.json mtime이 게이트 도입 이후인 상태만 "쓰다 죽음"으로 보고 override
   # 스텝을 재-태운다 — worker_done 수신 여부가 그 두 해석을 가른다. 게이트 도입 이전인 상태는 §0도
   # 동일하게 CONTRACT_SCHEMA_STALE로 escalate한다 — contract_resume.sh 미러.)
-elif jq -e '[.reasons[].target] | index("ac_fidelity")' "<CONTRACT_DIR>/verdict-r2.json" >/dev/null; then
-  # AC 자체("무엇을 만들지")에 이견이 남음 — 생성 비용을 쓰기 전에 사람에게 보낸다.
-  # 라우팅 입력은 generator가 쓴 override.json이 아니라 evaluator 소유의 verdict-r2.json이다
-  # (라운드 한도 = 2, §1 상단): override의 unresolved_reasons는 generator가 "해소 못 한" 항목만
-  # 골라 담은 자기 필터라, 그걸 기준으로 삼으면 generator가 ac_fidelity 반려를 "해소했다"고
-  # 자평하는 순간 이 게이트가 뚫린다 — 2라운드 뒤에는 그 자평을 검증할 evaluator 라운드가 없다
-  # (contract-schema.md override 절, docs/references/anthropic-harness-design-long-running-apps.md의
-  # self-evaluation 편향).
-  # logging.md §1 outcome 레시피대로 outcome=CONTRACT_ESCALATE, round=<도달한 라운드 수>를 남기고
-  # §2 없이 곧장 §5로.
 else
-  # 최종 verdict의 반려가 plan_coverage뿐 — 검증 방법 이견은 §3 리뷰·e2e가 최종 AC 기준으로
-  # 재검증하므로 진행. logging.md §1 outcome 레시피대로 outcome=CONTRACT_FINALIZED_BY_GENERATOR,
+  # ac_fidelity는 없다(위에서 이미 확인됨 — 반려 사유는 plan_coverage뿐)이고 override.json·
+  # proposal-r3.json도 모두 있다 — 검증 방법 이견은 §3 리뷰·e2e가 최종 AC 기준으로 재검증하므로
+  # 진행. logging.md §1 outcome 레시피대로 outcome=CONTRACT_FINALIZED_BY_GENERATOR,
   # round=<도달한 라운드 수>를 남기고 §2로 (issue #63).
 fi
 ```
