@@ -50,6 +50,19 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
 - 스폰이 실패하면(파싱 에러, no-output, timeout with zero output 등) 처음부터 재진단하지 않는다 —
   `~/.agents/orca-workflows/spawn-failures.md`의 grep-first 절차를 따른다. §1의 두 `terminal create` 호출
   모두에 적용된다.
+- **이 세션 자신의 호출이 classifier에 거부되면(issue #118)** — 위 항목과 다르다: 위는 스폰한 *워커*
+  터미널의 실패고, 이건 이 세션 자신의 `orca orchestration`/`orca terminal` 호출(`task-create`/
+  `worker-start`/`terminal create` 등)이 Claude Code auto-mode 분류기에 거부되는 경우다
+  (`spawn-failures.md`의 `Permission for this action was denied by the Claude Code auto mode classifier` 행, known_issue #118). 문구를 바꿔 같은 세션에서 재시도하지 않는다 — 거부 이력이
+  쌓일수록 분류기 판정 범위가 넓어져 악화된다(실측). 그 자리에서 멈추고 §5로 가 `outcome=ESCALATE`를
+  보고하되, `log_outcome --detail`에 (a) 이 실행의 `CONTRACT_DIR` 절대경로, (b) 아직 살아있는 것으로
+  확인된 task-runner 터미널 핸들(있다면)을 담는다. 실제 재스폰은 이 세션이 아니라 그 보고를 읽는
+  쪽(`orca-workflow-epic` 또는 사람)이 수행한다 — `orca terminal create` 자체가 거부 대상에 포함되므로
+  이 세션은 자기 자신을 이관시킬 수 없다. 새 코디네이터가 같은 `CONTRACT_DIR`를 가리키면 위
+  재개(crash-resume) 분기가 round/attempt 상태를 자동으로 이어받지만, 그 분기의 "이전 세션의
+  Run·터미널·task는 재사용하지 않는다"(위) 기본값은 여기서는 적용하지 않는다 — 보고된 task-runner
+  핸들은 크래시가 아니라 이 코디네이터만 접근이 막힌 것뿐이므로 재사용이 맞다(2026-08-09 실측: 이
+  재사용이 실제로 회복에 성공한 유일한 조치였다).
 - 자동 업데이트로 Orca 앱이 세션 도중 재시작해 orchestration 호출이 일시적으로 끊기면(known signature:
   `~/.agents/orca-workflows/spawn-failures.md`, issue #42), §1의 `orca orchestration`/
   `orca terminal create` 호출은 전부 `source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh`
@@ -515,7 +528,12 @@ find "$HOME/.local/state/orca-workflows/logs" -name 'assignments-*.jsonl' 2>/dev
 그 외 outcome(FAIL 한도 도달·ESCALATE·GATE_FAIL·CONTRACT_ESCALATE·CONTRACT_SCHEMA_STALE·CI_GATE_FAIL·
 CI_GATE_TIMEOUT·MERGE_CONFLICT·NO_DONE_TRANSITION)이면 아래 보고 내용을 조립한 뒤 mode로 분기한다:
 
-보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/CONTRACT_ESCALATE/CONTRACT_SCHEMA_STALE/CI_GATE_FAIL/CI_GATE_TIMEOUT/MERGE_CONFLICT/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **CONTRACT_ESCALATE**는 contract 협상이 라운드 한도에도 `ac_fidelity` 이견으로 끝났다는 뜻이다 — 코드 생성 전이므로 diff가 없다. `override.json`의 `unresolved_reasons`를 그대로 표시한다(무엇을 만들지에 대한 generator/evaluator의 이견 — 사람이 issue를 명확히 하거나 방향을 정한다). §1의 fail-closed 분기(override.json 자체가 없음)로 온 경우면 이견 내용 대신 그 사실 — generator가 기록 없이 라운드 한도에 도달함 — 을 표시한다. **CONTRACT_SCHEMA_STALE**는 override 완료(override.json mtime)가 proposal-r3 요구사항 도입 시각(commit 79b7c3b, 2026-08-12T09:44:57+09:00)보다 이전이라는 뜻이다 — 위반이 아니라 구버전 세션이므로 이 두 시각을 그대로 표시한다. 사람의 선택지: (a) `verdict-r2.json`의 미해소 `reasons`를 반영해 `proposal-r3.json`을 수동으로 작성한다 — 이때 worktree에 구현이 이미 있어도 **§2를 기계적으로 재실행해 이미 끝난 구현을 덮어쓰지 않도록 주의한다**: §2 "Dispatch 실행부"는 "`orca-task-runner`를 dispatch하지 않고 코디네이터가 직접 코드를 작성·수정해 §3로 가는 경로는 존재하지 않는다"(issue #128)고 명시하므로, 기존 diff를 그대로 §3 evaluate로 넘기는 정식 경로가 이 스킬에 현재 없다 — 이 공백은 별도 issue #161로 추적하며, 사람이 상황을 보고 직접 진행 방식을 정한다. 구현이 없으면 정상적으로 §2부터 재개한다. (b) 완료된 작업을 폐기하고 재협상을 지시한다. **CI_GATE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 repo의 CI required check가 merge를 막았다는 뜻이므로, 실패한 check 이름과 로그 링크(`gh pr checks <pr_num>`)를 그대로 표시한다 — 사람이 다시 조회하지 않게. **CI_GATE_TIMEOUT**은 budget 안에 check가 완주하지 못했거나 merge 거부 원인이 판별되지 않았다는 뜻이므로(코드 실패로 확정 아님), 마지막 `mergeStateStatus`와 check 상태 스냅샷을 표시한다. **MERGE_CONFLICT**는 base와의 충돌로 자동 merge가 불가능하다는 뜻이다 — 충돌 지점 정보를 표시하고, rebase/충돌 해소 여부는 사람이 결정한다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음) — 발생 지점은 §4의 merge 성공 후 close 단계이고, outcome 로깅은 그 시점에 §4가 직접 한다.
+보고 내용: issue 번호, PASS/FAIL/ESCALATE/GATE_FAIL/CONTRACT_ESCALATE/CONTRACT_SCHEMA_STALE/CI_GATE_FAIL/CI_GATE_TIMEOUT/MERGE_CONFLICT/NO_DONE_TRANSITION 중 어느 것으로 왔는지와 그 근거, 재시도 횟수, resolved providers/models. GATE_FAIL은 `orca-evaluate`가 아예 호출되지 않았다는 뜻이므로 그 사실을 반드시 표시한다. **ESCALATE**가
+evaluator의 판정이 아니라 이 코디네이터 자신의 orchestration/terminal 호출이 Claude Code auto-mode
+분류기에 거부되어 발생한 경우(§0, `spawn-failures.md`의 classifier 거부 행, issue #118)는 `detail`에
+이 실행의 `CONTRACT_DIR` 절대경로와, 확인된 경우 아직 살아있는 task-runner 터미널 핸들을 반드시
+담는다 — 재스폰(§0에서 서술한 대로 사람 또는 `orca-workflow-epic`이 수행)이 이 값들로 라운드를 처음부터
+다시 돌지 않고 재개하도록. **CONTRACT_ESCALATE**는 contract 협상이 라운드 한도에도 `ac_fidelity` 이견으로 끝났다는 뜻이다 — 코드 생성 전이므로 diff가 없다. `override.json`의 `unresolved_reasons`를 그대로 표시한다(무엇을 만들지에 대한 generator/evaluator의 이견 — 사람이 issue를 명확히 하거나 방향을 정한다). §1의 fail-closed 분기(override.json 자체가 없음)로 온 경우면 이견 내용 대신 그 사실 — generator가 기록 없이 라운드 한도에 도달함 — 을 표시한다. **CONTRACT_SCHEMA_STALE**는 override 완료(override.json mtime)가 proposal-r3 요구사항 도입 시각(commit 79b7c3b, 2026-08-12T09:44:57+09:00)보다 이전이라는 뜻이다 — 위반이 아니라 구버전 세션이므로 이 두 시각을 그대로 표시한다. 사람의 선택지: (a) `verdict-r2.json`의 미해소 `reasons`를 반영해 `proposal-r3.json`을 수동으로 작성한다 — 이때 worktree에 구현이 이미 있어도 **§2를 기계적으로 재실행해 이미 끝난 구현을 덮어쓰지 않도록 주의한다**: §2 "Dispatch 실행부"는 "`orca-task-runner`를 dispatch하지 않고 코디네이터가 직접 코드를 작성·수정해 §3로 가는 경로는 존재하지 않는다"(issue #128)고 명시하므로, 기존 diff를 그대로 §3 evaluate로 넘기는 정식 경로가 이 스킬에 현재 없다 — 이 공백은 별도 issue #161로 추적하며, 사람이 상황을 보고 직접 진행 방식을 정한다. 구현이 없으면 정상적으로 §2부터 재개한다. (b) 완료된 작업을 폐기하고 재협상을 지시한다. **CI_GATE_FAIL**은 `orca-evaluate`가 PASS를 냈는데도 repo의 CI required check가 merge를 막았다는 뜻이므로, 실패한 check 이름과 로그 링크(`gh pr checks <pr_num>`)를 그대로 표시한다 — 사람이 다시 조회하지 않게. **CI_GATE_TIMEOUT**은 budget 안에 check가 완주하지 못했거나 merge 거부 원인이 판별되지 않았다는 뜻이므로(코드 실패로 확정 아님), 마지막 `mergeStateStatus`와 check 상태 스냅샷을 표시한다. **MERGE_CONFLICT**는 base와의 충돌로 자동 merge가 불가능하다는 뜻이다 — 충돌 지점 정보를 표시하고, rebase/충돌 해소 여부는 사람이 결정한다. **NO_DONE_TRANSITION**은 tracker adapter의 `close_issue`가 "완료" transition을 찾지 못했다는 뜻이다(트래커 문서에 명시 없음, 또는 명시된 이름이 현재 상태의 available transition 목록에 없음) — 발생 지점은 §4의 merge 성공 후 close 단계이고, outcome 로깅은 그 시점에 §4가 직접 한다.
 
 - **hitl** — 질문을 올리고 응답까지 block한다: entry 세션이면 사람에게 직접, spawn된 세션이면
   ask(decision gate)로 호출자에게(§0 보고 채널). 선택지: 계속(응답의 피드백을 반영해 §2부터 재시도 —
