@@ -19,6 +19,12 @@
 # case-insensitively (`-i`) to catch that class without requiring every future error string to be
 # enumerated as a new literal.
 #
+# Signature broadened again 2026-08-13 (issue #103): "The Orca runtime closed the connection
+# before responding." — observed live at MediCount#513 (2026-08-09, orca-workflow-epic waiting on
+# a task-coordinator via `check --wait` during an app auto-update 1.4.176->1.4.177) — matched none
+# of the five keywords above, so it went unretried by this wrapper too (recovered only by a human
+# manually polling `orca status --json`). Added `closed the connection` case-insensitively.
+#
 # leftmost-longest assumption: both original literals are longer than any of the new keyword
 # alternatives, so under POSIX ERE leftmost-longest matching, `grep -oE` still prefers the
 # original literals wherever they're present — `matched_signature` extraction is unchanged for
@@ -50,7 +56,7 @@
 # --retry-of` call is a separate, already-intentional retry-lineage mechanism and is out of this
 # note's scope). `terminal create` has no `--retry-request` flag and remains unprotected.
 
-_ORCA_RETRY_SIGNATURE_RE='Could not connect to the running Orca app|Orca is not running\. Run .orca open. first|not running|could not connect|reconnect|bootstrap'
+_ORCA_RETRY_SIGNATURE_RE='Could not connect to the running Orca app|Orca is not running\. Run .orca open. first|not running|could not connect|reconnect|bootstrap|closed the connection'
 
 orca_call_with_retry() {
   local skill="$1" role="$2"
