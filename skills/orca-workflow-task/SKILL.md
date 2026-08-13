@@ -12,6 +12,13 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
 
 - `orca status --json` ready. 실패 시 아래 "폴백".
 - **이슈 트래커 해석** (실행 시작 시 1회, 캐싱 없이 — 매 실행마다 새로 읽는다): `~/.agents/orca-workflows/issue-trackers/selection.md`가 정의하는 절차로 백엔드를 정하고, 그 백엔드의 `~/.agents/orca-workflows/issue-trackers/{github,jira}.md`가 정의하는 오퍼레이션 중 이 스킬이 쓰는 `get_issue`(§1 evaluator spec의 issue 원문 확보)/`is_open`/`close_issue`/`link_pr_for_close`(§4)를 이후 실행에서 쓴다. 구체 값(project key, transition id 등)은 이 스킬에 복제하지 않는다 — 항상 selection.md가 가리키는 대상 repo의 tracker 문서에서 얻는다.
+- **'대상 repo' 값은 무가공 전달(issue #164)**: 호출자(진입 시 직접, 또는 `orca-workflow-epic`이 spawn하는
+  경우 spec_text)로부터 받는 "대상 repo" 값은 `~/.agents/orca-workflows/logging.md` §1 repo 필드에 그대로
+  쓰일 정본 식별자 문자열이다(예: `owner/name`). 받은 값이 파일시스템 경로처럼 보이거나 예상과 다른
+  형태여도 basename 등으로 가공·재해석하지 않고, 아래 §1/§2/§4의 모든 `log_dispatch`/`log_outcome`
+  호출과 spec_text의 "대상 repo"에 받은 문자열을 그대로 넘긴다 — 입력 형태가 이상해 보이는 것은 호출자
+  스펙의 문제이지 이 스킬이 보정할 대상이 아니다(같은 문자열이 갈라지면 `orca-retro`의 (repo, issue)
+  복합 키 필터가 이 스킬이 남긴 이벤트를 조용히 놓친다).
 - **Contract 디렉토리**(실행 시작 시 1회) — 이 실행이 처리하는 issue 번호로
   `~/.agents/orca-workflows/contract-schema.md` 규칙대로 `CONTRACT_DIR`를 계산·생성(`install -d -m 700`)해
   §1의 두 spec_text에 절대경로로 넣는다. acceptance criteria는 issue 본문의 사전 섹션이 아니라 §1
