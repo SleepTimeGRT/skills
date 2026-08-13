@@ -151,8 +151,16 @@ scratch — they were hard-won across several regressions (issue #112's own eval
 # and the guarded `log_self_recovery` call below is reached unconditionally every iteration
 # (outside the branch structure), so a stale non-empty value here would wrongly re-log a prior
 # iteration's already-logged event against this iteration's (unrelated) dispatch state.
+# new_dispatch_id needs the same unconditional clear (issue #186 fix): only the call_status!=0 and
+# timed_out=true branches ever assign it (below), so the plain-success path used to leave it
+# completely unset -- invisible until #186's `fi` relocation below made this tail run every
+# iteration instead of only inside the `elif` branch. Now an unset var here is a `set -u` crash, and
+# a stale non-empty value would wrongly advance DISPATCH_ID using a prior iteration's retry id
+# against this iteration's unrelated dispatch state -- the same staleness risk action_taken has,
+# just for the sibling field.
 source ~/.agents/orca-workflows/scripts/orca_call_with_retry.sh
 action_taken=""
+new_dispatch_id=""
 if [ -n "$prev_delivery_id" ]; then
   result="$(ORCA_RETRY_MAX_CYCLES=1 orca_call_with_retry "$CALLING_SKILL" "wait-loop" -- \
     orca orchestration check --run "$RUN_ID" --ack "$prev_delivery_id" --wait \
@@ -192,7 +200,6 @@ if [ "$call_status" -ne 0 ]; then
   # increments *before* the check on the same iteration (so it already reads 3 on the would-be-3rd
   # stall), whereas retry_count increments *after* a completed recovery attempt and is checked at the
   # top of the *next* iteration (so it still reads 2, not 3, when that next attempt would be the 3rd).
-  new_dispatch_id=""
   if [ "${transport_stall_count:-0}" -ge 3 ]; then
     terminal_status=n/a
     action_taken=escalated_spawn_failure
@@ -223,7 +230,6 @@ if [ "$call_status" -ne 0 ]; then
     fi
   fi
 elif [ "$timed_out" = "true" ]; then
-  new_dispatch_id=""
   if [ "${retry_count:-0}" -ge 2 ]; then
     terminal_status=n/a
     action_taken=escalated_spawn_failure
@@ -290,52 +296,59 @@ elif [ "$timed_out" = "true" ]; then
           # procedure from before this commit rather than reinventing it -- its SPEC_TEXT
           # write/read/isolate triad and staged-check discipline were hard-won.) Fail
           # closed here: no recovery is attempted. terminal_status stays "dead" (already assigned
-          # above by the outer case -- that classification is accurate, and logging.md's schema only
-          # allows alive|stuck_draft|dead here, not a fourth "n/a" value).
+          # above by the outer case from a real liveness probe -- that classification is accurate,
+          # so there is no reason to override it to "n/a"; issue #183's 4th schema value is for
+          # escalations that never ran a liveness probe at all, which this one did).
           action_taken=escalated_spawn_failure
         fi
         [ "$action_taken" != escalated_spawn_failure ] && retry_count=$(( ${retry_count:-0} + 1 ))
         ;;
     esac
   fi
-  # Log a self_recovery event exactly per logging.md's recipe, regardless of which branch was
-  # taken. DISPATCH_ID here is still the dispatch that timed out; new_dispatch_id is only
-  # non-empty when action_taken=worker_abandon_retry or action_taken=task_recreate_retry
-  # (logging.md's schema keeps both fields distinct so a late completion from the old dispatch
-  # can't be confused with the retry).
-  # Written via log_self_recovery(), never a hand-copied printf (issue #127: the printf this
-  # replaced always emitted new_dispatch_id/raw_action/schema_gap_issue as "%s", so valid-action
-  # records carried forbidden empty-string conditional fields, and a hand-typed action_taken typo
-  # bypassed the UNMAPPED_BRANCH safeguard). The helper validates action_taken against the
-  # canonical enum, omits empty conditional fields entirely, and picks the target file from
-  # --skill: orca-task-runner -> waves-<date>.jsonl (pass --wave-index <n> so it joins that
-  # wave's wave_start/wave_end records); orca-workflow-task/orca-workflow-epic ->
-  # assignments-<date>.jsonl (no wave concept, no --wave-index).
-  # Guarded on non-empty action_taken (issue #103's transport-stall branch above explicitly clears
-  # it for its "Orca came back within budget, just re-loop" sub-case): that sub-case isn't a
-  # self_recovery-schema event at all -- no worker-liveness decision was made, nothing for
-  # logging.md's schema to describe -- and it's already durably recorded at the spawn-failures.jsonl
-  # level by orca_call_with_retry itself (which orca-retro already consumes), so logging it again
-  # here under an invented/misapplied action_taken would be redundant at best and, if forced into an
-  # existing enum value like resumed_wait, actively misleading (that value specifically means "we
-  # probed the worker and found it alive" -- no worker probe happened here).
-  if [ -n "$action_taken" ]; then
-    source ~/.agents/orca-workflows/scripts/log_dispatch.sh
-    log_self_recovery --skill "$CALLING_SKILL" --issue "$ISSUE_NUM" --repo "$REPO_SLUG" --task-id "$TASK_ID" \
-      --dispatch-id "$DISPATCH_ID" --terminal "$WORKER_HANDLE" --waited-ms 3600000 \
-      --terminal-status "$terminal_status" --action-taken "$action_taken" \
-      --new-dispatch-id "$new_dispatch_id" --raw-action "${raw_action:-}" \
-      --schema-gap-issue "${schema_gap_issue:-}"
-  fi
-  # If a retry happened, this pending-set entry's dispatch_id moves forward now (see the opening
-  # paragraph above: "update the entry's dispatch_id in place"). The `worker_abandon_retry` sub-branch
-  # above is the only one that can set new_dispatch_id today (issue #94 stage 3 removed the inject
-  # sub-branch that used to also mint new_task_id/new_terminal_handle -- the identity-drift failure
-  # mode issue #121 tracked no longer has a code path that reaches it).
-  [ -n "$new_dispatch_id" ] && DISPATCH_ID="$new_dispatch_id"
-  [ "$action_taken" = escalated_spawn_failure ] && : # hand off to spawn-failures.md here; do not loop back.
-  # Loop back to the top (re-issue check --wait) unless escalated above.
 fi
+# issue #186 fix: the block below (log_self_recovery through the loop-back comment) must sit
+# *outside* the `if call_status -ne 0 / elif timed_out = true` chain above -- this `fi` used to be
+# the only one closing that chain, positioned after this whole tail instead of here, so the tail
+# was silently scoped to the `elif` branch only and the `call_status != 0` (transport-stall)
+# branch's two escalation sites could set action_taken=escalated_spawn_failure but never reach the
+# log_self_recovery call below them.
+# Log a self_recovery event exactly per logging.md's recipe, regardless of which branch was
+# taken. DISPATCH_ID here is still the dispatch that timed out; new_dispatch_id is only
+# non-empty when action_taken=worker_abandon_retry or action_taken=task_recreate_retry
+# (logging.md's schema keeps both fields distinct so a late completion from the old dispatch
+# can't be confused with the retry).
+# Written via log_self_recovery(), never a hand-copied printf (issue #127: the printf this
+# replaced always emitted new_dispatch_id/raw_action/schema_gap_issue as "%s", so valid-action
+# records carried forbidden empty-string conditional fields, and a hand-typed action_taken typo
+# bypassed the UNMAPPED_BRANCH safeguard). The helper validates action_taken against the
+# canonical enum, omits empty conditional fields entirely, and picks the target file from
+# --skill: orca-task-runner -> waves-<date>.jsonl (pass --wave-index <n> so it joins that
+# wave's wave_start/wave_end records); orca-workflow-task/orca-workflow-epic ->
+# assignments-<date>.jsonl (no wave concept, no --wave-index).
+# Guarded on non-empty action_taken (issue #103's transport-stall branch above explicitly clears
+# it for its "Orca came back within budget, just re-loop" sub-case): that sub-case isn't a
+# self_recovery-schema event at all -- no worker-liveness decision was made, nothing for
+# logging.md's schema to describe -- and it's already durably recorded at the spawn-failures.jsonl
+# level by orca_call_with_retry itself (which orca-retro already consumes), so logging it again
+# here under an invented/misapplied action_taken would be redundant at best and, if forced into an
+# existing enum value like resumed_wait, actively misleading (that value specifically means "we
+# probed the worker and found it alive" -- no worker probe happened here).
+if [ -n "$action_taken" ]; then
+  source ~/.agents/orca-workflows/scripts/log_dispatch.sh
+  log_self_recovery --skill "$CALLING_SKILL" --issue "$ISSUE_NUM" --repo "$REPO_SLUG" --task-id "$TASK_ID" \
+    --dispatch-id "$DISPATCH_ID" --terminal "$WORKER_HANDLE" --waited-ms 3600000 \
+    --terminal-status "$terminal_status" --action-taken "$action_taken" \
+    --new-dispatch-id "$new_dispatch_id" --raw-action "${raw_action:-}" \
+    --schema-gap-issue "${schema_gap_issue:-}"
+fi
+# If a retry happened, this pending-set entry's dispatch_id moves forward now (see the opening
+# paragraph above: "update the entry's dispatch_id in place"). The `worker_abandon_retry` sub-branch
+# above is the only one that can set new_dispatch_id today (issue #94 stage 3 removed the inject
+# sub-branch that used to also mint new_task_id/new_terminal_handle -- the identity-drift failure
+# mode issue #121 tracked no longer has a code path that reaches it).
+[ -n "$new_dispatch_id" ] && DISPATCH_ID="$new_dispatch_id"
+[ "$action_taken" = escalated_spawn_failure ] && : # hand off to spawn-failures.md here; do not loop back.
+# Loop back to the top (re-issue check --wait) unless escalated above.
 
 # result.timedOut == "false": process every message in the batch.
 # for msg in result.messages: worker_done -> remove this task_id from the pending set;

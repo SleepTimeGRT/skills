@@ -180,16 +180,15 @@ def test_transport_stall_escalates_when_orca_never_becomes_ready(tmp_path):
     assert state["action_taken"] == "escalated_spawn_failure"
     assert state["terminal_status"] == "n/a"
     assert state["prev_delivery_id"] == "delivery-prior", "still preserved on escalation"
-    # KNOWN GAP (issue #183, found while writing this test): log_self_recovery's own
-    # --terminal-status validation only accepts alive|dead|stuck_draft and rejects "n/a" with
-    # exit 64 -- a value self-recovery.md's *pre-existing* retry_count-exhausted escalation branch
-    # already used before this fix (untouched by issue #103), so every escalated_spawn_failure path
-    # in this loop -- old and new -- silently fails to write a self_recovery event (the call site
-    # doesn't check the exit code). The escalation control flow itself (action_taken set, no
-    # loop-back) is unaffected; only this log call's side effect is lost. Fixing the enum is out of
-    # scope for #103 (cross-cutting: touches log_dispatch.sh + logging.md + all 3 loop callers) --
-    # tracked separately as #183. This assertion documents current reality, not the intended state.
-    assert state["self_recovery_events"] == []
+    # Two independent fixes both had to land for this event to appear: issue #183 (log_self_recovery
+    # rejected --terminal-status n/a with exit 64) and issue #186 (this branch's action_taken was set
+    # but control never reached the log_self_recovery call at all -- it was scoped inside the elif
+    # branch only). The event must actually land, carrying the same terminal_status/action_taken this
+    # test already asserts above.
+    assert len(state["self_recovery_events"]) == 1
+    event = state["self_recovery_events"][0]
+    assert event["terminal_status"] == "n/a"
+    assert event["action_taken"] == "escalated_spawn_failure"
 
 
 def test_transport_stall_escalates_after_repeated_consecutive_stalls_even_if_orca_is_ready(tmp_path):
@@ -205,6 +204,14 @@ def test_transport_stall_escalates_after_repeated_consecutive_stalls_even_if_orc
     )
     assert state["action_taken"] == "escalated_spawn_failure"
     assert state["transport_stall_count"] == 3
+    # issue #186: this escalation site (transport_stall_count >= 3) is the other of the two
+    # call_status!=0 sites that a since-fixed structural bug (the shared log_self_recovery tail was
+    # scoped inside the elif branch only, see self-recovery.md's inline comment at the `fi`
+    # relocation) used to leave completely unlogged.
+    assert len(state["self_recovery_events"]) == 1
+    event = state["self_recovery_events"][0]
+    assert event["terminal_status"] == "n/a"
+    assert event["action_taken"] == "escalated_spawn_failure"
 
 
 def test_successful_call_after_prior_stall_processes_normally(tmp_path):

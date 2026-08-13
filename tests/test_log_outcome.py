@@ -517,6 +517,24 @@ def test_self_recovery_omitted_waited_ms_is_json_null(tmp_path, shell):
 
 
 @pytest.mark.parametrize("shell", SHELLS)
+def test_self_recovery_accepts_n_a_terminal_status_for_worker_independent_escalation(tmp_path, shell):
+    """issue #183: self-recovery.md's escalation branches that are not about worker liveness (retry
+    budget exhausted, transport-stall budget exhausted) set terminal_status=n/a -- alive/dead/
+    stuck_draft are all worker-liveness classifications and none is accurate when no worker probe
+    ran. Validation previously rejected n/a outright (exit 64, nothing written), so every
+    escalated_spawn_failure event of this kind silently vanished from assignments-*.jsonl."""
+    script = SELF_RECOVERY_CALL.replace("--terminal-status alive", "--terminal-status n/a").replace(
+        "--action-taken resumed_wait", "--action-taken escalated_spawn_failure"
+    )
+    result, home = _run(tmp_path, script, shell=shell)
+    assert result.returncode == 0, result.stderr
+    rec = _records(home)[0]
+    assert rec["terminal_status"] == "n/a"
+    assert rec["action_taken"] == "escalated_spawn_failure"
+    _assert_no_empty_string_values(rec)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
 def test_self_recovery_invalid_terminal_status_is_a_caller_error(tmp_path, shell):
     """terminal_status has no documented UNMAPPED_BRANCH-style safeguard (no raw_* field), so an
     unknown value is rejected like log_dispatch's --provider (issue #90), never persisted."""
