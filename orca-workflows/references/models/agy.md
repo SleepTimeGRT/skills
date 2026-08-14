@@ -1,8 +1,54 @@
 # agy Model Evidence
 
-> verified_at: 2026-07-30
+> verified_at: 2026-08-14
 
 Load this file only to audit, change, or re-validate `../../models/agy.md`.
+
+## 2026-08-14 model-generation update — gemini-3.7-flash replaces gemini-3.6-flash
+
+`gemini-3.7-flash` appeared in this machine's `agy models` catalog (agy CLI v1.1.12, alongside
+`gemini-3.6-flash-*`, `gemini-3.5-flash-*`, `gemini-3.1-pro-*`) and was released 2026-08-13 per
+Google's own announcement. Unlike the 2026-07-21 decision below, every figure here traces to a
+direct primary-source URL (no uncited secondary sources this time):
+
+- Announcement/pricing/availability: <https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-3-7-flash/>
+- Methodology + full results table (self-computed by Google/DeepMind, pass@1, model-id
+  `gemini-3.7-flash`, default sampling): <https://deepmind.google/models/evals-methodology/gemini-3-7-flash>
+  → PDF: <https://storage.googleapis.com/deepmind-media/gemini/gemini_3-7_flash_model_evaluation.pdf>
+
+**Pricing**: introductory $0.75 input / $3.75 output per 1M tokens for *both* 3.6 and 3.7 Flash,
+through 2026-12-31; $1.50/$7.50 from 2027-01-01. No cached-input price is stated in this primary
+table — the $0.15 figure recorded below for 3.6 Flash came from an uncited secondary source and
+should not be assumed to carry over.
+
+**Directly comparable (same DeepMind methodology doc, both generations scored)**:
+
+| Benchmark | 3.6 Flash | 3.7 Flash | GPT-5.6 Terra | Claude Sonnet 5 |
+|---|---|---|---|---|
+| GDM-MRCR v2, 128k avg (long-context retrieval) | 91.8% | **97.0%** | 93.5% | 81.5% |
+| OSWorld-2.0 (computer use, partial score) | 33.8% | 47.9% | **50.2%** | — |
+| DeepSWE v1.1 (long-horizon SWE) | 48.6% | 65.3% | **69.6%** | 53.8% |
+| FrontierCode 1.1 Main (production code quality) | 34.4% | **43.6%** | 41.3% | 42.7% |
+| Terminal-bench 2.1 | 78.0% | 85.8% | **87.4%** | 80.4% |
+
+**Not comparable across generations of evidence**: OSWorld-2.0 is a different (harder) benchmark
+version than the "OSWorld-Verified 83.0%" figure recorded for 3.6 Flash below — same model family,
+different suite, do not read 33.8%/47.9% as a regression from 83.0%. **Not available this round**:
+SWE-Bench Pro (the metric the 2026-07-21 decision used) does not appear in the 3.7 Flash
+methodology doc at all; Google replaced it with the DeepSWE v1.1 / FrontierCode / Terminal-bench
+suite. There is no direct 3.7 Flash successor number for the 58.7% SWE-Bench Pro figure below.
+
+**Routing conclusion unchanged**: GPT-5.6 Terra still leads OSWorld-2.0, DeepSWE v1.1, and
+Terminal-bench — the axes this repo's Computer-use assignment actually cares about — so agy stays
+Computer-use/Simple only, not promoted to Routine or High Risk. FrontierCode 1.1 Main is the one
+benchmark where 3.7 Flash edges out both Sonnet 5 and Terra, but per `model-selection.md`'s
+Comparison rules ("model-generation benchmark scores do not establish reviewer quality"), a single
+production-code-quality benchmark win doesn't reopen that door on its own. `../../models/agy.md`'s
+Mapping table is updated to `gemini-3.7-flash-{low,medium,high}` with the same effort tiers as
+before — a generation bump, not a re-derivation of the tier assignment. The same caveat as the
+2026-07-21 decision still applies: no representative in-repo agent-e2e/computer-use pilot has been
+recorded for this exact generation yet; these are published/self-reported benchmarks, not an Orca
+workflow smoke test.
 
 ## 2026-07-30 REPL retirement (reverses 2026-07-29 promotion)
 

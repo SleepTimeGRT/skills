@@ -65,9 +65,9 @@ agy -p '<complete instructions + artifact paths, fully resolved at launch time>'
 
 | Model token | Use | Effort |
 |---|---|---|
-| `gemini-3.6-flash-high` | Higher-accuracy computer-use/artifact cross-check when needed | high |
-| `gemini-3.6-flash-medium` | Default agent e2e and skeptical raw-artifact cross-check | medium |
-| `gemini-3.6-flash-low` | Simple mechanical work | low |
+| `gemini-3.7-flash-high` | Higher-accuracy computer-use/artifact cross-check when needed | high |
+| `gemini-3.7-flash-medium` | Default agent e2e and skeptical raw-artifact cross-check | medium |
+| `gemini-3.7-flash-low` | Simple mechanical work | low |
 
 Do not route Routine or High Risk code judgment to agy. Technical judgment stays with a risk-tier worker
 even when agy executes the browser or synthesizes raw traces.

@@ -49,7 +49,7 @@ Claude Code exception:
 | Routine | Codex (`codex`) | `gpt-5.6-terra` | medium | Primary generator and bounded first-pass triage; escalate final or high-risk review to Sol |
 | Simple | Claude (`claude-code`) | `claude-haiku-4-5-20251001` | omit | Transcription, boilerplate, and mechanical edits |
 | Simple | Codex (`codex`) | `gpt-5.6-luna` | max | Short, clear, repeatable work, plus narrow-context Routine subtasks (single file/small bounded diff) — never long-context or large-codebase work, regardless of effort; boot-smoke precondition applies (never dispatched in this repo yet) |
-| Simple | Gemini (`agy`) | `gemini-3.6-flash-low` | low | Short mechanical work |
+| Simple | Gemini (`agy`) | `gemini-3.7-flash-low` | low | Short mechanical work |
 
 Do not use `claude-fable-5`. Do not transfer an effort choice between models or providers merely because
 the level has the same name. Provider-specific evidence and unresolved validation are recorded in the
@@ -69,7 +69,7 @@ format. Technical judgment still goes to the appropriate risk-tier worker.
 
 | Priority | Model | Effort | Use |
 |---|---|---|---|
-| 1 | `gemini-3.6-flash-medium` | medium | Browser/computer execution and raw-artifact cross-check |
+| 1 | `gemini-3.7-flash-medium` | medium | Browser/computer execution and raw-artifact cross-check |
 | 2 | `claude-sonnet-5` | medium | Fallback when agy is unavailable or quota-limited |
 
 Do not choose this axis for long context alone. Capacity and retrieval quality are separate properties and
