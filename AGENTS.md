@@ -145,9 +145,14 @@ limitations — and adapt the skill's structure to match, rather than carrying f
 a capability gap that may have since closed.
 
 **Orca CLI baseline**: the orca-* skills in this repo, and the principles above, were last verified against
-Orca app version 1.4.180. Check `orca status --json`'s `runtime.appVersion` against this number before
-trusting any Orca-specific mechanism claim here as still accurate — a mismatch means the claim needs
-re-verification against the current version's own `skills get`/`--help` output, not blind reuse.
+Orca app version 1.4.180. Its GitHub changelog (stablyai/orca, v1.4.180...v1.4.182 compare) was reviewed
+2026-08-14 against this repo's documented workarounds after upgrading to 1.4.182 — that pass found and
+fixed one stale claim (`orca-workflows/self-recovery.md`'s `dispatch_not_found` behavior, fixed upstream in
+1.4.182 per PR stablyai/orca#13376) but did not re-run every mechanism live, so this line stays at 1.4.180
+rather than claiming full re-verification. Check `orca status --json`'s `runtime.appVersion` against this
+number before trusting any Orca-specific mechanism claim here as still accurate — a mismatch means the
+claim needs re-verification against the current version's own `skills get`/`--help` output or changelog,
+not blind reuse.
 
 ## Repository operations
 

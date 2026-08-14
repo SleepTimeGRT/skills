@@ -1,6 +1,7 @@
 # Orca Workflows Self-Recovery
 
-> verified_at: 2026-08-07
+> verified_at: 2026-08-14 (Orca 1.4.180→1.4.182 changelog review touched only the `dispatch_not_found`
+> claim below; the rest of this file's mechanisms were not re-run live this pass)
 
 Shared wait/recovery procedure for `orca-task-runner`/`orca-workflow-task`/`orca-workflow-epic`
 (`docs/superpowers/specs/2026-08-07-orca-event-driven-wait-design.md`) — split out so both `SKILL.md`
@@ -27,9 +28,12 @@ dispatch was created (Preconditions
 below enumerates both paths, and the `dead` case's two sub-branches implement them): for a dispatch
 created via `worker-start`, recover via `worker-abandon` (fence, non-destructive) followed by
 `worker-start --retry-of` (tracked retry); for a dispatch created via `task-create` + `dispatch --inject`,
-`worker-abandon` returns `dispatch_not_found` for that dispatch id (it only fences `worker-start`-created
-dispatches, confirmed live — issue #89), so recovery instead marks the stuck task `failed` and
-re-dispatches fresh via a new `task-create` + `dispatch --inject`. Neither path decides the recovery
+`worker-abandon` returned `dispatch_not_found` for that dispatch id through Orca 1.4.181 (it only fenced
+`worker-start`-created dispatches, confirmed live — issue #89; fixed upstream in Orca 1.4.182, PR
+stablyai/orca#13376, which gives context-only dispatches a real `worker-stop`/`worker-abandon` release
+path — not re-verified live in this repo since the path below is retired), so recovery instead marks
+the stuck task `failed` and re-dispatches fresh via a new `task-create` + `dispatch --inject`. Neither
+path decides the recovery
 action by reading the terminal and improvising by hand. Polling survives only as the rare,
 explicitly-logged fallback for the one thing Orca's event system cannot tell you by construction (a
 worker that will never send anything because it's dead) — never as the default.
@@ -56,7 +60,9 @@ worker that will never send anything because it's dead) — never as the default
   (History: a second primitive, `task-create` + `dispatch --inject`, existed alongside `worker-start` and
   fed a `dispatch-inject` recovery sub-branch below — retired in issue #94 once every caller had migrated
   to `worker-start`; see that issue and the caller table's own note for what to restore if a topology ever
-  needs it again.)
+  needs it again. If restored, drop the `dispatch_not_found` fail-and-redispatch branch above — Orca
+  1.4.182 fixed the underlying `worker-abandon` gap it worked around, so a restored branch should retry
+  `worker-abandon` directly instead of re-implementing the old workaround.)
 
 ## Caller dispatch-creation paths
 
