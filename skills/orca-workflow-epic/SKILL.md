@@ -119,6 +119,10 @@ log_dispatch --skill "orca-workflow-epic" --role "task-coordinator" --issue "<ta
 
 **outcome 라우팅** (`worker_done` 수신 후 coordinator 터미널 close):
 - `PASS` → dequeue, 의존이 풀린 다음 ready task로.
+- `SPIKE_ANSWERED` → dequeue(정상 종료, escalation 아님 — 사람의 결정은 이미 `-task`의 spike 분기
+  자리에서 끝났다, mode 무관). 의존하는 후속 task는 그대로 ready 큐에 남긴다(parked/skipped로 옮기지
+  않는다). `~/.agents/orca-workflows/logging.md` §1 outcome 레시피(`log_outcome`)대로
+  `skill=orca-workflow-epic`, `outcome=SPIKE_ANSWERED`를 남긴다.
 - 그 외(escalation류 outcome) →
   - mode=afk: 그 task를 **parked** 목록에 기록하고, `~/.agents/orca-workflows/logging.md` §1 outcome
     레시피(`log_outcome`)대로 `skill=orca-workflow-epic`, `outcome=escalation_parked`를 남긴 뒤, 그
@@ -156,8 +160,9 @@ parked/skipped가 있으면 닫히지 않는 것이 정상이다.
 
 ## 5. 보고
 
-호출자(`orca-workflow`)에게: 완료 목록 / parked 목록(각 outcome 값) / skipped 목록(막은 선행 task) /
-큐 issue 목록(retro spec용) / resolved providers·models. 이 스킬은 retro를 띄우지 않는다 — 라우터 몫.
+호출자(`orca-workflow`)에게: 완료 목록(`PASS`·`SPIKE_ANSWERED` 포함) / parked 목록(각 outcome 값) /
+skipped 목록(막은 선행 task) / 큐 issue 목록(retro spec용) / resolved providers·models. 이 스킬은
+retro를 띄우지 않는다 — 라우터 몫.
 
 ## 폴백
 

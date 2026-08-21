@@ -324,7 +324,7 @@ fi
   분류(spike/bounded/architectural)를 그대로 따른다:
   - **spike**(드묾 — "이게 가능한가"류 이슈): 코드 변경이 산출물이 아니므로 이 §1~§2 전체를
     건너뛴다. 조사 결과를 이슈에 코멘트로 남기고 사람에게 다음 행동(이슈 재정의/종료)을 물은 뒤,
-    `log_dispatch`로 `outcome=SPIKE_ANSWERED`를 남기고(Task 3이 이 값을 등록한다) 보고 채널로
+    `log_dispatch`로 `outcome=SPIKE_ANSWERED`를 남기고(이 값은 `log_dispatch.sh`의 `LOG_OUTCOME_ENUM`에 등록돼 있다) 보고 채널로
     종료를 알린다 — 아래 §5의 일반 "그 외 outcome"(hitl/afk 재분기, 계속/중단 선택지)은 타지
     않는다: 사람의 결정은 이미 여기서 끝났다. §0이 만든 worktree/Run/CONTRACT_DIR는 다른
     outcome들과 동일하게 보존한다(정리 로직을 새로 만들지 않는다). `orca-task-runner`/
