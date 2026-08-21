@@ -1,6 +1,6 @@
 ---
 name: orca-workflow-epic
-description: Queue coordinator for an epic issue — invoked in-session by `orca-workflow`; invoke explicitly, do not phrase-match. Builds the drain queue from the epic's children (issue-drain validation + issue-graph ordering), then serially spawns one `orca-workflow-task` coordinator terminal per queued task (each task coordinator owns its own Run; this skill knows nothing about contract/generation/evaluation internals — it consumes only {PASS, escalation outcome, question} signals), forwards mode [afk|hitl] unchanged, parks afk-escalated tasks and skips their dependents while continuing with independent ready tasks, relays hitl questions to the human, closes the epic only after every child is verified closed, and reports completed/parked/skipped. Self-relative. Do NOT use for ad-hoc multi-agent coordination or DAGs (use the `orchestration` skill) or raw terminal control (use `orca-cli`) — this skill runs only inside the orca-workflow pipeline.
+description: Queue coordinator for an epic issue — invoked in-session by `orca-workflow`; invoke explicitly, do not phrase-match. Builds the drain queue from the epic's children (issue-drain validation + issue-graph ordering), then serially spawns one `orca-workflow-task` coordinator terminal per queued task (each task coordinator owns its own Run; this skill knows nothing about contract/generation/evaluation internals — it consumes only {PASS, SPIKE_ANSWERED, escalation outcome, question} signals), forwards mode [afk|hitl] unchanged, parks afk-escalated tasks and skips their dependents while continuing with independent ready tasks, relays hitl questions to the human, closes the epic only after every child is verified closed, and reports completed/parked/skipped. Self-relative. Do NOT use for ad-hoc multi-agent coordination or DAGs (use the `orchestration` skill) or raw terminal control (use `orca-cli`) — this skill runs only inside the orca-workflow pipeline.
 compatibility: Requires the `orca` CLI (skill set last verified against Orca app 1.4.180), the `~/.agents/orca-workflows/` symlink to this repo's orca-workflows/, and the `gh` CLI.
 ---
 
@@ -8,7 +8,7 @@ compatibility: Requires the `orca` CLI (skill set last verified against Orca app
 
 epic issue 하나를 받아 child 큐를 만들고, task마다 `orca-workflow-task` coordinator를 직렬로 띄운다.
 **task 처리 내부를 전혀 모른다** — 이 스킬이 소비하는 신호는
-{PASS, escalation outcome, 질문} 셋뿐이고, 왜 escalate했는지는 `-task`의 outcome 로그와
+{PASS, SPIKE_ANSWERED, escalation outcome, 질문} 넷뿐이고, 왜 escalate했는지는 `-task`의 outcome 로그와
 CONTRACT_DIR 산출물이 담는다.
 
 ## 0. 전제
