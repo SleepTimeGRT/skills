@@ -69,13 +69,17 @@ r<n>.json`의 반려 사유를 반영해 `plan_path`가 가리키는 플랜 문�
 §2 "Generate"의 구현 모드 spec_text 구성에 `plan_path`(최종 라운드 `proposal-r<n>.json`에서 추출한
 구조 필드 하나)를 추가한다. 이 스킬이 "diff/report 본문을 직접 읽지 않는다"는 원칙과 충돌하지
 않는다 — §1이 라운드-한도 분기에서 이미 `reasons[].target` 같은 구조 필드 1개를 추출해 분기하는
-것과 정확히 같은 성격이다. `plan_path`가 없으면(bounded 분류 또는 afk) 지금 그대로 아무 것도
-추가하지 않는다.
+것과 정확히 같은 성격이다. 추출한 값이 `null`이면(bounded 분류 또는 afk) spec_text에 `plan_path`를
+싣지 않는다 — 이 필드는 `proposal-r<n>.json` 안에서는 항상 존재하지만(스키마 필수), 그걸 다음
+단계로 전달하는 spec_text는 이 파이프라인의 기존 관례대로 값이 있을 때만 문구를 추가한다.
 
-### 3. `contract-schema.md` — `proposal-r<n>.json`에 optional `plan_path` 필드 추가
+### 3. `contract-schema.md` — `proposal-r<n>.json`에 `plan_path` 필드 추가
 
-스키마에 `plan_path`(string, absolute path, optional)를 추가한다. afk와 bounded 분류에서는 이
-필드가 없다(부재 = 이 태스크는 native 경로). architectural 분류에서만 채워진다.
+스키마의 "모든 필드 필수 — 필드가 아예 없으면 스키마 위반, '언급 안 함' 상태는 존재할 수 없다"
+원칙(`destructive_operations`/`existing_tests_affected`가 이미 이 원칙을 빈 배열 `[]`로 지키고
+있다)을 그대로 따른다. `plan_path`는 **필수 필드**로 추가하고, architectural 분류가 아니면(afk
+전체, hitl의 bounded/spike) 값을 `null`로 채운다 — 필드를 생략하지 않는다. architectural
+분류에서만 실제 절대경로 문자열을 채운다.
 
 ### 4. `orca-task-runner` — SDD 루프를 §2 앞에 새 분기로 추가한다
 
