@@ -16,6 +16,11 @@
 - `orca-evaluate`의 내부 로직, `orca-workflow-task` §1의 라운드 한도/override 라우팅 bash, §2 감사 게이트, §3 evaluate 호출은 전부 무변경 — "code-gen ↔ evaluator" 관계를 유지한다는 사용자 요청.
 - `proposal-r<n>.json`은 "모든 필드 필수 — 필드가 아예 없으면 스키마 위반"이라는 기존 원칙(`contract-schema.md`, `destructive_operations`/`existing_tests_affected`가 이미 빈 배열로 이 원칙을 지킴)을 따른다. `plan_path`는 옵셔널이 아니라 **필수+nullable** 필드다 — bounded/spike/afk에서는 값이 `null`, architectural에서만 절대경로 문자열.
 - `superpowers:subagent-driven-development` 스킬 파일 자체를 호출하지 않는다 — 그 스킬의 서브에이전트 dispatch는 Claude Agent tool 전용이라, "self-relative(어느 provider가 이 세션을 돌리든 동일 동작)"인 `orca-task-runner`의 전제와 구조적으로 안 맞는다. 그 스킬의 패턴만 `orca-task-runner` 자신의 절차로 포팅한다.
+- `plan_path`가 SDD 루프 진입의 유일한 신호이려면 `orca-task-runner` §1(afk 전용 proposal 작성)도
+  이 필드를 항상 `null`로 명시적으로 써야 한다 — 그러지 않으면 필수 필드 요구사항 위반이거나,
+  afk가 의도치 않게 SDD 루프로 오분류될 위험이 있다(advisor 리뷰에서 발견, Task 5 Step 1이 처리).
+- spike 분기는 새 outcome `SPIKE_ANSWERED`를 로깅해야 한다 — 로깅 없이 종료하면 `orca-retro`/감사
+  도구가 이 invocation을 볼 수 없다(advisor 리뷰에서 발견, Task 3이 등록).
 - `skills/orca-workflow-task/SKILL.md`와 `skills/orca-task-runner/SKILL.md`는 둘 다 `orca-set`(`skills/orca-set.version`, 현재 `v1.1.31`) 멤버다 — 두 파일이 함께 바뀌므로 버전은 한 번만 올린다.
 - `skills/orca-task-runner/SKILL.md`의 frontmatter `description`은 1024자 캡(`tests/test_skill_description_length.py`)을 넘지 않아야 한다(현재 629자).
 - Bash 블록은 이 저장소의 기존 컨벤션대로 배열·`[[ ]]`·`${!var}`·glob 루프 없이 POSIX 호환으로 쓴다(zsh에서도 그대로 돈다).
@@ -28,8 +33,11 @@
 | File | Responsibility |
 |---|---|
 | `orca-workflows/contract-schema.md` | `proposal-r<n>.json` 스키마에 필수(nullable) `plan_path` 필드 추가 |
-| `skills/orca-workflow-task/SKILL.md` | §1: hitl generator 역할을 brainstorming/writing-plans 실호출 + 분류 분기로 재작성. §2: 두 spec_text 템플릿(라운드1 재사용분 + FAIL 재시도분)에 `plan_path` 전달 추가 |
-| `skills/orca-task-runner/SKILL.md` | 새 "SDD 태스크 루프" 섹션(§1과 §2 사이) + 진입 분기 bash + 서두/§4/frontmatter description의 "리뷰어 없음" 문장에 예외 추가 |
+| `skills/orca-workflow-task/SKILL.md` | §1: hitl generator 역할을 brainstorming/writing-plans 실호출 + 분류 분기(spike는 `SPIKE_ANSWERED` 로깅)로 재작성. §2: 두 spec_text 템플릿(라운드1 재사용분 + FAIL 재시도분)에 `plan_path` 전달 추가 |
+| `orca-workflows/scripts/log_dispatch.sh` | 신규 outcome `SPIKE_ANSWERED`를 `LOG_OUTCOME_ENUM`에 등록 |
+| `orca-workflows/logging.md` | `SPIKE_ANSWERED`의 사람이 읽는 축 목록 + 설명 문단 추가 |
+| `tests/test_log_outcome.py` | `DOCUMENTED_OUTCOME_ENUM` 크로스체크에 `SPIKE_ANSWERED` 추가 |
+| `skills/orca-task-runner/SKILL.md` | §1 필드 목록에 `plan_path: null` 지시 추가. 새 "SDD 태스크 루프" 섹션(§1과 §2 사이) + 진입 분기 bash + 서두/§4/frontmatter description의 "리뷰어 없음" 문장에 예외 추가 |
 | `tests/test_sdd_loop_entry_branch.py` | 신설 — `plan_path` 유무에 따른 SDD 루프 진입 분기 bash를 고정 |
 | `skills/orca-set.version` | 버전 bump |
 
@@ -41,7 +49,8 @@
 - Modify: `orca-workflows/contract-schema.md:46-61` (스키마 JSON 블록), `:63-65` ("모든 필드 필수" 불릿)
 
 **Interfaces:**
-- Produces: `plan_path`(string|null) — Task 3(`orca-workflow-task` §1)가 채우고, Task 4(`orca-task-runner` SDD 진입 분기)가 읽는 값의 정본 스키마.
+- Produces: `plan_path`(string|null) — Task 2(`orca-workflow-task` §1, hitl)와 Task 5 Step 1
+  (`orca-task-runner` §1, afk)가 채우고, Task 5의 SDD 진입 분기가 읽는 값의 정본 스키마.
 
 이 파일은 순수 문서(스키마 설명)이고 파싱 스크립트가 없다 — 이 저장소의 실행-기반 테스트 정책상
 자동 테스트는 없다(AGENTS.md, "prose-pinning 테스트는 반-패턴"). 검증은 Step 3의 수동 재확인이다.
@@ -141,8 +150,9 @@ EOF
 **Interfaces:**
 - Consumes: `superpowers:brainstorming`, `superpowers:writing-plans`(둘 다 외부 스킬 — 이 스킬은 그
   스킬들을 호출하는 절차만 서술한다).
-- Produces: `proposal-r<n>.json`(Task 1의 스키마, `plan_path` 필드 포함) — Task 3(§2)가 이 필드를
-  읽어 `orca-task-runner` dispatch에 전달한다.
+- Produces: `proposal-r<n>.json`(Task 1의 스키마, `plan_path` 필드 포함, spike 분기는 `SPIKE_ANSWERED`
+  outcome을 남기고 이 파일 자체를 쓰지 않음 — Task 3이 그 outcome 값을 등록) — Task 4(§2)가 이
+  필드를 읽어 `orca-task-runner` dispatch에 전달한다.
 
 이 절 전체가 프로즈(코디네이터 역할의 LLM이 따르는 절차 서술)이고 파싱되는 bash가 없다 — 자동
 테스트는 없다(위 Global Constraints). 검증은 Step 2의 수동 재확인이다.
@@ -184,8 +194,12 @@ EOF
 - **먼저 `superpowers:brainstorming`을 실제로 호출한다**(입력: 이슈 원문) — 그 스킬 자신의
   분류(spike/bounded/architectural)를 그대로 따른다:
   - **spike**(드묾 — "이게 가능한가"류 이슈): 코드 변경이 산출물이 아니므로 이 §1~§2 전체를
-    건너뛴다. 조사 결과를 이슈에 코멘트로 남기고 사람에게 다음 행동(이슈 재정의/종료)을 물은 뒤
-    종료한다 — `orca-task-runner`/`orca-evaluate` 모두 호출하지 않는다.
+    건너뛴다. 조사 결과를 이슈에 코멘트로 남기고 사람에게 다음 행동(이슈 재정의/종료)을 물은 뒤,
+    `log_dispatch`로 `outcome=SPIKE_ANSWERED`를 남기고(Task 3이 이 값을 등록한다) 보고 채널로
+    종료를 알린다 — 아래 §5의 일반 "그 외 outcome"(hitl/afk 재분기, 계속/중단 선택지)은 타지
+    않는다: 사람의 결정은 이미 여기서 끝났다. §0이 만든 worktree/Run/CONTRACT_DIR는 다른
+    outcome들과 동일하게 보존한다(정리 로직을 새로 만들지 않는다). `orca-task-runner`/
+    `orca-evaluate` 모두 호출하지 않는다.
   - **bounded**(이미 있는 흐름의 작은 범위 수정): brainstorming이 규정한 대로 스펙 문서도 플랜
     문서도 쓰지 않고 짧은 합의만 채팅으로 받는다. 그 합의로 `contract-schema.md` 스키마대로
     `proposal-r<n>.json`을 쓴다 — `plan_path` 필드는 `null`.
@@ -251,7 +265,118 @@ EOF
 
 ---
 
-### Task 3: `orca-workflow-task` SKILL.md §1/§2 — `plan_path`를 구현 모드 dispatch에 실어 보낸다
+### Task 3: `SPIKE_ANSWERED` outcome 값 등록
+
+**Files:**
+- Modify: `orca-workflows/scripts/log_dispatch.sh:69-84` (멤버십 노트 + `LOG_OUTCOME_ENUM`)
+- Modify: `tests/test_log_outcome.py:36-59` (`DOCUMENTED_OUTCOME_ENUM`)
+- Modify: `orca-workflows/logging.md:82-85`(진행-분기 축 목록), `:150-151`(설명 문단 삽입 위치)
+
+**Interfaces:**
+- Consumes: 없음.
+- Produces: `log_outcome --outcome SPIKE_ANSWERED ...`가 유효한 호출이 된다(Task 2의 spike 분기가
+  emit) — `UNMAPPED_BRANCH`로 강제 대체되지 않는다.
+
+- [ ] **Step 1: 실패하는 테스트 작성 — enum 크로스체크 목록 확장**
+
+`tests/test_log_outcome.py`의 `DOCUMENTED_OUTCOME_ENUM`(현재 36-59행)에서, `NO_ACCEPTANCE_CRITERIA`
+줄 바로 뒤(`"UNMAPPED_BRANCH"` 앞)에 삽입:
+
+```python
+    "NO_ACCEPTANCE_CRITERIA",  # issue #105
+    "SPIKE_ANSWERED",  # 직접 이슈 없음, docs/superpowers/specs/2026-08-22-orca-workflow-task-hitl-superpowers-design.md
+    "UNMAPPED_BRANCH",
+```
+
+- [ ] **Step 2: 테스트 실행해 실패 확인**
+
+Run: `python3 -m pytest tests/test_log_outcome.py -k enum -v`
+Expected: FAIL — `_extract_enum("LOG_OUTCOME_ENUM") == set(DOCUMENTED_OUTCOME_ENUM)`가 깨진다(스크립트
+쪽 enum에는 아직 `SPIKE_ANSWERED`가 없음).
+
+- [ ] **Step 3: `log_dispatch.sh`의 정본 enum에 값 추가**
+
+`orca-workflows/scripts/log_dispatch.sh`에서 (현재 69-84행) 다음을:
+
+```bash
+# - EPIC_DONE / PR_OPEN_PREMERGE_PASS (observed in #105's recurrence comments) are deliberately
+#   NOT added: neither has a decided semantics yet — they hit the UNMAPPED_BRANCH safeguard, which
+#   is the designed path for values awaiting a schema decision.
+LOG_OUTCOME_ENUM="PASS FAIL ESCALATE GATE_FAIL CONTRACT_ESCALATE CI_GATE_FAIL NO_DONE_TRANSITION CONTRACT_FINALIZED_BY_GENERATOR CONTRACT_APPROVED CONTRACT_SCHEMA_STALE MANUAL_RECOVERY_COMPLETED CI_GATE_TIMEOUT MERGE_CONFLICT RETRO_DONE RETRO_FAIL escalation_parked skipped unblocked_requeue NO_ACCEPTANCE_CRITERIA UNMAPPED_BRANCH"
+```
+
+다음으로:
+
+```bash
+# - EPIC_DONE / PR_OPEN_PREMERGE_PASS (observed in #105's recurrence comments) are deliberately
+#   NOT added: neither has a decided semantics yet — they hit the UNMAPPED_BRANCH safeguard, which
+#   is the designed path for values awaiting a schema decision.
+# - SPIKE_ANSWERED: added per docs/superpowers/specs/2026-08-22-orca-workflow-task-hitl-superpowers-design.md
+#   (직접 이슈 없음) — orca-workflow-task §1's hitl generator role classifies an issue as "spike"
+#   (investigation, not code) and, once the human has decided the next action, ends without ever
+#   reaching contract negotiation or §5's normal escalation branching. This is a normal termination,
+#   not PASS/FAIL/ESCALATE, so it needs its own progress-branch value rather than being silently
+#   unlogged.
+LOG_OUTCOME_ENUM="PASS FAIL ESCALATE GATE_FAIL CONTRACT_ESCALATE CI_GATE_FAIL NO_DONE_TRANSITION CONTRACT_FINALIZED_BY_GENERATOR CONTRACT_APPROVED CONTRACT_SCHEMA_STALE SPIKE_ANSWERED MANUAL_RECOVERY_COMPLETED CI_GATE_TIMEOUT MERGE_CONFLICT RETRO_DONE RETRO_FAIL escalation_parked skipped unblocked_requeue NO_ACCEPTANCE_CRITERIA UNMAPPED_BRANCH"
+```
+
+- [ ] **Step 4: 테스트 실행해 통과 확인**
+
+Run: `python3 -m pytest tests/test_log_outcome.py -v`
+Expected: 전체 PASS(다른 테스트가 이전 enum 문자열을 하드코딩하지 않았는지도 함께 확인).
+
+- [ ] **Step 5: `logging.md` 사람이 읽는 문서 갱신**
+
+`orca-workflows/logging.md`에서 (현재 82-85행) 진행-분기 축 목록을:
+
+```markdown
+- **진행-분기 축** — 판정이 아니라 정상적인 워크플로 상태 전이:
+  `NO_DONE_TRANSITION`|`CONTRACT_FINALIZED_BY_GENERATOR`|`CONTRACT_APPROVED`|`CONTRACT_SCHEMA_STALE`|
+  `MANUAL_RECOVERY_COMPLETED`|`CI_GATE_TIMEOUT`|`MERGE_CONFLICT`|`RETRO_DONE`|`RETRO_FAIL`|
+  `escalation_parked`|`skipped`|`unblocked_requeue`|`NO_ACCEPTANCE_CRITERIA`|`UNMAPPED_BRANCH`
+```
+
+다음으로:
+
+```markdown
+- **진행-분기 축** — 판정이 아니라 정상적인 워크플로 상태 전이:
+  `NO_DONE_TRANSITION`|`CONTRACT_FINALIZED_BY_GENERATOR`|`CONTRACT_APPROVED`|`CONTRACT_SCHEMA_STALE`|
+  `SPIKE_ANSWERED`|`MANUAL_RECOVERY_COMPLETED`|`CI_GATE_TIMEOUT`|`MERGE_CONFLICT`|`RETRO_DONE`|
+  `RETRO_FAIL`|`escalation_parked`|`skipped`|`unblocked_requeue`|`NO_ACCEPTANCE_CRITERIA`|`UNMAPPED_BRANCH`
+```
+
+그리고 `CONTRACT_SCHEMA_STALE` 설명 문단이 끝나는 지점(현재 150행, "...남긴다."로 끝남) 뒤,
+`MANUAL_RECOVERY_COMPLETED` 문단(152행) 앞에 새 문단을 삽입:
+
+```markdown
+`SPIKE_ANSWERED`는 `orca-workflow-task` §1의 hitl generator 역할이 이슈를 brainstorming으로
+"spike"(코드 변경이 아니라 조사/답변이 산출물인 이슈)로 분류하고, 사람에게 다음 행동을 물어 결정을
+받은 뒤 남기는 정상 종료다(직접 이슈 없음,
+`docs/superpowers/specs/2026-08-22-orca-workflow-task-hitl-superpowers-design.md`) — 계약 협상
+자체가 시작되지 않으므로 `round`는 없고, `detail`에 사람이 정한 다음 행동(이슈 재정의 요청/종료 등)을
+사람이 읽을 수 있는 문장으로 남긴다. `orca-task-runner`/`orca-evaluate` 어느 쪽도 호출되지 않은
+채 끝나는 유일한 정상 분기다.
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add orca-workflows/scripts/log_dispatch.sh tests/test_log_outcome.py orca-workflows/logging.md
+git commit -m "$(cat <<'EOF'
+logging: SPIKE_ANSWERED outcome 값 등록
+
+orca-workflow-task §1의 hitl spike 분기(Task 2)가 코드 변경 없이
+정상 종료할 때 남길 outcome을 UNMAPPED_BRANCH로 강제 대체되지 않는
+합법적 값으로 등록한다.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 4: `orca-workflow-task` SKILL.md §1/§2 — `plan_path`를 구현 모드 dispatch에 실어 보낸다
 
 **Files:**
 - Modify: `skills/orca-workflow-task/SKILL.md:382` (§1 라운드1 task-runner spec_text — §2 fresh dispatch가 재사용)
@@ -259,7 +384,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `proposal-r<n>.json`의 `plan_path`(Task 1의 스키마, Task 2가 씀).
-- Produces: `orca-task-runner`가 받는 구현 모드 spec_text에 포함되는 `plan_path` 값 — Task 4의
+- Produces: `orca-task-runner`가 받는 구현 모드 spec_text에 포함되는 `plan_path` 값 — Task 5의
   SDD 진입 분기가 이 값의 존재로 분기한다.
 
 프로즈 템플릿 문자열 수정이라 자동 테스트는 없다(§1의 라운드-한도 bash 로직 자체는 이 Task에서
@@ -317,19 +442,66 @@ EOF
 
 ---
 
-### Task 4: `orca-task-runner` SKILL.md — SDD 태스크 루프 신설 + 진입 분기 + 리뷰어 예외 문구
+### Task 5: `orca-task-runner` SKILL.md — SDD 태스크 루프 신설 + 진입 분기 + 리뷰어 예외 문구
 
 **Files:**
 - Modify: `skills/orca-task-runner/SKILL.md:3`(frontmatter description), `:9`(서두 리뷰어 문장),
-  새 섹션 삽입 위치(§1 끝, 현재 134행 뒤 / §2 시작, 현재 136행 앞), `:199`(§4 리뷰어 문장)
+  `:113-125`(§1 필드 목록 — `plan_path: null` 지시 추가), 새 섹션 삽입 위치(§1 끝, 현재 134행 뒤 /
+  §2 시작, 현재 136행 앞), `:199`(§4 리뷰어 문장)
 - Test: `tests/test_sdd_loop_entry_branch.py`(신설)
 
 **Interfaces:**
-- Consumes: `plan_path`(spec으로 받음, Task 3이 전달) — non-null이면 SDD 태스크 루프, null/부재면
+- Consumes: `plan_path`(spec으로 받음, Task 4가 전달) — non-null이면 SDD 태스크 루프, null/부재면
   기존 §2~§5.
-- Produces: 없음 — 이 스킬 내부 분기일 뿐, 다른 태스크가 이 출력에 의존하지 않는다.
+- Produces: 이 스킬 자신의 §1(afk 전용 proposal 작성)이 쓰는 `plan_path: null` — Task 1의 스키마가
+  요구하는 필수 필드를 afk 쪽에서도 채운다. 그 외에는 다른 태스크가 이 출력에 의존하지 않는다.
 
-- [ ] **Step 1: 실패하는 테스트 작성 — 진입 분기 bash 고정**
+- [ ] **Step 1: §1의 proposal 필드 목록에 `plan_path: null` 지시 추가**
+
+`skills/orca-task-runner/SKILL.md`에서 (현재 122-125행) 다음을:
+
+```markdown
+- 이 변경으로 red가 되거나 갱신이 필요한 기존 테스트·단언(`existing_tests_affected`, file:line) —
+  빈 배열이 "명시적 없음"이다. `verification_plan`은 새로 추가할 검증만 담는다 — 기존에 green이던
+  단언 중 이 변경으로 red가 될 것은 여기 별도로 열거한다(정확 일치 단언, 게이트 자체를 막는 회귀를
+  특히 놓치기 쉽다).
+```
+
+다음으로:
+
+```markdown
+- 이 변경으로 red가 되거나 갱신이 필요한 기존 테스트·단언(`existing_tests_affected`, file:line) —
+  빈 배열이 "명시적 없음"이다. `verification_plan`은 새로 추가할 검증만 담는다 — 기존에 green이던
+  단언 중 이 변경으로 red가 될 것은 여기 별도로 열거한다(정확 일치 단언, 게이트 자체를 막는 회귀를
+  특히 놓치기 쉽다).
+- `plan_path` — 항상 `null`이다. 이 §1(generator 역할)은 afk 전용이고(hitl에서는
+  `orca-workflow-task`가 이 필드를 직접 쓴다 — 그 스킬 SKILL.md §1 "mode=hitl일 때 generator
+  역할" 절 참고), afk 경로는 `superpowers:brainstorming`/`superpowers:writing-plans`를 거치지
+  않으므로 플랜 문서 자체가 존재하지 않는다.
+```
+
+- [ ] **Step 2: 수동 재확인**
+
+편집된 §1 필드 목록을 다시 읽어 다른 필드들과 같은 스타일(불릿, 필드명 백틱 표기)로 쓰였는지
+확인한다.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add skills/orca-task-runner/SKILL.md
+git commit -m "$(cat <<'EOF'
+orca-task-runner §1: plan_path를 항상 null로 채운다 (afk 전용 경로)
+
+Task 1이 contract-schema.md에서 plan_path를 필수 필드로 만들었으므로,
+이 §1(afk 전용 proposal 작성)도 이 필드를 명시적으로 채워야 스키마를
+지킨다 — afk는 brainstorming/writing-plans를 거치지 않으므로 항상 null.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+- [ ] **Step 4: 실패하는 테스트 작성 — 진입 분기 bash 고정**
 
 `tests/test_sdd_loop_entry_branch.py`를 새로 작성한다(기존 `tests/test_generate_audit_gate.py`와
 같은 추출-후-서브프로세스-실행 패턴):
@@ -391,13 +563,13 @@ def test_empty_plan_path_selects_native_dag(shell):
     assert result.stdout.strip() == "NATIVE_DAG"
 ```
 
-- [ ] **Step 2: 테스트 실행해 실패 확인**
+- [ ] **Step 5: 테스트 실행해 실패 확인**
 
 Run: `python3 -m pytest tests/test_sdd_loop_entry_branch.py -v`
 Expected: 두 테스트 모두 ERROR — `SKILL.md`에 아직 "SDD 태스크 루프" 앵커 텍스트가 없으므로
 `_entry_branch_block()` 내부의 `text.index(...)`가 `ValueError`(부분 문자열 없음)를 던진다.
 
-- [ ] **Step 3: frontmatter description에 예외 문구 추가**
+- [ ] **Step 6: frontmatter description에 예외 문구 추가**
 
 `skills/orca-task-runner/SKILL.md`에서 (현재 3행) 다음 문장을:
 
@@ -414,7 +586,7 @@ Subtask gates are mechanical only (typecheck/unit test/lint/format) — never an
 (이 편집 후 `python3 -c "import re; text=open('skills/orca-task-runner/SKILL.md').read(); m=re.search(r'description: (.*)', text); print(len(m.group(1)))"`로 1024자 캡을 넘지 않는지 확인 — 현재
 629자 + 약 100자 추가로 여유 있음.)
 
-- [ ] **Step 4: 서두 리뷰어 문장에 예외 추가**
+- [ ] **Step 7: 서두 리뷰어 문장에 예외 추가**
 
 `skills/orca-task-runner/SKILL.md`에서 (현재 9행) 다음을:
 
@@ -428,7 +600,7 @@ Subtask gates are mechanical only (typecheck/unit test/lint/format) — never an
 하나의 task(issue)를 구현한다. **생성만** 한다 — 평가는 이 스킬의 책임이 아니다(`orca-evaluate`가 담당). subtask 단위 리뷰어 역할은 두지 않는다(단, `plan_path`가 있는 SDD 태스크 루프 경로는 예외 — 아래 "SDD 태스크 루프" 절 참고, hitl 전용).
 ```
 
-- [ ] **Step 5: §1과 §2 사이에 "SDD 태스크 루프" 섹션 신설**
+- [ ] **Step 8: §1과 §2 사이에 "SDD 태스크 루프" 섹션 신설**
 
 `skills/orca-task-runner/SKILL.md`에서, 현재 §1의 끝(134행, "verdict-r2.json을 읽고 proposal-r3.json을 작성한다(override.json 작성 없음)... 위 override 절차와 동일하되 라운드 번호만 한 칸씩 밀림)."로 끝나는 문단) 뒤, `## 2. Subtask DAG 구성` 헤딩(136행) 앞에 다음 섹션을 삽입한다:
 
@@ -481,7 +653,7 @@ tool이 없는 세션(이 세션 자신이 Codex나 agy로 돌 수 있음)에서
 (상세 설계 근거: `docs/superpowers/specs/2026-08-22-orca-workflow-task-hitl-superpowers-design.md`)
 ```
 
-- [ ] **Step 6: §4 리뷰어 문장에 예외 추가**
+- [ ] **Step 9: §4 리뷰어 문장에 예외 추가**
 
 `skills/orca-task-runner/SKILL.md`에서 (현재 199행) 다음을:
 
@@ -495,12 +667,12 @@ subtask가 worker_done을 보내기 전에 스스로 실행: typecheck, unit tes
 subtask가 worker_done을 보내기 전에 스스로 실행: typecheck, unit test, formatter, linter, 무거운 환경 구성이 필요 없는 script test. **subtask 단위 agent 리뷰어는 없다.** 게이트를 통과하지 못하면 worker_done을 보내지 않고 스스로 고친다. (이 §4는 §2~§5 native 경로에만 적용된다 — `plan_path`가 있는 SDD 태스크 루프 경로는 태스크별 LLM 리뷰어를 예외적으로 둔다, hitl 전용. 위 "SDD 태스크 루프" 절 참고.)
 ```
 
-- [ ] **Step 7: 테스트 실행해 통과 확인**
+- [ ] **Step 10: 테스트 실행해 통과 확인**
 
 Run: `python3 -m pytest tests/test_sdd_loop_entry_branch.py -v`
 Expected: 두 테스트 모두 PASS.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add skills/orca-task-runner/SKILL.md tests/test_sdd_loop_entry_branch.py
@@ -520,26 +692,27 @@ EOF
 
 ---
 
-### Task 5: 전체 스위트 재확인, 버전 bump, 배포
+### Task 6: 전체 스위트 재확인, 버전 bump, 배포
 
 **Files:**
 - Modify: `skills/orca-set.version`
 
 **Interfaces:**
-- Consumes: Task 1-4의 모든 커밋.
+- Consumes: Task 1-5의 모든 커밋.
 - Produces: `~/.agents/skills/`에 배포된 새 버전(orca-set 전체).
 
 - [ ] **Step 1: 전체 테스트 스위트 실행**
 
 Run: `python3 -m pytest tests/ -q`
-Expected: 전부 PASS (Task 4의 신설 테스트 포함, 기존 테스트에 회귀 없음 — 특히
+Expected: 전부 PASS (Task 3의 `test_log_outcome.py` 갱신, Task 5의 신설
+`test_sdd_loop_entry_branch.py` 포함, 기존 테스트에 회귀 없음 — 특히
 `test_skill_description_length.py`, `test_round_limit_branch_order.py`, `test_generate_audit_gate.py`
 가 이번 변경으로 건드린 파일들을 커버하므로 확인).
 
 - [ ] **Step 2: 작업 트리 클린 확인**
 
 Run: `git status --short`
-Expected: 출력 없음(Task 1-4가 이미 커밋됨). `deploy-skills.sh`는 dirty skill을 거부한다.
+Expected: 출력 없음(Task 1-5가 이미 커밋됨). `deploy-skills.sh`는 dirty skill을 거부한다.
 
 - [ ] **Step 3: 버전 bump**
 
@@ -574,18 +747,21 @@ Expected: 새 커밋-고정 복사본이 `~/.agents/skills/`에 `v1.1.32`로 설
 
 ## Self-Review Notes
 
-**Spec coverage:** 설계 문서의 "설계 1"(트리거 분기) → Task 2. "설계 2"(§2 plan_path 전달) →
-Task 3. "설계 3"(contract-schema.md) → Task 1. "설계 4"(SDD 루프) → Task 4. "설계 5"(§5 무변경,
-합류 지점 명시) → Task 4의 SDD 루프 절 5번 항목이 그 합류를 서술(§5 자체는 코드 변경 없음, 별도
-Task 불필요). "마이그레이션/롤아웃" → Task 5. 설계 문서의 "범위 밖" 항목(afk, orca-evaluate 내부,
-subagent-driven-development 스킬 파일 자체, orca-workflow/orca-workflow-epic) 모두 이 플랜에서
-건드리지 않는다.
+**Spec coverage:** 설계 문서의 "설계 1"(트리거 분기, spike의 `SPIKE_ANSWERED` 포함) → Task 2 +
+Task 3. "설계 2"(§2 plan_path 전달) → Task 4. "설계 3"(contract-schema.md) → Task 1. "설계
+4"(SDD 루프, `orca-task-runner` §1의 `plan_path: null` 포함) → Task 5. "설계 5"(§5 무변경, 합류
+지점 명시) → Task 5의 SDD 루프 절 5번 항목이 그 합류를 서술(§5 자체는 코드 변경 없음, 별도 Task
+불필요). "마이그레이션/롤아웃" → Task 6. 설계 문서의 "범위 밖" 항목(afk의 §2~§7 로직,
+orca-evaluate 내부, subagent-driven-development 스킬 파일 자체, orca-workflow/orca-workflow-epic)
+모두 이 플랜에서 건드리지 않는다. advisor 리뷰에서 발견된 두 gap(plan_path 신호의 전제, spike
+outcome 로깅 부재)은 스펙 문서를 먼저 정정한 뒤 Task 3과 Task 5 Step 1로 반영했다.
 
 **Placeholder scan:** 각 Step이 실제 교체 전/후 텍스트를 통째로 담고 있다 — "TBD"·"구현하라" 류
-표현 없음. Task 4 Step 1의 테스트는 `tests/test_generate_audit_gate.py`의 실제 구조를 그대로 뗀
-완성된 코드다.
+표현 없음. Task 3 Step 1과 Task 5 Step 4의 테스트는 각각 `tests/test_log_outcome.py`(기존 패턴
+확장)와 `tests/test_generate_audit_gate.py`(구조 재사용)의 실제 코드를 그대로 뗀 완성된 코드다.
 
-**Type/name consistency:** `plan_path`(필드명), `SDD_LOOP`/`NATIVE_DAG`(테스트가 assert하는 stdout
-문자열), `role="sdd-implementer"`/`"sdd-reviewer"`(로그 role 값)가 Task 1·3·4 전체에서 동일하게
-쓰인다. `docs/superpowers/specs/2026-08-22-orca-workflow-task-hitl-superpowers-design.md` 경로
-문자열도 Task 1·2에서 동일하다.
+**Type/name consistency:** `plan_path`(필드명), `SPIKE_ANSWERED`(outcome 값), `SDD_LOOP`/
+`NATIVE_DAG`(테스트가 assert하는 stdout 문자열), `role="sdd-implementer"`/`"sdd-reviewer"`(로그
+role 값)가 Task 1·2·3·4·5 전체에서 동일하게 쓰인다.
+`docs/superpowers/specs/2026-08-22-orca-workflow-task-hitl-superpowers-design.md` 경로 문자열도
+Task 1·2·3에서 동일하다.
