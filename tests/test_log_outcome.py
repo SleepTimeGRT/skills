@@ -55,6 +55,7 @@ DOCUMENTED_OUTCOME_ENUM = [
     "skipped",  # issue #138
     "unblocked_requeue",  # issue #165
     "NO_ACCEPTANCE_CRITERIA",  # issue #105
+    "SPIKE_ANSWERED",  # 직접 이슈 없음, docs/superpowers/specs/2026-08-22-orca-workflow-task-hitl-superpowers-design.md
     "UNMAPPED_BRANCH",
 ]
 

@@ -81,8 +81,8 @@ orca-task-runner에 dispatch됐는가"를 로그만으로 판정할 수 있게 �
 - **verdict 축** — task 라우팅 판정: `PASS`|`FAIL`|`ESCALATE`|`GATE_FAIL`|`CONTRACT_ESCALATE`|`CI_GATE_FAIL`
 - **진행-분기 축** — 판정이 아니라 정상적인 워크플로 상태 전이:
   `NO_DONE_TRANSITION`|`CONTRACT_FINALIZED_BY_GENERATOR`|`CONTRACT_APPROVED`|`CONTRACT_SCHEMA_STALE`|
-  `MANUAL_RECOVERY_COMPLETED`|`CI_GATE_TIMEOUT`|`MERGE_CONFLICT`|`RETRO_DONE`|`RETRO_FAIL`|
-  `escalation_parked`|`skipped`|`unblocked_requeue`|`NO_ACCEPTANCE_CRITERIA`|`UNMAPPED_BRANCH`
+  `SPIKE_ANSWERED`|`MANUAL_RECOVERY_COMPLETED`|`CI_GATE_TIMEOUT`|`MERGE_CONFLICT`|`RETRO_DONE`|
+  `RETRO_FAIL`|`escalation_parked`|`skipped`|`unblocked_requeue`|`NO_ACCEPTANCE_CRITERIA`|`UNMAPPED_BRANCH`
 
 **기계-검증 정본은 `orca-workflows/scripts/log_dispatch.sh`의 `log_outcome()`(enum 변수
 `LOG_OUTCOME_ENUM`)이다** — 위 목록은 사람이 읽는 미러이고, 둘이 어긋나면 스크립트가 정본이다. 모든
@@ -148,6 +148,14 @@ mtime이 그 요구사항 도입 시점(commit 79b7c3b, 2026-08-12T09:44:57+09:0
 별도 값으로 분리한다. 이 라인은 per-call-site 추가 필드 규칙에 따라 `round`(도달한 라운드 수, 이
 게이트 한정 항상 2)와 `detail`(override.json mtime과 게이트 도입 시각을 사람이 읽을 수 있는
 형태로)을 더해 남긴다.
+
+`SPIKE_ANSWERED`는 `orca-workflow-task` §1의 hitl generator 역할이 이슈를 brainstorming으로
+"spike"(코드 변경이 아니라 조사/답변이 산출물인 이슈)로 분류하고, 사람에게 다음 행동을 물어 결정을
+받은 뒤 남기는 정상 종료다(직접 이슈 없음,
+`docs/superpowers/specs/2026-08-22-orca-workflow-task-hitl-superpowers-design.md`) — 계약 협상
+자체가 시작되지 않으므로 `round`는 없고, `detail`에 사람이 정한 다음 행동(이슈 재정의 요청/종료 등)을
+사람이 읽을 수 있는 문장으로 남긴다. `orca-task-runner`/`orca-evaluate` 어느 쪽도 호출되지 않은
+채 끝나는 유일한 정상 분기다.
 
 `MANUAL_RECOVERY_COMPLETED`는 `worker_done`이 Orca 런타임 문제(재시작·연결 끊김 등)로 유실돼
 `self-recovery.md`의 자동 대기/재시도 루프로도 완료 확인이 안 될 때, 코디네이터가 산출물(커밋·아티팩트)을
