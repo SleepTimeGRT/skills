@@ -81,7 +81,13 @@
 # - EPIC_DONE / PR_OPEN_PREMERGE_PASS (observed in #105's recurrence comments) are deliberately
 #   NOT added: neither has a decided semantics yet — they hit the UNMAPPED_BRANCH safeguard, which
 #   is the designed path for values awaiting a schema decision.
-LOG_OUTCOME_ENUM="PASS FAIL ESCALATE GATE_FAIL CONTRACT_ESCALATE CI_GATE_FAIL NO_DONE_TRANSITION CONTRACT_FINALIZED_BY_GENERATOR CONTRACT_APPROVED CONTRACT_SCHEMA_STALE MANUAL_RECOVERY_COMPLETED CI_GATE_TIMEOUT MERGE_CONFLICT RETRO_DONE RETRO_FAIL escalation_parked skipped unblocked_requeue NO_ACCEPTANCE_CRITERIA UNMAPPED_BRANCH"
+# - SPIKE_ANSWERED: added per docs/superpowers/specs/2026-08-22-orca-workflow-task-hitl-superpowers-design.md
+#   (직접 이슈 없음) — orca-workflow-task §1's hitl generator role classifies an issue as "spike"
+#   (investigation, not code) and, once the human has decided the next action, ends without ever
+#   reaching contract negotiation or §5's normal escalation branching. This is a normal termination,
+#   not PASS/FAIL/ESCALATE, so it needs its own progress-branch value rather than being silently
+#   unlogged.
+LOG_OUTCOME_ENUM="PASS FAIL ESCALATE GATE_FAIL CONTRACT_ESCALATE CI_GATE_FAIL NO_DONE_TRANSITION CONTRACT_FINALIZED_BY_GENERATOR CONTRACT_APPROVED CONTRACT_SCHEMA_STALE SPIKE_ANSWERED MANUAL_RECOVERY_COMPLETED CI_GATE_TIMEOUT MERGE_CONFLICT RETRO_DONE RETRO_FAIL escalation_parked skipped unblocked_requeue NO_ACCEPTANCE_CRITERIA UNMAPPED_BRANCH"
 
 # self_recovery.action_taken — mirrors logging.md §1's self_recovery recipe. resume_wait (a typo'd
 # variant of resumed_wait, seen 5x in issue #127) is exactly the class the substitution below

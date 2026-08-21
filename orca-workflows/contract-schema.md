@@ -56,13 +56,14 @@ install -d -m 700 "$CONTRACT_DIR"
   "scope": { "summary": "<무엇을 만들 것인가 — 사실 서술만>", "files": ["<path>"] },
   "verification_plan": [ {"covers": ["ac1"], "method": "<구체 파일/함수/테스트>", "fails_before_fix": "<이 항목이 fix 이전에 어떻게 실패하는지, 또는 왜 실패할 수 없는지>"} ],
   "destructive_operations": [ "<의도된 destructive op 설명>" ],
-  "existing_tests_affected": [ {"location": "<file:line>", "reason": "<이 변경으로 red가 되는 이유>"} ]
+  "existing_tests_affected": [ {"location": "<file:line>", "reason": "<이 변경으로 red가 되는 이유>"} ],
+  "plan_path": "<superpowers:writing-plans가 쓴 플랜 문서의 절대경로, architectural 분류가 아니면 null>"
 }
 ```
 
 - **모든 필드 필수.** `destructive_operations`/`existing_tests_affected`의 빈 배열 `[]`은
   "명시적으로 없음"이다 — 필드가 아예 없으면 스키마 위반이므로 "언급 안 함" 상태는 존재할 수
-  없다(종전 prose 제안서의 "공란 vs 없음" 구분을 스키마 필수성이 대체한다). `verification_plan[].fails_before_fix`도 같은 규칙이다 — 비어 있거나 필드 자체가 없으면 스키마 위반이다. 변별 불가일 때도 침묵이 아니라 그 사실을 명시적으로 적는다 — 예: 이 항목이 fix 전후 구분이 불가능한 이유를 그대로 서술한다. **무동작(no-op) 통과 금지**: `fails_before_fix`를 채울 때, 이 검증 방법이 stub/no-op(빈 구현, 아무 것도 하지 않는 구현)에서도 통과하는지 스스로 점검한다. 통과한다면 그 검증 방법 자체가 스키마 위반이다 — 구조적 존재 확인(예: 특정 API 호출 문자열이 소스에 있는지)만으로는 무동작 구현을 배제하지 못하는 경우가 이에 해당한다. 여러 경로를 커버해도 전부 구조적 확인이면 여전히 무동작을 통과시킨다는 점에 유의한다(happy-path만 커버 금지 규칙과는 별개 축).
+  없다(종전 prose 제안서의 "공란 vs 없음" 구분을 스키마 필수성이 대체한다). `plan_path`도 같은 원칙이다 — `null`이 "이 라운드는 architectural 분류가 아니라 플랜 문서가 없음"의 명시값이다(issue: 직접 이슈 없음, `docs/superpowers/specs/2026-08-22-orca-workflow-task-hitl-superpowers-design.md`). `orca-task-runner`는 이 필드가 non-null일 때만 SDD 태스크 루프로 진입한다(그 스킬 SKILL.md의 "SDD 태스크 루프" 절 참고). `verification_plan[].fails_before_fix`도 같은 규칙이다 — 비어 있거나 필드 자체가 없으면 스키마 위반이다. 변별 불가일 때도 침묵이 아니라 그 사실을 명시적으로 적는다 — 예: 이 항목이 fix 전후 구분이 불가능한 이유를 그대로 서술한다. **무동작(no-op) 통과 금지**: `fails_before_fix`를 채울 때, 이 검증 방법이 stub/no-op(빈 구현, 아무 것도 하지 않는 구현)에서도 통과하는지 스스로 점검한다. 통과한다면 그 검증 방법 자체가 스키마 위반이다 — 구조적 존재 확인(예: 특정 API 호출 문자열이 소스에 있는지)만으로는 무동작 구현을 배제하지 못하는 경우가 이에 해당한다. 여러 경로를 커버해도 전부 구조적 확인이면 여전히 무동작을 통과시킨다는 점에 유의한다(happy-path만 커버 금지 규칙과는 별개 축).
 - **설득 서술 필드는 의도적으로 없다.** "왜 이 제안이 충분한가"류 정당화는 어떤 필드에도 넣지
   않는다(`scope.summary` 포함 — 사실 서술만). `verification_plan[].fails_before_fix`도 같은 경계를 따른다 — pre-fix 동작에 대한 사실 서술이지 "왜 이 항목이 검증으로 충분한가" 정당화가 아니다. 근거는 아래 "라운드 2+ 입력 격리".
 - `verification_plan[].covers`는 `draft_acceptance_criteria`의 id만 참조한다. 어떤 plan 항목도

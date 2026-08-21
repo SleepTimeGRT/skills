@@ -314,19 +314,37 @@ fi
 
 **"호출"의 실체**: `orca-task-runner`/`orca-evaluate`는 이 스킬(orca-workflow-task)과 같은 세션에서 도는 게 아니라, 각각 orchestration으로 별도 터미널을 띄워서 넘기는 것이다 — 그래야 이 스킬이 "diff나 report 본문을 직접 읽지 않는다"는 원칙이 실제로 지켜진다. **단, 이 원칙은 evaluator와 afk의 generator에 적용된다** — hitl의 generator측은 아래 절대로 다르다.
 
-**mode=hitl일 때 generator 역할(issue #180)** — 별도 스폰 없이 코디네이터 자신이 처리한다. 아래
-"라운드 1"·"라운드 2+" 블록 중 **task-runner를 향하는 부분**(대상이 evaluator인 부분은 라운드·mode
-무관하게 항상 그대로 스폰한다)은 hitl에서 실행하지 않는다. `proposal-r<n>.json`(라운드 1이든 2+든)과
-`override.json`은 이 코디네이터 세션이 사람과 직접 협의해 쓴다:
+**mode=hitl일 때 generator 역할(issue #180, 2026-08-22 확장 — 설계 근거:
+`docs/superpowers/specs/2026-08-22-orca-workflow-task-hitl-superpowers-design.md`)** — 별도 스폰
+없이 코디네이터 자신이 처리한다. 아래 "라운드 1"·"라운드 2+" 블록 중 **task-runner를 향하는
+부분**(대상이 evaluator인 부분은 라운드·mode 무관하게 항상 그대로 스폰한다)은 hitl에서 실행하지
+않는다.
 
-- 대화 방식은 `superpowers:brainstorming`의 질문법(한 번에 한 질문, 2-3안 제시 후 추천, 섹션별 승인)을
-  따르되, **그 스킬 자신의 종료 조건은 따르지 않는다** — `docs/superpowers/specs/`에 디자인 문서를
-  쓰고 커밋하는 스텝, `writing-plans` 호출 스텝 둘 다 여기서는 존재하지 않는다. 대신 사람이
-  draft_acceptance_criteria·scope·verification_plan에 합의하면 그 자리에서 `contract-schema.md`
-  스키마대로 `proposal-r<n>.json`(라운드 1은 초안부터, 2+는 직전 `verdict-r<n-1>.json`의 반려 사유를
-  반영)을 CONTRACT_DIR에 직접 쓴다. override 단계도 동일 — 아래 라운드-한도 분기가 override 시점에
-  도달했다고 판정하면, 그 사유(`verdict-r2.json`의 `reasons`)를 사람에게 그대로 보여주고 진행할지
-  묻는다. 진행이면 `override.json` + 확정 `proposal-r<n+1>.json`을 이 자리에서 쓴다.
+- **먼저 `superpowers:brainstorming`을 실제로 호출한다**(입력: 이슈 원문) — 그 스킬 자신의
+  분류(spike/bounded/architectural)를 그대로 따른다:
+  - **spike**(드묾 — "이게 가능한가"류 이슈): 코드 변경이 산출물이 아니므로 이 §1~§2 전체를
+    건너뛴다. 조사 결과를 이슈에 코멘트로 남기고 사람에게 다음 행동(이슈 재정의/종료)을 물은 뒤,
+    `log_dispatch`로 `outcome=SPIKE_ANSWERED`를 남기고(이 값은 `log_dispatch.sh`의 `LOG_OUTCOME_ENUM`에 등록돼 있다) 보고 채널로
+    종료를 알린다 — 아래 §5의 일반 "그 외 outcome"(hitl/afk 재분기, 계속/중단 선택지)은 타지
+    않는다: 사람의 결정은 이미 여기서 끝났다. §0이 만든 worktree/Run/CONTRACT_DIR는 다른
+    outcome들과 동일하게 보존한다(정리 로직을 새로 만들지 않는다). `orca-task-runner`/
+    `orca-evaluate` 모두 호출하지 않는다.
+  - **bounded**(이미 있는 흐름의 작은 범위 수정): brainstorming이 규정한 대로 스펙 문서도 플랜
+    문서도 쓰지 않고 짧은 합의만 채팅으로 받는다. 그 합의로 `contract-schema.md` 스키마대로
+    `proposal-r<n>.json`을 쓴다 — `plan_path` 필드는 `null`.
+  - **architectural**(구조 변경, 여러 파일에 걸친 작업): brainstorming이 스펙 문서를 대상 repo의
+    `docs/superpowers/specs/`에 커밋 → 이어서 `superpowers:writing-plans`를 호출해 플랜 문서를
+    대상 repo의 `docs/superpowers/plans/`에 커밋. `proposal-r<n>.json`의 `plan_path`에 이 플랜
+    문서의 절대경로를 채운다.
+  - bounded/architectural 모두 라운드 1은 위 절차로 초안부터, 2+는 직전 `verdict-r<n-1>.json`의
+    반려 사유를 반영해 쓴다. override 단계도 동일 — 아래 라운드-한도 분기가 override 시점에
+    도달했다고 판정하면, 그 사유(`verdict-r2.json`의 `reasons`)를 사람에게 그대로 보여주고 진행할지
+    묻는다. 진행이면 `override.json` + 확정 `proposal-r<n+1>.json`을 이 자리에서 쓴다(architectural
+    경로면 `plan_path`는 같은 파일을 계속 가리킨다 — writing-plans 산출물은 라운드마다 새 파일을
+    만들지 않는다).
+  - **라운드 재협상은 brainstorming을 처음부터 다시 돌리지 않는다** — evaluator의 반려 사유를
+    반영해 `plan_path`가 가리키는 플랜 문서를 프루닝/보강하는 짧은 재협의만 하고 다음 라운드
+    proposal을 다시 쓴다.
 - **질문 전달 경로**는 §0 "보고 채널"과 동일하다 — entry 세션(호출자 없음)이면 사람과 직접 대화하고,
   spawn된 세션(`orca-workflow-epic`이 스폰)이면 질문마다 `ask`(decision gate)로 올려 응답을
   기다린다(브레인스토밍 대화 전체에 걸쳐 반복 — `orca skills get orchestration` 확인 결과 `ask`는
@@ -379,7 +397,7 @@ while :; do
   fi
 done
 # End pre-dispatch boot-quiesce
-spec_text="<issue 번호 + 대상 repo(logging.md §1 repo 필드용 — 받은 문자열 그대로, issue #158) + CONTRACT_DIR 절대경로 + 제안서/구현 모드(제안서 모드면: contract-schema.md 스키마대로 AC 초안을 포함한 proposal-r<라운드>.json을 CONTRACT_DIR에 작성) + orphan-폴백 계약(§0) 전문 + heartbeat 억제 계약(§0) 전문>"
+spec_text="<issue 번호 + 대상 repo(logging.md §1 repo 필드용 — 받은 문자열 그대로, issue #158) + CONTRACT_DIR 절대경로 + 제안서/구현 모드(제안서 모드면: contract-schema.md 스키마대로 AC 초안을 포함한 proposal-r<라운드>.json을 CONTRACT_DIR에 작성; 구현 모드면: 최종 라운드 proposal-r<n>.json의 plan_path가 null이 아니면 그 절대경로를 \"plan_path: <값>\"으로 포함 — SDD 태스크 루프 진입 신호, orca-task-runner SKILL.md \"SDD 태스크 루프\" 절 참고) + orphan-폴백 계약(§0) 전문 + heartbeat 억제 계약(§0) 전문>"
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
   orca orchestration task-create --spec "$spec_text" --retry-request "$(uuidgen)" --json
 orca_call_with_retry "orca-workflow-task" "task-runner" -- \
@@ -500,7 +518,7 @@ log_dispatch --skill "orca-workflow-task" --role "contract-round" --issue "<issu
 `orca-task-runner` 호출, 결과로 **task 전체 diff 경로** 또는 **`GATE_FAIL`**을 받는다(`orca-task-runner`가 자기 task-레벨 게이트를 재시도 한도(2회) 안에 못 넘긴 경우 — `skills/orca-task-runner/SKILL.md` §6). §4의 FAIL 재시도로 돌아온 호출이면 spec을 아래 템플릿대로 구성한다 — findings를 prose로 요약하지 않고 파일 경로만 넘긴다:
 
 ```
-spec_text="<issue 번호 + 대상 repo(logging.md §1 repo 필드용, issue #158) + CONTRACT_DIR 절대경로 + 구현 모드 + 직전 attempt 번호 + \"CONTRACT_DIR의 eval-report-a<attempt>.json과 최종 라운드 proposal(가장 큰 proposal-r<n>.json — 네가 직접 확인)을 이 순서로 전부 읽어라 — findings를 요약해 넘기지 않는다\" + orphan-폴백 계약(§0) 전문 + heartbeat 억제 계약(§0) 전문>"
+spec_text="<issue 번호 + 대상 repo(logging.md §1 repo 필드용, issue #158) + CONTRACT_DIR 절대경로 + 구현 모드 + 직전 attempt 번호 + \"CONTRACT_DIR의 eval-report-a<attempt>.json과 최종 라운드 proposal(가장 큰 proposal-r<n>.json — 네가 직접 확인)을 이 순서로 전부 읽어라 — findings를 요약해 넘기지 않는다. 그 최종 proposal의 plan_path가 null이 아니면 그 절대경로를 이번에도 plan_path로 포함한다(재시도라고 SDD 태스크 루프 진입 여부가 바뀌지 않는다)\" + orphan-폴백 계약(§0) 전문 + heartbeat 억제 계약(§0) 전문>"
 ```
 
 확정 계약 라운드 번호는 이 스킬이 치환하지 않는다 — 확정 AC의 정본은 "최종 라운드(가장 큰 n) proposal"이고(contract-schema.md — override 경로에서는 정정 라운드(r4+)가 나중에 추가될 수 있어 코디네이터가 아는 번호가 낡을 수 있다, issue #130), generator가 CONTRACT_DIR에서 직접 확인한다(이 스킬은 feedback 본문도 확정 AC 본문도 중계하지 않는다).
