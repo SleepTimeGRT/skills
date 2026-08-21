@@ -1,12 +1,12 @@
 ---
 name: orca-task-runner
-description: Use when generating the implementation for one task (issue) — proposes an implementation-and-verification contract to orca-evaluate, then fans out subtasks across Claude Code/Codex/agy terminals in dependency-ordered waves. Subtask gates are mechanical only (typecheck/unit test/lint/format) — never an agent reviewer; task-level review belongs to orca-evaluate. Self-relative — works identically whichever provider runs this session. Do NOT use for ad-hoc multi-agent fan-out or terminal control (use the `orchestration` or `orca-cli` skills) — this skill is invoked only by orca-workflow coordinators, never by phrase-matching.
+description: Use when generating the implementation for one task (issue) — proposes an implementation-and-verification contract to orca-evaluate, then fans out subtasks across Claude Code/Codex/agy terminals in dependency-ordered waves. Subtask gates are mechanical only (typecheck/unit test/lint/format) — never an agent reviewer; task-level review belongs to orca-evaluate. Exception: the hitl-only SDD task loop (plan_path present) uses a per-task LLM reviewer instead. Self-relative — works identically whichever provider runs this session. Do NOT use for ad-hoc multi-agent fan-out or terminal control (use the `orchestration` or `orca-cli` skills) — this skill is invoked only by orca-workflow coordinators, never by phrase-matching.
 compatibility: Requires the `orca` CLI (skill set last verified against Orca app 1.4.180), the `~/.agents/orca-workflows/` symlink to this repo's orca-workflows/, and the `gh` CLI.
 ---
 
 # Orca Task Runner
 
-하나의 task(issue)를 구현한다. **생성만** 한다 — 평가는 이 스킬의 책임이 아니다(`orca-evaluate`가 담당). subtask 단위 리뷰어 역할은 두지 않는다.
+하나의 task(issue)를 구현한다. **생성만** 한다 — 평가는 이 스킬의 책임이 아니다(`orca-evaluate`가 담당). subtask 단위 리뷰어 역할은 두지 않는다(단, `plan_path`가 있는 SDD 태스크 루프 경로는 예외 — 아래 "SDD 태스크 루프" 절 참고, hitl 전용).
 
 ## 0. 전제
 
@@ -137,6 +137,53 @@ spec으로 받은 `CONTRACT_DIR`에 `proposal-r<라운드>.json`으로,
 모드로 재호출된다 — 그 경우 `override.json`(`final_round: 3`) + `proposal-r4.json`(최종
 확정)을 쓴다(위 override 절차와 동일하되 라운드 번호만 한 칸씩 밀림).
 
+## SDD 태스크 루프 (`plan_path` 있는 경우 — §2~§5 대체, hitl 전용)
+
+스폰 spec에 `plan_path`(절대경로)가 있으면 이 절차로 진입한다 — 아래 §2 "Subtask DAG 구성"부터
+§5 "Wave 루프"까지는 타지 않는다. 이 절차를 마치면 곧장 §6 "Task 레벨 게이트"로 합류한다(§6·§7은
+무변경). `plan_path`가 없거나 null이면(afk 전체, hitl의 bounded/spike) 이 절을 건너뛰고 §2로
+진행한다:
+
+```bash
+if [ -n "<spec으로 받은 plan_path — 없으면 빈 문자열>" ]; then
+  echo "SDD_LOOP"
+else
+  echo "NATIVE_DAG"
+fi
+```
+
+**중요한 구현 판단**: 이 절은 `superpowers:subagent-driven-development` 스킬을 호출하지 않는다.
+그 스킬의 서브에이전트 dispatch는 Claude Code Agent tool 전용인데, 이 스킬 자신은 "self-relative
+— 어느 provider가 이 세션을 돌리든 동일하게 동작한다"는 전제를 갖고 있다(SKILL.md 서두). Agent
+tool이 없는 세션(이 세션 자신이 Codex나 agy로 돌 수 있음)에서 그 스킬을 부르는 경로는 성립하지
+않는다. 대신 그 스킬의 **패턴**(태스크브리프 → implementer → 태스크별 리뷰어 → fix-loop, 진행
+원장)을 아래처럼 이 스킬 자신의 절차로 포팅하고, provider fan-out은 §0/§3/§5의 기존 스폰
+메커니즘을 그대로 재사용한다.
+
+1. `plan_path` 문서를 읽어 태스크 목록을 추출한다(writing-plans의 Files/Interfaces/Step 1-5 형식).
+   이 스킬이 별도로 DAG를 재구성하지 않는다.
+2. 태스크를 **순차로**(SDD 기본값 그대로) 실행한다 — §2의 파일-겹침 기반 wave 병렬화는 이 경로에
+   적용하지 않는다(플랜이 그 분석을 염두에 두고 만들어지지 않았고, SDD 자신도 순차 실행이
+   기본값이다).
+3. 태스크마다 `~/.agents/orca-workflows/model-selection.md` 휴리스틱으로 provider(claude/codex/
+   agy)·model·effort를 고른다 — §0/§3/§5가 이미 쓰는 것과 동일한 정책, 새 휴리스틱을 만들지 않는다.
+4. 선택된 provider로 implementer를 dispatch한다 — §0/§3/§5의 기존 스폰 메커니즘 그대로(claude:
+   `worker-start --agent`, codex/agy: `terminal create` 선-생성 + `worker-start --terminal`).
+5. 태스크 완료(`worker_done`) 후, 같은 model-selection.md 휴리스틱으로 고른 태스크별 리뷰어(스펙+
+   품질 검토)를 **implementer와는 별도의 워커로** 스폰한다 — self-review 편향을 막기 위해 같은
+   워커가 자기 결과를 검토하는 경로는 두지 않는다. 반려되면 fix-loop(최대 5라운드: 1-3라운드는
+   같은 implementer 재개, 4-5라운드는 model-selection.md의 다음 상위 tier로 fresh implementer)를
+   태운다. 5라운드를 다 써도 그린이 안 되면 이 태스크에서 멈추고 §6에 진입하지 않은 채 곧장
+   `GATE_FAIL`을 `orca-workflow-task`에 반환한다(§6의 "2회 재시도 후 GATE_FAIL" 원칙과 같은 결).
+6. 모든 태스크가 끝나면 **SDD의 final whole-branch review는 생략**하고 곧장 §6으로 넘어간다 —
+   `orca-evaluate`가 같은 issue에서 이미 diff 전체 code-review를 하므로 중복이다.
+7. 진행 원장(progress ledger)은 SDD 기본 위치(`<repo-root>/.superpowers/sdd/`)가 아니라
+   `CONTRACT_DIR` 아래에 둔다 — 이 파이프라인의 crash-resume이 이미 `CONTRACT_DIR` 아티팩트 스캔이
+   정본이고, target repo마다 gitignore 항목을 추가할 필요가 없다. 태스크별 assign/outcome 로그는
+   `logging.md`의 기존 레시피를 재사용한다(`role="sdd-implementer"`/`"sdd-reviewer"`).
+
+(상세 설계 근거: `docs/superpowers/specs/2026-08-22-orca-workflow-task-hitl-superpowers-design.md`)
+
 ## 2. Subtask DAG 구성
 
 합의된 범위로 subtask를 쪼갠다. 각 subtask가 만들/수정할 파일 목록을 비교: **겹치면 `--deps` 순차 의존, 독립이면 같은 wave.** 판정이 애매하면 보수적으로 의존 처리.
@@ -200,7 +247,7 @@ signature부터 확인한다. codex는 이 실패 판정과 별개로, boot-quie
 
 ## 4. Subtask 게이트 — 기계적인 것만
 
-subtask가 worker_done을 보내기 전에 스스로 실행: typecheck, unit test, formatter, linter, 무거운 환경 구성이 필요 없는 script test. **subtask 단위 agent 리뷰어는 없다.** 게이트를 통과하지 못하면 worker_done을 보내지 않고 스스로 고친다.
+subtask가 worker_done을 보내기 전에 스스로 실행: typecheck, unit test, formatter, linter, 무거운 환경 구성이 필요 없는 script test. **subtask 단위 agent 리뷰어는 없다.** 게이트를 통과하지 못하면 worker_done을 보내지 않고 스스로 고친다. (이 §4는 §2~§5 native 경로에만 적용된다 — `plan_path`가 있는 SDD 태스크 루프 경로는 태스크별 LLM 리뷰어를 예외적으로 둔다, hitl 전용. 위 "SDD 태스크 루프" 절 참고.)
 
 ## 5. Wave 루프
 
