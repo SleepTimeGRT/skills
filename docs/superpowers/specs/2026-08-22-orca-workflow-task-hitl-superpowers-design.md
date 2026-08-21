@@ -22,8 +22,11 @@ Agent tool 전용이라, `orca-task-runner`가 이미 갖고 있는 codex/agy fa
 
 **수정 대상**:
 - `skills/orca-workflow-task/SKILL.md` §1(hitl generator 역할), §2(Generate dispatch spec_text)
-- `skills/orca-task-runner/SKILL.md`(§2 앞에 새 분기 추가, §4/서두의 "리뷰어 없음" 문장에 예외 추가)
-- `orca-workflows/contract-schema.md`(`proposal-r<n>.json`에 optional `plan_path` 필드 추가)
+- `skills/orca-task-runner/SKILL.md`(§1의 proposal 작성 필드 목록에 `plan_path: null` 지시 추가,
+  §2 앞에 새 분기 추가, §4/서두의 "리뷰어 없음" 문장에 예외 추가)
+- `orca-workflows/contract-schema.md`(`proposal-r<n>.json`에 필수(nullable) `plan_path` 필드 추가)
+- `orca-workflows/scripts/log_dispatch.sh`/`orca-workflows/logging.md`/`tests/test_log_outcome.py`
+  (신규 outcome `SPIKE_ANSWERED` 등록 — 아래 "설계 1"의 spike 분기가 쓴다)
 
 **범위 밖**:
 - `mode=afk` — 전혀 건드리지 않는다. afk에는 사람이 없어 brainstorming의 승인 게이트 자체가 성립하지
@@ -43,8 +46,12 @@ Agent tool 전용이라, `orca-task-runner`가 이미 갖고 있는 codex/agy fa
 (spike/bounded/architectural)를 그대로 따른다:
 
 - **spike**(드묾 — "이게 가능한가"류 이슈): 코드 변경이 산출물이 아니므로 §1~§2 전체를 건너뛴다.
-  조사 결과를 이슈에 코멘트로 남기고 사람에게 다음 행동(이슈 재정의/종료)을 물은 뒤 종료한다.
-  `orca-task-runner`/`orca-evaluate` 모두 호출되지 않는다.
+  조사 결과를 이슈에 코멘트로 남기고 사람에게 다음 행동(이슈 재정의/종료)을 물은 뒤, 새 outcome
+  `SPIKE_ANSWERED`를 `log_dispatch`로 남기고 보고 채널로 종료를 알린다 — §5의 일반 "그 외
+  outcome"(hitl/afk 재분기, 계속/중단 선택지 등)은 타지 않는다: 사람의 결정은 이미 이 자리에서
+  끝났다. §0이 만든 worktree/Run/CONTRACT_DIR는 다른 outcome들과 동일하게 보존한다(§5 afk 보존
+  절차와 같은 원칙 — 별도 정리 로직을 새로 만들지 않는다). `orca-task-runner`/`orca-evaluate` 모두
+  호출되지 않는다.
 - **bounded**(이미 있는 흐름의 작은 범위 수정): brainstorming이 규정한 대로 스펙 문서도 플랜 문서도
   안 쓰고 짧은 합의만 채팅으로 받는다. 이 합의 내용으로 `proposal-r<n>.json`을 쓴다(`plan_path`
   필드 없음). 이후 라운드-한도/override 로직과 evaluator 디스패치는 지금 그대로다. §2에서
@@ -142,12 +149,21 @@ enum을 그대로 타므로, §4 라우팅·§5 에스컬레이션 로직 자체
    `mode=hitl` 인자로 분기하는 안. 기각: `plan_path`는 afk 경로에서 절대 채워지지 않으므로(afk는
    brainstorming/writing-plans를 호출하지 않음) 이미 충분한 신호다. `orca-task-runner`에 `mode`
    개념을 새로 알리면 이 스킬의 self-relative 원칙(어느 provider가 돌든 같은 입력에 같은 동작)에
-   불필요한 결합을 추가한다.
-2. **`plan_path` 태스크에도 파일-겹침 기반 wave 병렬화 적용** — 브레인스토밍 중 논의했으나, 플랜이
+   불필요한 결합을 추가한다. **주의(advisor 리뷰에서 발견)**: 이 신호가 실제로 충분하려면
+   `orca-task-runner` §1(proposal 작성, afk 전용 호출 경로)이 자기가 쓰는 `proposal-r<n>.json`에
+   `plan_path`를 항상 `null`로 채워야 한다 — 스키마가 이 필드를 필수로 만들었으므로(설계 3),
+   §1이 이 필드를 언급하지 않으면 afk 제안서가 스키마 위반이 되거나, §1이 스스로 무언가를 채워
+   넣어 의도치 않게 SDD 루프로 오분류될 위험이 있다. §1의 필드 목록에 "plan_path — 항상 null,
+   이 §1은 afk 전용이라 플랜 문서가 존재하지 않는다"를 명시적으로 추가한다(수정 대상에 반영).
+2. **orca-retro가 `SPIKE_ANSWERED`를 예방 가능한 escalate로 오인할 가능성** — 검토 결과 기각(=
+   carve-out 불필요): `orca-retro` lens 3은 문자열이 정확히 `ESCALATE` 또는 `*_HUMAN_DECISION`
+   suffix인 outcome만 대상으로 하고(`skills/orca-retro/SKILL.md` §해당 lens), `SPIKE_ANSWERED`는
+   둘 다 아니다 — 이미 사람이 결정을 마친 정상 종료이므로 애초에 그 lens의 대상 패턴에 안 걸린다.
+3. **`plan_path` 태스크에도 파일-겹침 기반 wave 병렬화 적용** — 브레인스토밍 중 논의했으나, 플랜이
    그 분석을 염두에 두고 쪼개진 게 아니라 오판정(태스크가 실은 파일을 공유하는데 독립으로 오분류)
    위험이 병렬화 이득보다 크다고 판단해 기각. 순차 실행으로 시작하고, 실제로 비용이 문제가 되면
    별도로 재검토한다.
-3. **SDD의 final whole-branch review 유지** — `orca-evaluate`의 diff 전체 code-review와 중복이라
+4. **SDD의 final whole-branch review 유지** — `orca-evaluate`의 diff 전체 code-review와 중복이라
    기각(섹션 3에서 이미 사용자와 합의).
 
 ## 에러 처리
