@@ -108,8 +108,7 @@ python3 "$QUEUE" next /tmp/rows.json /tmp/state.json > /tmp/next.json
 
 ### 2.2 격리 + 스폰
 
-`orca skills get orca-cli`의 현재 문법으로: `orca worktree create --name task-<N>`(이미 있으면 그대로
-쓴다 — `orca worktree show`로 확인) → 그 worktree에 provider REPL 터미널을 **대화형으로** 만든다.
+`orca skills get orca-cli`가 정의하는 현재 문법으로: 이름이 `task-<N>`인 Orca 추적 worktree를 만들거나(이미 있으면 그대로 재사용 — 같은 문서의 worktree 조회 명령으로 확인) → 그 worktree에 provider REPL 터미널을 **대화형으로** 만든다.
 provider별 launch는 permission-bypass 플래그를 인라인으로 넣는다: claude `--dangerously-skip-permissions`,
 codex `--dangerously-bypass-approvals-and-sandbox`, agy `--dangerously-skip-permissions`. model/effort는
 지정하지 않는다(하네스 기본값). REPL이 idle이 될 때까지 기다린 뒤 다음으로(orca-cli 문서의 wait 구성).
@@ -126,7 +125,7 @@ codex `--dangerously-bypass-approvals-and-sandbox`, agy `--dangerously-skip-perm
 
 | 관측 | 처리 |
 |---|---|
-| `worker_done` (payload 첫 줄이 `merged #<PR>` / `pr-open: <사유>` / `failed: <사유>`) | 그 줄을 자식 이슈 코멘트로(첫 줄 `<!-- epic-drain:result <status> -->`). merged면 터미널 종료 |
+| `worker_done` (payload 첫 줄이 `merged #<PR>` / `pr-open: <사유>` / `failed: <사유>`) | 그 줄을 자식 이슈 코멘트로(첫 줄 `<!-- epic-drain:result <status> -->`). merged면 터미널 종료, pr-open/failed면 터미널·worktree·PR 보존(사람이 이어서 볼 수 있게) |
 | `escalation` | `failed: escalation — <내용>` 코멘트, 터미널·worktree·PR 보존 |
 | 누적 대기 3시간 초과 / 터미널 사망(`orca terminal` 조회 실패) | `failed: timeout|terminal dead` 코멘트, 보존 |
 
