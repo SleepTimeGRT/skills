@@ -43,15 +43,3 @@
 # provides no destructive-op protection while still allowing self-merge.
 #MIGRATION_LINT_ENABLED="true"
 #MIGRATION_LINT_REGEX='^supabase/migrations/.*\.sql$'
-
-# Skip $E2E_CMD when orca-task-runner (skills/orca-task-runner/SKILL.md §6) already ran
-# this exact command against this exact HEAD commit and cached a PASS. The cache is keyed
-# by repo + commit SHA and the record's e2e_cmd is compared against this file's $E2E_CMD —
-# any mismatch (different command, different commit, no record) is a cache miss and e2e
-# runs normally, so nothing here can silently skip a check that wasn't actually run.
-# Read-only from premerge.sh's side: only orca-task-runner writes cache entries. Only
-# useful in repos whose PRs are driven through orca-task-runner — otherwise the cache
-# simply never has entries and this knob is a no-op even when enabled.
-# This file is itself inside PROTECTED_REGEX, so an agent cannot enable this and benefit
-# from it within the same PR.
-#E2E_CACHE_ENABLED="true"

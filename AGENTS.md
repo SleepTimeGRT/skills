@@ -40,13 +40,11 @@ the right times — should-trigger/should-NOT-trigger phrasing), **functional te
 skill produce correct real outputs — live/simulated execution against Given/When/Then
 expectations), and **performance comparison** (with-skill vs without-skill baselines: message
 count, token count, failed calls). `tests/` in this repo covers **only the functional category, and
-only partially**. As of 2026-08-12 it is an execution suite: every remaining test file runs real
-code — the shell/python scripts (`deploy-skills.sh`, `orca_call_with_retry.sh`, `log_dispatch.sh`,
-`select_reviewer.py`, premerge/hook/audit scripts) or bash blocks extracted from skill docs and run
-against stubbed `orca` responses. The prose-pinning tests that asserted specific strings and
-ordering inside `SKILL.md`/`orca-workflows/*.md` were deleted that day: they froze current wording
-as the spec, so every intentional doc edit produced a false failure, and they verified nothing about
-whether a skill actually works. **Triggering tests and performance comparison remain uncovered**, so
+only partially**. It is an execution suite: every test file runs real code — the shell/python
+scripts (`deploy-skills.sh`, premerge/hook/audit scripts). Prose-pinning tests that assert specific
+strings or ordering inside `SKILL.md` are not written here: they freeze current wording as the
+spec, so every intentional doc edit produces a false failure, and they verify nothing about whether
+a skill actually works. **Triggering tests and performance comparison remain uncovered**, so
 don't describe a skill here as "tested per the guide". Nothing enforces the suite automatically —
 no CI, no git hook; run `python3 -m pytest tests/ -q` yourself after touching a script or a
 documented bash procedure.
@@ -90,69 +88,17 @@ leaves unmarked manual installs untouched. These are not worktree symlinks — e
 `skills/` does nothing until redeployed. After committing a skill change, run
 `scripts/deploy-skills.sh [skill-name ...]` (no args = all skills). It refuses dirty
 skills so the recorded commit never lies about the deployed content.
-The orca skills are a version set pinned by `skills/orca-set.version` (line 1 = version,
-rest = members): deploying any member deploys the whole set at that one version, `--version`
-must not contradict the set file, and one dirty member aborts the whole set — so the seven
-always carry the same version label.
 
-### `orca-workflows/` deploy path (decision, #22)
+## Retired: Orca-driven issue pipeline
 
-`orca-workflows/` is intentionally *not* brought under the commit-pinned mechanism above.
-`~/.agents/orca-workflows/` is a plain symlink to this repo's local main-branch checkout
-(single machine, single consumer: the `orca-*` skills that read
-`model-selection.md`/`spawn-failures.md`/`logging.md` from it, plus `orca-workflows/scripts/` for
-executable helpers such as `orca_call_with_retry.sh` — issue #42 — that call sites `source`
-directly and invoke, not just read as reference prose). It isn't installed by other repos via
-`npx skills add`, so `skills/`'s N-repo integrity guarantees don't apply here — changes go
-live the moment they merge to main, with no separate deploy step to forget.
-
-Known risk from this choice (accepted, not fixed): the symlink has no dirty-tree refusal or
-sha256 verification, so an edit committed directly to the main checkout (bypassing PR review)
-goes live instantly with no integrity check — the inverse of `skills/`'s stale-deployed-copy
-risk. Separately, edits made in a feature worktree are invisible at `~/.agents/orca-workflows/`
-until merged to main, since the symlink always resolves to the main checkout, never the
-worktree currently in use.
-
-## Orca-\* skill design principle: diagnose + self-recover, don't bypass
-
-For `orca-workflow`/`orca-workflow-epic`/`orca-workflow-task`/`orca-task-runner`/`orca-evaluate` (and any future skill wrapping Orca's CLI/features):
-use Orca's own features as fully as possible. When one of them misbehaves, the required fix order is:
-
-1. **Diagnose** — reproduce, capture the exact failure text/signature and where it fires (this is what
-   `spawn-failures.md`'s known-signature table and `logging.md`'s `self_recovery` event exist for).
-2. **Self-recover** — build recovery into the skill using Orca's own mechanisms as the primary fix: wait on
-   `orca status --json`/`check --wait`, retry via `orca_call_with_retry.sh`, resume via
-   `worker-start --retry-of` (see `self-recovery.md`, `scripts/orca_call_with_retry.sh`). This is the main
-   remedy, not a fallback tried after a manual workaround.
-3. **Bypass/disable, last resort only, with explicit user sign-off** — turning off the misbehaving Orca
-   feature entirely to make the symptom go away is not an acceptable substitute for 1-2 on its own.
-
-### Prefer Orca's current recommended mechanism over ad-hoc CLI composition
-
-Before implementing any orca-* skill behavior — waiting on a worker, reading its output, retrying,
-cleaning up a terminal, or any other operation — load the current guide (`orca skills get <name>`, `--help`,
-or `agent-context --json`) for that exact operation and use whatever it documents as the primary/composed
-path. Do not substitute a lower-level primitive (raw `terminal read`, `terminal wait --for tui-idle`, manual
-`terminal send`) just because it is more familiar or already at hand. When a documented command names its
-own fallback (e.g. `worker-read`'s hook-based transcript degrading to a `terminal` source), treat the
-fallback as evidence the primary path carries guarantees the fallback does not — using the fallback by
-default forfeits those guarantees, it does not substitute for them.
-
-When Orca's version changes, do not assume a skill's existing behavior or workaround still reflects Orca's
-current recommended path. Re-check whether a newer, more direct mechanism now exists for that operation —
-Orca's own CLI help, `skills get`, and changelog are the source of truth, not memory of a prior version's
-limitations — and adapt the skill's structure to match, rather than carrying forward a workaround built for
-a capability gap that may have since closed.
-
-**Orca CLI baseline**: the orca-* skills in this repo, and the principles above, were last verified against
-Orca app version 1.4.180. Its GitHub changelog (stablyai/orca, v1.4.180...v1.4.182 compare) was reviewed
-2026-08-14 against this repo's documented workarounds after upgrading to 1.4.182 — that pass found and
-fixed one stale claim (`orca-workflows/self-recovery.md`'s `dispatch_not_found` behavior, fixed upstream in
-1.4.182 per PR stablyai/orca#13376) but did not re-run every mechanism live, so this line stays at 1.4.180
-rather than claiming full re-verification. Check `orca status --json`'s `runtime.appVersion` against this
-number before trusting any Orca-specific mechanism claim here as still accurate — a mismatch means the
-claim needs re-verification against the current version's own `skills get`/`--help` output or changelog,
-not blind reuse.
+The `orca-workflow*`/`orca-task-runner`/`orca-evaluate`/`orca-retro` skill set and the
+`orca-workflows/` reference tree were removed on 2026-08-22 — see
+`docs/adr/0002-retire-orca-workflow-pipeline.md` for the evidence and reasoning. Do not rebuild a
+pipeline that drives other agent terminals through Orca from an LLM session in this repo without
+re-reading that ADR; issue-driven implementation work now runs through the `superpowers` skills
+(brainstorming → writing-plans → subagent-driven-development → finishing-a-development-branch)
+directly in the agent session, with Orca used only ad hoc via its own `orca-cli`/`orchestration`
+skills.
 
 ## Repository operations
 

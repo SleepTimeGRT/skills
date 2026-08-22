@@ -7,7 +7,7 @@ Deterministic destructive-op deny-list scan for SQL migration files. Tuned
 for recall, not precision: narrowing vs widening ALTER COLUMN TYPE is not
 distinguished (both flag), and statement splitting on ';' does not account
 for semicolons inside string literals or comments. A flag routes the change
-to an intent check (human review, or orca-evaluate contract comparison) — it
+to an intent check (human review) — it
 never blocks by itself beyond that, so over-flagging is the accepted
 trade-off against under-flagging a real destructive operation.
 
