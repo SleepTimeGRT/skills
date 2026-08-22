@@ -88,3 +88,73 @@ SDD의 ruling으로 흡수한다 — 여기서 미리 맞추려 하지 않는다
 전 자식이 끝나면 큐 블록 최종본을 보여주고 **"이대로 페이즈 B를 시작할까?"** 한 번 묻는다. 승인 뒤
 페이즈 B는 사람에게 묻지 않는다. 거절이면 여기서 끝 — 큐는 epic에 남아 있으므로 나중에
 `/epic-drain <epic#>`로 이어간다(§3).
+
+## 2. 페이즈 B — 실행
+
+드라이버 = 이 세션(페이즈 A를 끝낸 세션, 또는 §3로 들어온 세션). 루프 한 바퀴 = 자식 하나. 컨텍스트에는
+자식당 결과 한 줄만 남긴다 — 자식의 diff·리뷰·plan 본문을 읽지 않는다.
+
+### 2.1 다음 자식 고르기
+
+```bash
+gh issue view "$EPIC" -R "$REPO" --json body -q .body > /tmp/epic-body.md
+python3 "$QUEUE" read /tmp/epic-body.md > /tmp/rows.json
+python3 "$QUEUE" state "$REPO" /tmp/rows.json > /tmp/state.json
+python3 "$QUEUE" next /tmp/rows.json /tmp/state.json > /tmp/next.json
+```
+
+`next`가 `null`이면 §2.5로. `skipped`에 새로 들어온 자식이 있으면 그 이슈에 코멘트
+`<!-- epic-drain:result failed -->` + "skipped: `<reason>`"을 남겨 다음 바퀴에 다시 고르지 않게 한다.
+
+### 2.2 격리 + 스폰
+
+`orca skills get orca-cli`의 현재 문법으로: `orca worktree create --name task-<N>`(이미 있으면 그대로
+쓴다 — `orca worktree show`로 확인) → 그 worktree에 provider REPL 터미널을 **대화형으로** 만든다.
+provider별 launch는 permission-bypass 플래그를 인라인으로 넣는다: claude `--dangerously-skip-permissions`,
+codex `--dangerously-bypass-approvals-and-sandbox`, agy `--dangerously-skip-permissions`. model/effort는
+지정하지 않는다(하네스 기본값). REPL이 idle이 될 때까지 기다린 뒤 다음으로(orca-cli 문서의 wait 구성).
+
+### 2.3 dispatch 1회
+
+`orca skills get orchestration`의 현재 구성(Run 생성/바인딩 → `task-create` → `worker-start`)으로
+`references/child-prompt.md`를 채운 프롬프트를 한 번 보낸다. 이 세션의 Run 하나를 페이즈 B 내내 재사용한다.
+
+### 2.4 대기 → 기록
+
+`worker_done` 또는 `escalation`을 orchestration 문서의 wait 구성으로 5~10분 단위 bounded stretch로 기다린다.
+재시도·복구 루프는 없다:
+
+| 관측 | 처리 |
+|---|---|
+| `worker_done` (payload 첫 줄이 `merged #<PR>` / `pr-open: <사유>` / `failed: <사유>`) | 그 줄을 자식 이슈 코멘트로(첫 줄 `<!-- epic-drain:result <status> -->`). merged면 터미널 종료 |
+| `escalation` | `failed: escalation — <내용>` 코멘트, 터미널·worktree·PR 보존 |
+| 누적 대기 3시간 초과 / 터미널 사망(`orca terminal` 조회 실패) | `failed: timeout|terminal dead` 코멘트, 보존 |
+
+기록 후 §2.1로 돌아간다(의존 자식 skip은 `next`가 계산한다).
+
+### 2.5 종료
+
+큐에 고를 자식이 없으면 epic에 요약 코멘트 — 자식별 `merged/pr-open/failed/skipped/spike` + 사람이 볼 것
+(열린 PR, failed 사유). 전 자식이 `merged`/`closed`/`spike`면 `gh issue close "$EPIC"`. 아니면 열어 둔다.
+
+## 3. 재개
+
+`/epic-drain <epic#>`를 다시 부르면:
+
+- 큐 블록이 있으면 §1.1을 건너뛴다. `kind`가 비었거나, `architectural`인데 `plan` 파일이 repo에 없는
+  자식만 §1.2를 다시 탄다. 그 외 자식은 §1.3 승인만 다시 받고 §2로.
+- §2.1의 `state`가 `merged`/`closed`/`spike`인 자식은 자동으로 건너뛴다. `failed`/`pr-open`인 자식은 사람에게
+  "재시도 / 그대로 둠" 한 번 묻는다 — 재시도면 그 이슈에 `<!-- epic-drain:result retry -->`가 아니라
+  새 코멘트 없이 상태를 `pending`으로 취급하도록, 이전 결과 코멘트를 **편집**해 마커를 지운다(`gh api`
+  PATCH). 그대로 두면 그 자식과 의존 자식은 이번 실행에서 빠진다.
+- 이전 실행의 Orca 터미널·Run은 재사용하지 않는다. worktree(`task-<N>`)는 재사용한다.
+
+## 4. 에러 처리
+
+| 상황 | 처리 |
+|---|---|
+| `orca status` 불가 | 페이즈 A만 수행, 페이즈 B 진입 전에 멈추고 보고 |
+| worktree 생성 실패 / 터미널 스폰 실패 | 그 자식 `failed: spawn — <메시지>` 코멘트, 다음 자식 |
+| `gh` 호출 실패 | 그 자식은 `pending`으로 보고 다음 바퀴에 재시도(헬퍼가 stderr에 남김) |
+| 드라이버 세션 크래시 | 상태는 GitHub에 있다 — §3 |
+| 자식이 사람 질문을 올림(ask) | 답하지 않는다. SDD의 4가지 stop 조건은 `escalation`으로 오므로 그 경로로 처리 |
