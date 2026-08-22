@@ -25,7 +25,15 @@ compatibility: Claude Code session for the planning/driver phase (superpowers pl
 - Orca 명령 문법은 여기 복제하지 않는다 — 필요한 시점에 `orca skills get orca-cli`(worktree·터미널),
   `orca skills get orchestration`(Run/task/worker-start/check)을 읽고 거기 적힌 현재 구성을 쓴다.
 - 입력 해석:
-  - `/epic-drain <epic#>` — 그 이슈가 epic. 자식 = 본문에서 참조된 `#N`(체크리스트 포함) ∪ `gh issue view <epic#> --json` 으로 읽히는 sub-issue 가운데 **열린 것**. 큐 블록이 이미 있으면 그 블록이 자식 목록의 정본이다(→ §3 재개).
+  - `/epic-drain <epic#>` — 그 이슈가 epic. 자식 = (a) 본문에서 참조된 `#N`(체크리스트 포함) ∪ (b) GitHub
+    sub-issue(아래 GraphQL) 가운데 **열린 것**. 큐 블록이 이미 있으면 그 블록이 자식 목록의 정본이다(→ §3 재개).
+    sub-issue 조회(없거나 필드 오류면 (a)만으로 진행하고 그 사실을 사람에게 한 줄 알린다):
+
+    ```bash
+    OWNER="${REPO%/*}"; NAME="${REPO#*/}"
+    gh api graphql -f query='query($o:String!,$n:String!,$i:Int!){ repository(owner:$o,name:$n){ issue(number:$i){ subIssues(first:100){ nodes{ number state } } } } }' \
+      -f o="$OWNER" -f n="$NAME" -F i="$EPIC" --jq '.data.repository.issue.subIssues.nodes[] | select(.state=="OPEN") | .number'
+    ```
   - `/epic-drain <issue#> [<issue#> ...]` — epic이 아직 없다. 제목·자식 체크리스트를 제안하고 사람이 승인하면 `gh issue create`로 epic을 만든 뒤 위 경로로 합류한다.
 
 ## 1. 페이즈 A — 계획
