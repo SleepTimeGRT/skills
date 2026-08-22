@@ -130,3 +130,17 @@ def test_missing_dep_in_state_is_skipped_with_reason():
     out = q.runnable(rows, state)
     assert [s["issue"] for s in out["skipped"]] == ["86", "88"]
     assert "999" in out["skipped"][0]["reason"]
+
+
+def test_transitive_skip_is_order_independent():
+    q = _load()
+    rows = [
+        {"order": 1, "issue": "88", "kind": "bounded", "depends_on": ["86"], "provider": "claude", "plan": ""},
+        {"order": 2, "issue": "86", "kind": "bounded", "depends_on": ["85"], "provider": "claude", "plan": ""},
+        {"order": 3, "issue": "85", "kind": "bounded", "depends_on": [], "provider": "claude", "plan": ""},
+    ]
+    state = {"85": "failed", "86": "pending", "88": "pending"}
+    out = q.runnable(rows, state)
+    assert out["next"] is None
+    assert sorted(s["issue"] for s in out["skipped"]) == ["86", "88"]
+    assert len(out["skipped"]) == 2

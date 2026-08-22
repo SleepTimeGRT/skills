@@ -96,24 +96,40 @@ def runnable(rows: list[dict], state: dict[str, str]) -> dict:
     done: list[str] = []
     skipped: list[dict] = []
     skipped_set: set[str] = set()
-    for r in rows:
-        st = state.get(r["issue"], "pending")
-        if r["kind"] == "spike" or st in _DONE_STATES:
-            done.append(r["issue"])
-            continue
-        for dep in r["depends_on"]:
-            if dep not in state:
-                skipped.append({"issue": r["issue"], "reason": f"dep #{dep} not in queue/state"})
-                skipped_set.add(r["issue"])
-                break
-            if state[dep] in _BROKEN_STATES:
-                skipped.append({"issue": r["issue"], "reason": f"dep #{dep} is {state[dep]}"})
-                skipped_set.add(r["issue"])
-                break
-            if dep in skipped_set:
-                skipped.append({"issue": r["issue"], "reason": f"dep #{dep} skipped"})
-                skipped_set.add(r["issue"])
-                break
+    skipped_seen: set[str] = set()  # Track which issues have been added to skipped list
+
+    # Fixpoint iteration: repeat until skipped_set stops growing
+    while True:
+        prev_size = len(skipped_set)
+        for r in rows:
+            if r["issue"] in skipped_set or r["issue"] in done:
+                continue
+            st = state.get(r["issue"], "pending")
+            if r["kind"] == "spike" or st in _DONE_STATES:
+                done.append(r["issue"])
+                continue
+            for dep in r["depends_on"]:
+                if dep not in state:
+                    if r["issue"] not in skipped_seen:
+                        skipped.append({"issue": r["issue"], "reason": f"dep #{dep} not in queue/state"})
+                        skipped_seen.add(r["issue"])
+                    skipped_set.add(r["issue"])
+                    break
+                if state[dep] in _BROKEN_STATES:
+                    if r["issue"] not in skipped_seen:
+                        skipped.append({"issue": r["issue"], "reason": f"dep #{dep} is {state[dep]}"})
+                        skipped_seen.add(r["issue"])
+                    skipped_set.add(r["issue"])
+                    break
+                if dep in skipped_set:
+                    if r["issue"] not in skipped_seen:
+                        skipped.append({"issue": r["issue"], "reason": f"dep #{dep} skipped"})
+                        skipped_seen.add(r["issue"])
+                    skipped_set.add(r["issue"])
+                    break
+        if len(skipped_set) == prev_size:
+            break
+
     nxt = None
     for r in rows:
         if r["issue"] in skipped_set or r["issue"] in done:
