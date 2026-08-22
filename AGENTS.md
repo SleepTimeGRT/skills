@@ -89,6 +89,17 @@ leaves unmarked manual installs untouched. These are not worktree symlinks — e
 `scripts/deploy-skills.sh [skill-name ...]` (no args = all skills). It refuses dirty
 skills so the recorded commit never lies about the deployed content.
 
+### Live-symlink exception: `epic-drain`
+
+`~/.agents/skills/epic-drain` is a plain symlink to this repo's local main-branch checkout
+(`skills/epic-drain/`), not a commit-pinned copy — single machine, single consumer, and the skill
+is still being shaped by pilots, so changes go live the moment they merge to main with no deploy
+step to forget. `deploy-skills.sh` detects the symlink and skips it (no rsync, no metadata) so it
+never dirties the repo. Accepted risks: no dirty-tree refusal or sha256 check (an edit committed
+straight to the main checkout goes live instantly), and edits in a feature worktree are invisible
+at `~/.agents/skills/epic-drain` until merged. To convert back to a pinned copy, remove the symlink
+and run `scripts/deploy-skills.sh epic-drain`.
+
 ## Retired: Orca-driven issue pipeline
 
 The `orca-workflow*`/`orca-task-runner`/`orca-evaluate`/`orca-retro` skill set and the

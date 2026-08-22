@@ -68,6 +68,12 @@ for name in "${NAMES[@]}"; do
   fi
 
   dst="$HOME_DIR/.agents/skills/$name"
+  if [ -L "$dst" ]; then
+    # 라이브 심볼릭 링크 배포(이 repo의 main 체크아웃을 직접 가리킴) — rsync/메타데이터를 쓰면 repo를
+    # 더럽히므로 건너뛴다. merge가 곧 배포다.
+    echo "OK $name (symlink → $(readlink "$dst"), live; no copy)"
+    continue
+  fi
   mkdir -p "$dst"
   rsync -a --delete "$src/" "$dst/"
   printf '{\n  "version": "%s",\n  "commit": "%s",\n  "date": "%s",\n  "hash": "%s"\n}\n' \
