@@ -262,7 +262,7 @@ git commit -m "epic-drain: queue block parse/render/upsert helper"
 
 **Interfaces:**
 - Consumes: `parse_queue` rows from Task 1.
-- Produces: `runnable(rows: list[dict], state: dict[str, str]) -> dict` returning `{"next": row|None, "skipped": [{"issue", "reason"}...], "done": [issue...]}`.
+- Produces: `runnable(rows: list[dict], state: dict[str, str]) -> dict` returning `{"next": row|None, "skipped": [{"issue", "reason"}...], "done": [issue...], "blocked": [{"issue", "reason"}...]}`.
   - `state` maps issue → one of `pending | merged | closed | pr-open | failed | spike`.
   - `done` = issues whose state is `merged`/`closed`/`spike`, or `kind == "spike"`.
   - A row is **skipped** when any dependency's state is `failed`/`pr-open`, or a dependency is itself skipped (transitive), or a dependency issue is missing from `state` (reason `"dep #N not in queue/state"`).
