@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
+import stat
+import subprocess
+import textwrap
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -144,3 +149,58 @@ def test_transitive_skip_is_order_independent():
     assert out["next"] is None
     assert sorted(s["issue"] for s in out["skipped"]) == ["86", "88"]
     assert len(out["skipped"]) == 2
+
+
+def _fake_gh(tmp_path, payloads: dict[str, dict]) -> dict[str, str]:
+    """Install a fake `gh` that answers `gh issue view <n> ... --json ...` from payloads[n]."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    data = tmp_path / "gh-data.json"
+    data.write_text(json.dumps(payloads))
+    script = bindir / "gh"
+    script.write_text(textwrap.dedent(f"""\
+        #!/usr/bin/env python3
+        import json, sys
+        args = sys.argv[1:]
+        if args[:2] != ["issue", "view"]:
+            sys.exit(9)
+        n = args[2]
+        data = json.load(open({str(data)!r}))
+        if n not in data:
+            sys.stderr.write("not found\\n"); sys.exit(1)
+        print(json.dumps(data[n]))
+        """))
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    return {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"}
+
+
+def test_child_state_precedence_marker_then_spike_then_closed(tmp_path):
+    q = _load()
+    payloads = {
+        "85": {"state": "OPEN", "comments": [{"body": "noise"}, {"body": "done <!-- epic-drain:result merged -->"}]},
+        "86": {"state": "OPEN", "comments": [{"body": "<!-- epic-drain:result failed --> boom"},
+                                               {"body": "<!-- epic-drain:result pr-open --> later"}]},
+        "87": {"state": "OPEN", "comments": []},
+        "88": {"state": "CLOSED", "comments": []},
+        "89": {"state": "OPEN", "comments": []},
+    }
+    env = _fake_gh(tmp_path, payloads)
+    rows_path = tmp_path / "rows.json"
+    rows_path.write_text(json.dumps(_rows()))
+    res = subprocess.run(["python3", str(QUEUE_PY), "state", "o/r", str(rows_path)],
+                         env=env, capture_output=True, text=True)
+    assert res.returncode == 0, res.stderr
+    state = json.loads(res.stdout)
+    assert state == {"85": "merged", "86": "pr-open", "87": "spike", "88": "closed", "89": "pending"}
+
+
+def test_child_state_gh_failure_falls_back_to_pending(tmp_path):
+    q = _load()
+    env = _fake_gh(tmp_path, {"85": {"state": "OPEN", "comments": []}})
+    rows_path = tmp_path / "rows.json"
+    rows_path.write_text(json.dumps(_rows()[:2]))   # 86 missing from fake gh → exit 1
+    res = subprocess.run(["python3", str(QUEUE_PY), "state", "o/r", str(rows_path)],
+                         env=env, capture_output=True, text=True)
+    assert res.returncode == 0
+    assert json.loads(res.stdout) == {"85": "pending", "86": "pending"}
+    assert "86" in res.stderr

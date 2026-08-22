@@ -87,6 +87,39 @@ def upsert_queue(body: str, rows: Iterable[dict]) -> str:
 
 # --- state / next (Task 2 & 3) -----------------------------------------------------------------
 
+def child_state(repo: str, rows: list[dict], run=subprocess.run) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for r in rows:
+        n = r["issue"]
+        proc = run(["gh", "issue", "view", n, "-R", repo, "--json", "state,comments"],
+                   capture_output=True, text=True)
+        if proc.returncode != 0:
+            print(f"epic-drain: gh issue view {n} failed ({proc.returncode}): {proc.stderr.strip()} — treating as pending",
+                  file=sys.stderr)
+            out[n] = "pending"
+            continue
+        try:
+            data = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            print(f"epic-drain: gh issue view {n} returned non-JSON — treating as pending", file=sys.stderr)
+            out[n] = "pending"
+            continue
+        marker = None
+        for c in data.get("comments") or []:
+            m = RESULT_MARKER_RE.search(c.get("body") or "")
+            if m:
+                marker = m.group(1)  # keep the latest
+        if marker:
+            out[n] = marker
+        elif r["kind"] == "spike":
+            out[n] = "spike"
+        elif (data.get("state") or "").upper() == "CLOSED":
+            out[n] = "closed"
+        else:
+            out[n] = "pending"
+    return out
+
+
 _DONE_STATES = {"merged", "closed", "spike"}
 _BROKEN_STATES = {"failed", "pr-open"}
 
@@ -160,6 +193,10 @@ def main(argv: list[str]) -> int:
         rows = json.load(open(argv[2], encoding="utf-8"))
         state = json.load(open(argv[3], encoding="utf-8"))
         print(json.dumps(runnable(rows, state), ensure_ascii=False, indent=2))
+        return 0
+    if cmd == "state" and len(argv) == 4:
+        rows = json.load(open(argv[3], encoding="utf-8"))
+        print(json.dumps(child_state(argv[2], rows), ensure_ascii=False, indent=2))
         return 0
     print(f"usage error: {argv[1:]}", file=sys.stderr)
     print(__doc__, file=sys.stderr)
