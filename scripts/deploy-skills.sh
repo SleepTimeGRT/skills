@@ -9,10 +9,6 @@
 #     - hash = SKILL.md의 sha256 (기존 형식과 호환)
 #     - version = 사람이 관리하는 라벨. --version 없으면 기존 설치본 값을 유지,
 #       설치본이 없으면 v0.0.0. 실질적 pin은 commit+hash다.
-#   - 버전 세트: skills/orca-set.version(1행 = 버전, 이후 행 = 멤버 이름)에 묶인
-#     스킬들은 항상 같은 버전으로 함께 배포된다 — 멤버가 하나라도 지정되면 세트
-#     전체로 확장하고, 버전은 세트 파일 값만 쓰며(--version과 다르면 중단),
-#     멤버 중 하나라도 dirty면 세트 전체를 배포하지 않는다(부분 배포 금지).
 #
 # 안전 규칙:
 #   - 대상 스킬의 working tree가 dirty면 중단한다 — .installed-version.json의
@@ -46,44 +42,6 @@ if [ ${#NAMES[@]} -eq 0 ]; then
     < <(find "$SKILLS_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
 fi
 
-# ── 버전 세트(헤더 주석 참고) ─────────────────────────────────────────────
-SET_FILE="$SKILLS_DIR/orca-set.version"
-SET_VERSION=""
-SET_MEMBERS=()
-if [ -f "$SET_FILE" ]; then
-  { IFS= read -r SET_VERSION
-    while IFS= read -r m; do [ -n "$m" ] && SET_MEMBERS+=("$m"); done; } < "$SET_FILE"
-fi
-
-in_set() {
-  local n="$1" m
-  [ ${#SET_MEMBERS[@]} -eq 0 ] && return 1
-  for m in "${SET_MEMBERS[@]}"; do [ "$m" = "$n" ] && return 0; done
-  return 1
-}
-
-if [ ${#SET_MEMBERS[@]} -gt 0 ]; then
-  need_set=0
-  for n in "${NAMES[@]}"; do in_set "$n" && need_set=1; done
-  if [ "$need_set" -eq 1 ]; then
-    if [ -n "$VERSION_ARG" ] && [ "$VERSION_ARG" != "$SET_VERSION" ]; then
-      echo "ABORT: 세트 멤버의 버전은 skills/orca-set.version($SET_VERSION)이 정본 — --version $VERSION_ARG 와 충돌. 세트 파일을 수정·커밋 후 재실행" >&2
-      exit 1
-    fi
-    for m in "${SET_MEMBERS[@]}"; do
-      found=0
-      for n in "${NAMES[@]}"; do [ "$n" = "$m" ] && found=1; done
-      [ "$found" -eq 0 ] && NAMES+=("$m")
-    done
-    for m in "${SET_MEMBERS[@]}"; do
-      if [ -n "$(git -C "$REPO_ROOT" status --porcelain -- "skills/$m")" ]; then
-        echo "ABORT: 세트 멤버 skills/$m 에 커밋되지 않은 변경 — 세트는 전부-아니면-전무로 배포한다(버전 어긋남 방지). 커밋 후 재실행" >&2
-        exit 1
-      fi
-    done
-  fi
-fi
-
 COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD)"
 DATE="$(date +%Y-%m-%dT%H:%M:%S%z | sed 's/\([0-9][0-9]\)$/:\1/')"
 FAIL=0
@@ -99,11 +57,7 @@ for name in "${NAMES[@]}"; do
 
   skill_fail=0
   hash="$(shasum -a 256 "$src/SKILL.md" | awk '{print $1}')"
-  if in_set "$name"; then
-    version="$SET_VERSION"
-  else
-    version="$VERSION_ARG"
-  fi
+  version="$VERSION_ARG"
   if [ -z "$version" ]; then
     existing="$HOME_DIR/.agents/skills/$name/.installed-version.json"
     if [ -f "$existing" ]; then

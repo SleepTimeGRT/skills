@@ -30,7 +30,6 @@ PROTECTED_EXTRA_REGEX="" # repo-specific additions to the protected set
 PROTECTED_SCRIPT_KEYS="" # space-separated package.json script keys to guard; empty = guard the whole scripts block
 MIGRATION_LINT_ENABLED="false" # opt-in destructive-op lint for schema/migration files
 MIGRATION_LINT_REGEX="" # e.g. '^supabase/migrations/.*\.sql$' — required when MIGRATION_LINT_ENABLED=true
-E2E_CACHE_ENABLED="false" # opt-in: skip $E2E_CMD when orca-task-runner already cached a PASS for this exact commit
 CONF="$REPO_ROOT/scripts/premerge.conf.sh"
 [ -f "$CONF" ] && . "$CONF"
 
@@ -135,9 +134,7 @@ fi
 # ---- 4. migration safety (opt-in) --------------------------------------------
 # Deterministic destructive-op scan for schema/migration files. Disabled by
 # default; a repo opts in via scripts/premerge.conf.sh. When enabled and the
-# lint flags something, this hard-blocks self-merge with no override — a
-# contract-aware alternative exists in orca-evaluate's separate merge path,
-# which does not go through this script.
+# lint flags something, this hard-blocks self-merge with no override.
 if [ "$MIGRATION_LINT_ENABLED" = "true" ]; then
   if [ -z "$MIGRATION_LINT_REGEX" ]; then
     printf '[premerge] FAIL — MIGRATION_LINT_ENABLED=true but MIGRATION_LINT_REGEX unset in premerge.conf.sh\n' >&2
@@ -185,35 +182,8 @@ if [ -n "$E2E_CMD" ]; then
     printf '[premerge] SKIP e2e — all changed paths match E2E_EXEMPT_REGEX\n'
     E2E_NOTE=" (e2e skipped — E2E_EXEMPT_REGEX)"
   else
-    # Opt-in cache check: orca-task-runner (see skills/orca-task-runner/SKILL.md §6) may have
-    # already run this exact $E2E_CMD against this exact commit and cached a PASS. This block
-    # only *reads* that cache — it never writes to it, so a generic (non-orca) repo that turns
-    # this on simply never gets a hit and always falls through to running e2e below.
-    E2E_CACHE_HIT=0
-    if [ "$E2E_CACHE_ENABLED" = "true" ]; then
-      CACHE_REPO_ID=$(git remote get-url origin 2>/dev/null || git rev-parse --show-toplevel)
-      CACHE_REPO_HASH=$(node -e 'console.log(require("crypto").createHash("sha256").update(process.argv[1]).digest("hex").slice(0,16))' "$CACHE_REPO_ID")
-      CACHE_FILE="$HOME/.local/state/orca-workflows/e2e-cache/$CACHE_REPO_HASH/$(git rev-parse HEAD).json"
-      if [ -f "$CACHE_FILE" ]; then
-        CACHE_MATCH=$(E2E_CMD="$E2E_CMD" python3 -c '
-import json, os, sys
-try:
-    with open(sys.argv[1]) as f:
-        rec = json.load(f)
-except Exception:
-    print("0"); sys.exit()
-print("1" if rec.get("e2e_cmd") == os.environ["E2E_CMD"] and rec.get("result") == "PASS" else "0")
-' "$CACHE_FILE" 2>/dev/null || echo 0)
-        [ "$CACHE_MATCH" = "1" ] && E2E_CACHE_HIT=1
-      fi
-    fi
-    if [ "$E2E_CACHE_HIT" = "1" ]; then
-      printf '[premerge] SKIP e2e — cached PASS for this exact commit (orca-task-runner §6)\n'
-      E2E_NOTE=" (e2e skipped — cache hit)"
-    else
-      token_gate_capture premerge:e2e -- bash -c "$E2E_CMD"
-      E2E_NOTE=" (e2e ran)"
-    fi
+    token_gate_capture premerge:e2e -- bash -c "$E2E_CMD"
+    E2E_NOTE=" (e2e ran)"
   fi
 fi
 
