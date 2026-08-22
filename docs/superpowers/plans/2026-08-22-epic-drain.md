@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Skill folder kebab-case, `SKILL.md` exact spelling, frontmatter `name` = `epic-drain`, `description` ≤ 1024 chars, no XML tags (`<` `>`) anywhere in SKILL.md prose (HTML comment markers are allowed only inside fenced code blocks quoting the epic body format — keep them there).
+- Skill folder kebab-case, `SKILL.md` exact spelling, frontmatter `name` = `epic-drain`, `description` ≤ 1024 chars, no XML/HTML tags in SKILL.md prose — angle-bracket markers such as the queue/result HTML comments appear only inside fenced code blocks or inline backtick code.
 - No history/dates/pilot names inside `SKILL.md` (repo rule: skills carry current instructions only).
 - Orca command syntax is never copied into the skill — the skill tells the agent to read `orca skills get orca-cli` / `orca skills get orchestration` at run time.
 - Python scripts: stdlib only, `python3`, runnable from any cwd, exit non-zero with a message on bad input.
@@ -655,9 +655,10 @@ fm=t.split("---",2)[1]
 desc=re.search(r"^description:\s*(.*)$", fm, re.M).group(1)
 print("desc len", len(desc)); assert len(desc)<=1024
 body=t.split("---",2)[2]
-# XML-ish tags outside fenced blocks are forbidden
+# XML-ish tags outside fenced blocks / inline code are forbidden
 outside=re.sub(r"```.*?```", "", body, flags=re.S)
-assert "<!--" not in outside and not re.search(r"<[a-zA-Z/]", outside), "angle-bracket tag outside code fence"
+outside=re.sub(r"`[^`\n]*`", "", outside)
+assert "<!--" not in outside and not re.search(r"<[a-zA-Z/!]", outside), "angle-bracket tag outside code"
 print("OK")
 EOF
 ```
