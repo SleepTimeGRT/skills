@@ -87,6 +87,44 @@ def upsert_queue(body: str, rows: Iterable[dict]) -> str:
 
 # --- state / next (Task 2 & 3) -----------------------------------------------------------------
 
+_DONE_STATES = {"merged", "closed", "spike"}
+_BROKEN_STATES = {"failed", "pr-open"}
+
+
+def runnable(rows: list[dict], state: dict[str, str]) -> dict:
+    rows = sorted(rows, key=lambda r: r["order"])
+    done: list[str] = []
+    skipped: list[dict] = []
+    skipped_set: set[str] = set()
+    for r in rows:
+        st = state.get(r["issue"], "pending")
+        if r["kind"] == "spike" or st in _DONE_STATES:
+            done.append(r["issue"])
+            continue
+        for dep in r["depends_on"]:
+            if dep not in state:
+                skipped.append({"issue": r["issue"], "reason": f"dep #{dep} not in queue/state"})
+                skipped_set.add(r["issue"])
+                break
+            if state[dep] in _BROKEN_STATES:
+                skipped.append({"issue": r["issue"], "reason": f"dep #{dep} is {state[dep]}"})
+                skipped_set.add(r["issue"])
+                break
+            if dep in skipped_set:
+                skipped.append({"issue": r["issue"], "reason": f"dep #{dep} skipped"})
+                skipped_set.add(r["issue"])
+                break
+    nxt = None
+    for r in rows:
+        if r["issue"] in skipped_set or r["issue"] in done:
+            continue
+        if state.get(r["issue"], "pending") != "pending":
+            continue
+        if all(state.get(d) in ("merged", "closed") for d in r["depends_on"]):
+            nxt = r
+            break
+    return {"next": nxt, "skipped": skipped, "done": done}
+
 
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
@@ -101,6 +139,11 @@ def main(argv: list[str]) -> int:
         body = open(argv[2], encoding="utf-8").read()
         rows = json.load(open(argv[3], encoding="utf-8"))
         sys.stdout.write(upsert_queue(body, rows))
+        return 0
+    if cmd == "next" and len(argv) == 4:
+        rows = json.load(open(argv[2], encoding="utf-8"))
+        state = json.load(open(argv[3], encoding="utf-8"))
+        print(json.dumps(runnable(rows, state), ensure_ascii=False, indent=2))
         return 0
     print(f"usage error: {argv[1:]}", file=sys.stderr)
     print(__doc__, file=sys.stderr)

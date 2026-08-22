@@ -75,3 +75,58 @@ def test_upsert_replaces_in_place_and_appends_when_missing():
     appended = q.upsert_queue("no block here\n", rows)
     assert appended.startswith("no block here\n")
     assert q.parse_queue(appended)[1]["issue"] == "86"
+
+
+def _rows():
+    return [
+        {"order": 1, "issue": "85", "kind": "architectural", "depends_on": [], "provider": "claude", "plan": "p85.md"},
+        {"order": 2, "issue": "86", "kind": "bounded", "depends_on": ["85"], "provider": "codex", "plan": ""},
+        {"order": 3, "issue": "87", "kind": "spike", "depends_on": [], "provider": "claude", "plan": ""},
+        {"order": 4, "issue": "88", "kind": "bounded", "depends_on": ["86"], "provider": "claude", "plan": ""},
+        {"order": 5, "issue": "89", "kind": "bounded", "depends_on": [], "provider": "agy", "plan": ""},
+    ]
+
+
+def test_next_picks_lowest_order_pending_with_deps_merged():
+    q = _load()
+    state = {"85": "pending", "86": "pending", "87": "spike", "88": "pending", "89": "pending"}
+    out = q.runnable(_rows(), state)
+    assert out["next"]["issue"] == "85"
+    assert out["skipped"] == []
+    assert out["done"] == ["87"]
+
+
+def test_next_skips_dependents_of_failed_transitively():
+    q = _load()
+    state = {"85": "failed", "86": "pending", "87": "spike", "88": "pending", "89": "pending"}
+    out = q.runnable(_rows(), state)
+    assert out["next"]["issue"] == "89"
+    assert [s["issue"] for s in out["skipped"]] == ["86", "88"]
+    assert "85" in out["skipped"][0]["reason"]
+
+
+def test_pr_open_dependency_also_skips():
+    q = _load()
+    state = {"85": "pr-open", "86": "pending", "87": "spike", "88": "pending", "89": "merged"}
+    out = q.runnable(_rows(), state)
+    assert out["next"] is None
+    assert [s["issue"] for s in out["skipped"]] == ["86", "88"]
+    assert out["done"] == ["87", "89"]
+
+
+def test_blocked_by_pending_dep_is_neither_next_nor_skipped():
+    q = _load()
+    state = {"85": "merged", "86": "pending", "87": "spike", "88": "pending", "89": "merged"}
+    out = q.runnable(_rows(), state)
+    assert out["next"]["issue"] == "86"       # 88 waits on 86 silently
+    assert out["skipped"] == []
+
+
+def test_missing_dep_in_state_is_skipped_with_reason():
+    q = _load()
+    rows = _rows()
+    rows[1]["depends_on"] = ["999"]
+    state = {"85": "merged", "86": "pending", "87": "spike", "88": "pending", "89": "merged"}
+    out = q.runnable(rows, state)
+    assert [s["issue"] for s in out["skipped"]] == ["86", "88"]
+    assert "999" in out["skipped"][0]["reason"]
