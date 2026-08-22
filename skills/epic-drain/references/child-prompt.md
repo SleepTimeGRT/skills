@@ -21,7 +21,7 @@
    1회(필요시 fix round)로 구현한다. 별도 플랜 문서는 없다.
 {ENDIF}
 2. 끝나면 superpowers:finishing-a-development-branch의 선택 메뉴를 띄우지 말고 아래 고정 경로를 탄다:
-   - 전체 테스트 통과 확인 → `git push -u origin task-{ISSUE}` → `gh pr create --fill --body "Closes #{ISSUE}"`
+   - 전체 테스트 통과 확인 → `git push -u origin HEAD` → `gh pr create --fill --body "Closes #{ISSUE}"`
    - repo에 premerge 게이트(`scripts/premerge.sh` 등)나 required check가 있으면 통과/완료를 기다린다.
    - 통과하면 `gh pr merge --squash --delete-branch`. 실패·충돌·미해소 리뷰 finding이면 merge하지 않고
      PR을 열어 둔다.
@@ -36,3 +36,4 @@
 
 채움 규칙: `{BASE_BRANCH}`는 `gh repo view --json defaultBranchRef -q .defaultBranchRef.name`;
 `{ISSUE_BODY}`는 `gh issue view` 본문 그대로(요약하지 않는다); `{PLAN_PATH}`는 큐의 `plan` 열(repo 상대경로).
+`{IF …}`/`{ELSE …}`/`{ENDIF}` 지시선은 드라이버가 해당 분기만 남기고 지시선 자체는 삭제한 뒤 보낸다.

@@ -19,6 +19,7 @@ compatibility: Claude Code session for the planning/driver phase (superpowers pl
 ## 0. 전제
 
 - 대상 repo = 현재 cwd의 git repo. `gh auth status`가 통과해야 한다. `REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"`.
+- `EPIC="<호출 인자의 epic 번호>"`.
 - 페이즈 B는 `orca status --json`이 ready여야 한다. 아니면 페이즈 A까지만 하고 보고한다.
 - 이 스킬의 헬퍼: `QUEUE="$HOME/.agents/skills/epic-drain/scripts/queue.py"` (배포 경로. 이 repo 안에서
   개발 중이면 `skills/epic-drain/scripts/queue.py`). 서브커맨드 `read`/`write`/`state`/`next`.
@@ -103,8 +104,10 @@ python3 "$QUEUE" state "$REPO" /tmp/rows.json > /tmp/state.json
 python3 "$QUEUE" next /tmp/rows.json /tmp/state.json > /tmp/next.json
 ```
 
-`next`가 `null`이면 §2.5로. `skipped`에 새로 들어온 자식이 있으면 그 이슈에 코멘트
-`<!-- epic-drain:result failed -->` + "skipped: `<reason>`"을 남겨 다음 바퀴에 다시 고르지 않게 한다.
+`next`가 `null`이면 §2.5로. `skipped`에 새로 들어온 자식이 있으면 그 이슈에 코멘트 — 첫 줄
+`<!-- epic-drain:skipped -->`, 이어서 `skipped: <reason>` — 을 남겨 다음 바퀴에 다시 고르지 않게 한다.
+이 마커는 결과 마커가 **아니다** — `state`는 이 마커를 무시하므로 재개 시 그 자식은 처음부터 다시
+평가된다. `next.json`의 `blocked` 항목은 코멘트를 남기지 않고 §2.5 요약에만 보고한다.
 
 ### 2.2 격리 + 스폰
 
@@ -133,7 +136,7 @@ codex `--dangerously-bypass-approvals-and-sandbox`, agy `--dangerously-skip-perm
 
 ### 2.5 종료
 
-큐에 고를 자식이 없으면 epic에 요약 코멘트 — 자식별 `merged/pr-open/failed/skipped/spike` + 사람이 볼 것
+큐에 고를 자식이 없으면 epic에 요약 코멘트 — 자식별 `merged/pr-open/failed/skipped/blocked/spike` + 사람이 볼 것
 (열린 PR, failed 사유). 전 자식이 `merged`/`closed`/`spike`면 `gh issue close "$EPIC"`. 아니면 열어 둔다.
 
 ## 3. 재개
@@ -145,7 +148,8 @@ codex `--dangerously-bypass-approvals-and-sandbox`, agy `--dangerously-skip-perm
 - §2.1의 `state`가 `merged`/`closed`/`spike`인 자식은 자동으로 건너뛴다. `failed`/`pr-open`인 자식은 사람에게
   "재시도 / 그대로 둠" 한 번 묻는다 — 재시도면 그 이슈에 `<!-- epic-drain:result retry -->`가 아니라
   새 코멘트 없이 상태를 `pending`으로 취급하도록, 이전 결과 코멘트를 **편집**해 마커를 지운다(`gh api`
-  PATCH). 그대로 두면 그 자식과 의존 자식은 이번 실행에서 빠진다.
+  PATCH). 코멘트 id는 `gh api repos/$REPO/issues/<N>/comments --jq '.[] | select(.body|test("epic-drain:result")) | .id'`로
+  찾는다. 그대로 두면 그 자식과 의존 자식은 이번 실행에서 빠진다.
 - 이전 실행의 Orca 터미널·Run은 재사용하지 않는다. worktree(`task-<N>`)는 재사용한다.
 
 ## 4. 에러 처리

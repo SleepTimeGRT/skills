@@ -204,3 +204,61 @@ def test_child_state_gh_failure_falls_back_to_pending(tmp_path):
     assert res.returncode == 0
     assert json.loads(res.stdout) == {"85": "pending", "86": "pending"}
     assert "86" in res.stderr
+
+
+def test_dependency_on_spike_counts_as_done():
+    q = _load()
+    rows = [
+        {"order": 1, "issue": "87", "kind": "spike", "depends_on": [], "provider": "claude", "plan": ""},
+        {"order": 2, "issue": "88", "kind": "bounded", "depends_on": ["87"], "provider": "claude", "plan": ""},
+    ]
+    out = q.runnable(rows, {"87": "spike", "88": "pending"})
+    assert out["next"]["issue"] == "88"
+    assert out["done"] == ["87"] and out["skipped"] == [] and out["blocked"] == []
+
+
+def test_blocked_lists_pending_rows_waiting_on_pending_deps():
+    q = _load()
+    state = {"85": "merged", "86": "pending", "87": "spike", "88": "pending", "89": "merged"}
+    out = q.runnable(_rows(), state)
+    assert out["next"]["issue"] == "86"
+    assert out["blocked"] == [{"issue": "88", "reason": "dep #86 is pending"}]
+
+
+def test_cycle_reports_blocked_not_silent():
+    q = _load()
+    rows = [
+        {"order": 1, "issue": "10", "kind": "bounded", "depends_on": ["11"], "provider": "claude", "plan": ""},
+        {"order": 2, "issue": "11", "kind": "bounded", "depends_on": ["10"], "provider": "claude", "plan": ""},
+    ]
+    out = q.runnable(rows, {"10": "pending", "11": "pending"})
+    assert out["next"] is None and out["skipped"] == []
+    assert [b["issue"] for b in out["blocked"]] == ["10", "11"]
+
+
+def test_duplicate_issue_rows_raise():
+    import pytest
+    q = _load()
+    rows = [
+        {"order": 1, "issue": "10", "kind": "bounded", "depends_on": [], "provider": "claude", "plan": ""},
+        {"order": 2, "issue": "10", "kind": "bounded", "depends_on": [], "provider": "claude", "plan": ""},
+    ]
+    with pytest.raises(ValueError):
+        q.runnable(rows, {"10": "pending"})
+
+
+def test_read_without_block_exits_1_with_message(tmp_path):
+    body = tmp_path / "body.md"; body.write_text("no block\n")
+    res = subprocess.run(["python3", str(QUEUE_PY), "read", str(body)], capture_output=True, text=True)
+    assert res.returncode == 1 and res.stdout.strip() == "" and "no queue block" in res.stderr
+
+
+def test_malformed_order_cell_raises():
+    import pytest
+    q = _load()
+    bad = BLOCK.replace("| 2 | #86 |", "| 2x | #86 |")
+    with pytest.raises(ValueError):
+        q.parse_queue(bad)
+    empty = BLOCK.replace("| 2 | #86 |", "|  | #86 |")
+    with pytest.raises(ValueError):
+        q.parse_queue(empty)

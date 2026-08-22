@@ -51,11 +51,18 @@ def parse_queue(body: str) -> list[dict] | None:
         cells = [c.strip() for c in line.strip("|").split("|")]
         if len(cells) != len(COLUMNS):
             continue
-        if cells[0].lower() == "order" or set(cells[0]) <= set("-: "):
-            continue  # header / separator
+        first = cells[0]
+        if first.lower() == "order":
+            continue  # header
+        if first and set(first) <= set("-: "):
+            continue  # separator
+        try:
+            order = int(first)
+        except ValueError:
+            raise ValueError(f"epic-drain: malformed queue row (order must be an integer): {line}")
         provider = cells[4]
         rows.append({
-            "order": int(cells[0]),
+            "order": order,
             "issue": _cell_issue(cells[1]),
             "kind": cells[2],
             "depends_on": _cell_deps(cells[3]),
@@ -126,6 +133,11 @@ _BROKEN_STATES = {"failed", "pr-open"}
 
 def runnable(rows: list[dict], state: dict[str, str]) -> dict:
     rows = sorted(rows, key=lambda r: r["order"])
+    seen_issues: set[str] = set()
+    for r in rows:
+        if r["issue"] in seen_issues:
+            raise ValueError(f"duplicate issue #{r['issue']} in queue")
+        seen_issues.add(r["issue"])
     done: list[str] = []
     skipped: list[dict] = []
     skipped_set: set[str] = set()
@@ -169,10 +181,24 @@ def runnable(rows: list[dict], state: dict[str, str]) -> dict:
             continue
         if state.get(r["issue"], "pending") != "pending":
             continue
-        if all(state.get(d) in ("merged", "closed") for d in r["depends_on"]):
+        if all(state.get(d) in _DONE_STATES for d in r["depends_on"]):
             nxt = r
             break
-    return {"next": nxt, "skipped": skipped, "done": done}
+
+    nxt_issue = nxt["issue"] if nxt is not None else None
+    blocked: list[dict] = []
+    for r in rows:
+        n = r["issue"]
+        if n in done or n in skipped_set or n == nxt_issue:
+            continue
+        if state.get(n, "pending") != "pending":
+            continue
+        for dep in r["depends_on"]:
+            if state.get(dep) not in _DONE_STATES:
+                blocked.append({"issue": n, "reason": f"dep #{dep} is {state.get(dep, 'pending')}"})
+                break
+
+    return {"next": nxt, "skipped": skipped, "done": done, "blocked": blocked}
 
 
 def main(argv: list[str]) -> int:
@@ -181,9 +207,13 @@ def main(argv: list[str]) -> int:
         return 2
     cmd = argv[1]
     if cmd == "read" and len(argv) == 3:
-        rows = parse_queue(open(argv[2], encoding="utf-8").read())
+        path = argv[2]
+        rows = parse_queue(open(path, encoding="utf-8").read())
+        if rows is None:
+            print(f"epic-drain: no queue block found in {path}", file=sys.stderr)
+            return 1
         print(json.dumps(rows, ensure_ascii=False, indent=2))
-        return 0 if rows is not None else 1
+        return 0
     if cmd == "write" and len(argv) == 4:
         body = open(argv[2], encoding="utf-8").read()
         rows = json.load(open(argv[3], encoding="utf-8"))

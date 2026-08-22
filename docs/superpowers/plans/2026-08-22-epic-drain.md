@@ -267,7 +267,8 @@ git commit -m "epic-drain: queue block parse/render/upsert helper"
   - `done` = issues whose state is `merged`/`closed`/`spike`, or `kind == "spike"`.
   - A row is **skipped** when any dependency's state is `failed`/`pr-open`, or a dependency is itself skipped (transitive), or a dependency issue is missing from `state` (reason `"dep #N not in queue/state"`).
   - A row is **blocked (not yet)** — neither next nor skipped — when a dependency is still `pending` (it simply isn't chosen now).
-  - `next` = lowest-`order` row with state `pending`, `kind != "spike"`, all deps in `merged`/`closed`. `None` when nothing is runnable.
+  - `blocked`: pending rows waiting on a non-done dep.
+  - `next` = lowest-`order` row with state `pending`, `kind != "spike"`, all deps in `_DONE_STATES` (merged/closed/spike). `None` when nothing is runnable.
   - Rows with state `pr-open`/`failed` are neither next nor done (they are reported by the caller from `state`).
 
 - [ ] **Step 1: Write the failing tests**
